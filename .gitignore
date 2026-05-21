@@ -1,0 +1,39 @@
+# Node
+node_modules/
+.pnpm-store/
+dist/
+.turbo/
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.uv-cache/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Build artifacts
+.next/
+out/
+build/
+*.egg-info/
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Editors
+.vscode/
+.idea/
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Vercel
+.vercel

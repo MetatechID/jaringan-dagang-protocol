@@ -1,0 +1,26 @@
+[project]
+name = "jaringan-dagang-protocol-workspace"
+version = "0.0.0"
+description = "Workspace root for the Python packages in jaringan-dagang-protocol. Not published."
+license = { text = "Apache-2.0" }
+requires-python = ">=3.12"
+
+[tool.uv.workspace]
+members = [
+  "packages/beckn-protocol-py",
+  "packages/network-extension",
+  "apps/beli-aman-bap",
+  "apps/registry",
+  "apps/gateway",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "packages/*/tests", "apps/*/tests"]
