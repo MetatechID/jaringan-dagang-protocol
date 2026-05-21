@@ -52,6 +52,23 @@ DDL_STATEMENTS: list[str] = [
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS biteship_order_id VARCHAR(64);",
     "CREATE INDEX IF NOT EXISTS ix_orders_biteship_order_id ON orders (biteship_order_id);",
 
+    # --- orders: fulfillment columns synced from seller BPP / Biteship webhook ---
+    # These were declared in models/order.py since Task A6/B but never had an
+    # explicit migration — they only existed where Base.metadata.create_all()
+    # had run. SKIP_CREATE_ALL=true in serverless / VM rendered them invisible.
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS fulfillment_status VARCHAR(32);",
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS fulfillment_awb VARCHAR(100);",
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS fulfillment_tracking_url VARCHAR(1024);",
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS fulfillment_last_event_at TIMESTAMP WITH TIME ZONE;",
+    "CREATE INDEX IF NOT EXISTS ix_orders_fulfillment_status ON orders (fulfillment_status);",
+
+    # --- orders: ONDC RSP settlement columns (Task A6) — same root cause ---
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS settlement_status VARCHAR(16);",
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS settlement_basis VARCHAR(16);",
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS settlement_window VARCHAR(8);",
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS settlement_reference VARCHAR(255);",
+    "CREATE INDEX IF NOT EXISTS ix_orders_settlement_reference ON orders (settlement_reference);",
+
     # --- escrow_ledger: status + external_ref ---
     # Enum: PENDING | COMPLETED | FAILED. Default COMPLETED for backfill
     # (legacy mock rows are all settled).
