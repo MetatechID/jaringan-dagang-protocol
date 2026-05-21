@@ -10,14 +10,10 @@ requires-python = ">=3.12"
 # packages land. uv refuses to sync a workspace whose declared members
 # are missing pyproject.toml files.
 [tool.uv.workspace]
-members = []
-# members = [
-#   "packages/beckn-protocol-py",
-#   "packages/network-extension",
-#   "apps/beli-aman-bap",
-#   "apps/registry",
-#   "apps/gateway",
-# ]
+members = [
+  "packages/beckn-protocol-py",
+  "apps/beli-aman-bap",
+]
 
 [tool.ruff]
 line-length = 100

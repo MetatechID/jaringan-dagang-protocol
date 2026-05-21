@@ -1,0 +1,76 @@
+# Indonesia Network Extension Layer - ONDC Rating v1 Enums
+#
+# Localizes the canonical ONDC Rating enumerations for the post-fulfillment
+# rating flow. v1 scope: buyer rates an order item / provider / fulfillment
+# via /rating, BPP acknowledges via /on_rating. Buyer storefront UI for
+# rating capture is deferred to v2 (this file only localizes the protocol-
+# level enum and error space).
+#
+# Upstream sources (codes are NOT invented here):
+#   - Rating category:
+#     ONDC-Official/ONDC-RET-Specifications @ release-2.0.2
+#       api/components/enums/rating_category.yaml
+#   - Rating-specific error codes (70xxx):
+#     ONDC-Official/protocol-network-extension @ release-1.0.0
+#       error_codes/rating/ErrorCodes.yaml
+#
+# Beckn transport base remains nic2004:52110 (the /rating and /on_rating
+# messages ride the same Beckn signed envelope as RET11 /select/confirm).
+
+version: "1.0.0"
+domain: "ONDC:RET"
+sub_domain: "ONDC:RET11"        # Makanan & Minuman Kemasan (Packaged F&B)
+beckn_domain: "nic2004:52110"
+
+# ===========================================================================
+# Rating category codes  (rating.rating_category)
+# What entity the buyer is rating. ONDC Rating v1 set.
+# ===========================================================================
+rating_category:
+  - code: "Item"
+    name: "Item"
+    name_id: "Barang"
+    description: "Rating applies to a specific SKU/item in the order."
+  - code: "Order"
+    name: "Order"
+    name_id: "Pesanan"
+    description: "Rating applies to the order as a whole."
+  - code: "Fulfillment"
+    name: "Fulfillment"
+    name_id: "Pengiriman"
+    description: "Rating applies to the fulfillment / delivery experience."
+  - code: "Provider"
+    name: "Provider"
+    name_id: "Penjual"
+    description: "Rating applies to the seller (BPP / provider) overall."
+  - code: "Agent"
+    name: "Agent"
+    name_id: "Kurir"
+    description: "Rating applies to the delivery agent."
+
+# ===========================================================================
+# Rating-specific error codes (used in /rating, /on_rating)
+# Localized from ONDC protocol-network-extension error_codes/rating. v1
+# anchors on the codes the rating flow can actually emit.
+# ===========================================================================
+rating_error_codes:
+  - code: "70001"
+    name: "Invalid Rating"
+    name_id: "Rating Tidak Valid"
+    description: "Rating could not be processed - invalid category or out-of-range value."
+  - code: "70002"
+    name: "Rating not allowed"
+    name_id: "Rating Tidak Diperbolehkan"
+    description: "Order state does not permit rating yet (e.g. not delivered)."
+  - code: "70003"
+    name: "Rating already submitted"
+    name_id: "Rating Sudah Diberikan"
+    description: "Buyer has already rated this order; updates not allowed in v1."
+  - code: "70004"
+    name: "Rating window closed"
+    name_id: "Jendela Rating Ditutup"
+    description: "Rating submitted after the post-fulfillment rating window closed."
+  - code: "70005"
+    name: "Unsupported rating category"
+    name_id: "Kategori Rating Tidak Didukung"
+    description: "BPP does not accept ratings for the requested entity type."

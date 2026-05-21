@@ -1,0 +1,25 @@
+{
+  "name": "@jaringan-dagang/beckn-protocol",
+  "version": "0.1.0-beta.0",
+  "description": "Beckn protocol library for TypeScript — context builders, Ed25519 signing, envelope (de)serialization. Indonesian commerce (ONDC) flavoring lives in @jaringan-dagang/network-extension.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MetatechID/jaringan-dagang-protocol.git",
+    "directory": "packages/beckn-protocol-js"
+  },
+  "homepage": "https://github.com/MetatechID/jaringan-dagang-protocol/tree/main/packages/beckn-protocol-js#readme",
+  "keywords": ["beckn", "ondc", "open-commerce", "jaringan-dagang", "indonesia"],
+  "type": "module",
+  "main": "./typescript/index.ts",
+  "scripts": {
+    "build": "echo 'TODO: tsup'",
+    "test": "echo 'TODO: vitest'",
+    "lint": "echo 'TODO: eslint'",
+    "typecheck": "echo 'TODO: tsc --noEmit'"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

@@ -1,0 +1,220 @@
+# Indonesia Network Extension Layer - Fashion Category Taxonomy
+# Indonesian fashion categories for retail domain
+
+version: "1.0.0"
+domain: "ONDC:RET12"
+
+categories:
+  - code: "FASHION_PRIA"
+    name: "Men's Fashion"
+    name_id: "Fashion Pria"
+    description: "Men's clothing, footwear, and accessories"
+    beckn_category_id: "Mens Wear"
+    sub_categories:
+      - code: "FASHION_PRIA_KEMEJA"
+        name: "Men's Shirts"
+        name_id: "Kemeja Pria"
+        description: "Formal shirts, casual shirts, and batik shirts for men"
+        examples: ["Kemeja batik", "Kemeja formal", "Kemeja flanel"]
+
+      - code: "FASHION_PRIA_KAOS"
+        name: "Men's T-Shirts & Polos"
+        name_id: "Kaos Pria"
+        description: "Casual t-shirts, polo shirts, and casual tops"
+        examples: ["Kaos polos", "Kaos polo", "Kaos oblong"]
+
+      - code: "FASHION_PRIA_CELANA"
+        name: "Men's Pants"
+        name_id: "Celana Pria"
+        description: "Trousers, jeans, shorts, and casual pants"
+        examples: ["Celana jeans", "Celana chino", "Celana pendek", "Celana kain"]
+
+      - code: "FASHION_PRIA_KOKO"
+        name: "Men's Islamic Wear"
+        name_id: "Baju Koko & Muslim Pria"
+        description: "Koko shirts, sarongs, and Islamic attire for men"
+        examples: ["Baju koko", "Sarung", "Peci", "Jubah pria"]
+
+      - code: "FASHION_PRIA_JAKET"
+        name: "Men's Outerwear"
+        name_id: "Jaket & Sweater Pria"
+        description: "Jackets, hoodies, sweaters, and blazers"
+        examples: ["Jaket jeans", "Hoodie", "Blazer", "Jas"]
+
+  - code: "FASHION_WANITA"
+    name: "Women's Fashion"
+    name_id: "Fashion Wanita"
+    description: "Women's clothing, footwear, and accessories"
+    beckn_category_id: "Womens Wear"
+    sub_categories:
+      - code: "FASHION_WANITA_ATASAN"
+        name: "Women's Tops"
+        name_id: "Atasan Wanita"
+        description: "Blouses, shirts, and casual tops for women"
+        examples: ["Blouse", "Atasan batik", "Tank top", "Crop top"]
+
+      - code: "FASHION_WANITA_BAWAHAN"
+        name: "Women's Bottoms"
+        name_id: "Bawahan Wanita"
+        description: "Skirts, pants, and shorts for women"
+        examples: ["Rok", "Celana kulot", "Celana jeans wanita", "Hot pants"]
+
+      - code: "FASHION_WANITA_DRESS"
+        name: "Dresses"
+        name_id: "Dress & Gaun"
+        description: "Casual dresses, formal gowns, and midi dresses"
+        examples: ["Dress batik", "Gaun pesta", "Midi dress", "Maxi dress"]
+
+      - code: "FASHION_WANITA_KEBAYA"
+        name: "Kebaya"
+        name_id: "Kebaya"
+        description: "Traditional Indonesian kebaya in various regional styles"
+        examples: ["Kebaya Jawa", "Kebaya Bali", "Kebaya encim", "Kebaya modern"]
+
+      - code: "FASHION_WANITA_HIJAB"
+        name: "Hijab & Muslim Fashion"
+        name_id: "Hijab & Busana Muslim"
+        description: "Hijabs, modest fashion, gamis, and Islamic wear for women"
+        examples: ["Hijab segi empat", "Pashmina", "Gamis", "Tunik muslim", "Mukena"]
+
+  - code: "FASHION_ANAK"
+    name: "Kids' Fashion"
+    name_id: "Fashion Anak"
+    description: "Clothing for children and teenagers"
+    beckn_category_id: "Kids Wear"
+    sub_categories:
+      - code: "FASHION_ANAK_BAYI"
+        name: "Baby Clothes"
+        name_id: "Baju Bayi (0-2 tahun)"
+        description: "Clothing for infants and toddlers"
+        examples: ["Jumper bayi", "Setelan bayi", "Baju tidur bayi"]
+
+      - code: "FASHION_ANAK_KECIL"
+        name: "Young Children Clothes"
+        name_id: "Baju Anak (3-10 tahun)"
+        description: "Clothing for young children"
+        examples: ["Kaos anak", "Dress anak", "Celana anak"]
+
+      - code: "FASHION_ANAK_SERAGAM"
+        name: "School Uniforms"
+        name_id: "Seragam Sekolah"
+        description: "School uniforms for SD, SMP, and SMA levels"
+        examples: ["Seragam SD", "Seragam SMP", "Seragam SMA", "Seragam Pramuka"]
+
+  - code: "FASHION_BATIK"
+    name: "Batik"
+    name_id: "Batik"
+    description: "Indonesian batik clothing and fabric, UNESCO intangible cultural heritage"
+    beckn_category_id: "Ethnic Wear"
+    sub_categories:
+      - code: "FASHION_BATIK_TULIS"
+        name: "Hand-drawn Batik"
+        name_id: "Batik Tulis"
+        description: "Premium hand-drawn batik using traditional canting technique"
+        examples: ["Batik tulis Solo", "Batik tulis Pekalongan", "Batik tulis Cirebon"]
+
+      - code: "FASHION_BATIK_CAP"
+        name: "Stamped Batik"
+        name_id: "Batik Cap"
+        description: "Batik made with copper stamps for consistent patterns"
+        examples: ["Batik cap Solo", "Batik cap Jogja"]
+
+      - code: "FASHION_BATIK_PRINT"
+        name: "Printed Batik"
+        name_id: "Batik Print / Cetak"
+        description: "Machine-printed batik fabric, affordable everyday wear"
+        examples: ["Batik print", "Batik sarimbit", "Batik seragam"]
+
+      - code: "FASHION_BATIK_KAIN"
+        name: "Batik Fabric"
+        name_id: "Kain Batik"
+        description: "Unstitched batik fabric sold by the meter or piece"
+        examples: ["Kain batik", "Jarik", "Selendang batik"]
+
+  - code: "FASHION_TRADISIONAL"
+    name: "Traditional & Regional Wear"
+    name_id: "Pakaian Adat & Daerah"
+    description: "Traditional Indonesian garments from various ethnic groups and regions"
+    beckn_category_id: "Ethnic Wear"
+    sub_categories:
+      - code: "FASHION_TRADISIONAL_TENUN"
+        name: "Woven Fabric (Tenun)"
+        name_id: "Tenun"
+        description: "Traditional hand-woven fabrics from various Indonesian regions"
+        examples: ["Tenun ikat NTT", "Tenun Lombok", "Ulos Batak", "Songket Palembang"]
+
+      - code: "FASHION_TRADISIONAL_SONGKET"
+        name: "Songket"
+        name_id: "Songket"
+        description: "Luxurious brocade fabric with gold or silver thread"
+        examples: ["Songket Palembang", "Songket Minang", "Songket Bali"]
+
+      - code: "FASHION_TRADISIONAL_ADAT"
+        name: "Ceremonial Costumes"
+        name_id: "Pakaian Adat"
+        description: "Full traditional costume sets for ceremonies"
+        examples: ["Beskap Jawa", "Baju Bodo Bugis", "Aesan Gede Palembang"]
+
+  - code: "FASHION_SEPATU"
+    name: "Footwear"
+    name_id: "Sepatu & Sandal"
+    description: "Shoes, sandals, and traditional footwear"
+    beckn_category_id: "Footwear"
+    sub_categories:
+      - code: "FASHION_SEPATU_FORMAL"
+        name: "Formal Shoes"
+        name_id: "Sepatu Formal"
+        description: "Dress shoes, leather shoes, and business footwear"
+        examples: ["Sepatu pantofel", "Sepatu kulit", "High heels"]
+
+      - code: "FASHION_SEPATU_KASUAL"
+        name: "Casual Shoes"
+        name_id: "Sepatu Kasual"
+        description: "Sneakers, loafers, and casual shoes"
+        examples: ["Sneakers", "Slip-on", "Sepatu kanvas"]
+
+      - code: "FASHION_SEPATU_SANDAL"
+        name: "Sandals & Slippers"
+        name_id: "Sandal & Selop"
+        description: "Sandals, flip-flops, and traditional slippers"
+        examples: ["Sandal jepit", "Sandal gunung", "Selop", "Bakiak"]
+
+      - code: "FASHION_SEPATU_OLAHRAGA"
+        name: "Sports Shoes"
+        name_id: "Sepatu Olahraga"
+        description: "Athletic and sports footwear"
+        examples: ["Sepatu lari", "Sepatu futsal", "Sepatu badminton"]
+
+  - code: "FASHION_AKSESORIS"
+    name: "Accessories"
+    name_id: "Aksesoris"
+    description: "Fashion accessories including bags, jewelry, and watches"
+    beckn_category_id: "Fashion Accessories"
+    sub_categories:
+      - code: "FASHION_AKSESORIS_TAS"
+        name: "Bags"
+        name_id: "Tas"
+        description: "Handbags, backpacks, clutches, and traditional bags"
+        examples: ["Tas ransel", "Tas selempang", "Clutch", "Tas anyaman"]
+
+      - code: "FASHION_AKSESORIS_PERHIASAN"
+        name: "Jewelry"
+        name_id: "Perhiasan"
+        description: "Gold, silver, and fashion jewelry including traditional designs"
+        examples: ["Gelang", "Kalung", "Cincin", "Anting", "Bros"]
+
+      - code: "FASHION_AKSESORIS_JAM"
+        name: "Watches"
+        name_id: "Jam Tangan"
+        description: "Wristwatches and smartwatches"
+
+      - code: "FASHION_AKSESORIS_KACAMATA"
+        name: "Eyewear"
+        name_id: "Kacamata"
+        description: "Sunglasses and fashion eyewear"
+
+      - code: "FASHION_AKSESORIS_TOPI"
+        name: "Hats & Headwear"
+        name_id: "Topi & Penutup Kepala"
+        description: "Caps, hats, and traditional headwear"
+        examples: ["Topi baseball", "Bucket hat", "Blangkon", "Peci"]

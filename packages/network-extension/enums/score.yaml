@@ -1,0 +1,94 @@
+# Indonesia Network Extension Layer - ONDC Score (Reputation) v1 Enums
+#
+# Localizes the canonical ONDC Score enumerations for the BPP-side
+# reputation signal. v1 scope: each BPP computes its own Score over a
+# daily window from local order + refund data (completion / return /
+# response / resolution / rating metrics) and persists the per-store
+# snapshot. The downstream consumption (Score-weighted ranking on
+# /search, public reputation surfaces) is deferred to v2.
+#
+# Upstream sources (codes are NOT invented here):
+#   - Score attribute / band shape:
+#     ONDC-Official/protocol-network-extension @ release-1.0.0
+#       enums/score/score_attribute.yaml
+#       enums/score/score_band.yaml
+#
+# Score is local-only in v1 — no inter-NP /score envelope yet. The buckets
+# below are the BPP self-reporting thresholds; tightening them is a v2
+# governance decision.
+
+version: "1.0.0"
+domain: "ONDC:RET"
+sub_domain: "ONDC:RET11"        # Makanan & Minuman Kemasan (Packaged F&B)
+beckn_domain: "nic2004:52110"
+
+# ===========================================================================
+# Score attribute codes  (score.attributes[].name)
+# The per-attribute reputation signals a BPP rolls up daily. v1 set covers
+# the post-purchase lifecycle: completion, returns, responsiveness,
+# resolution timeliness, plus the post-fulfillment rating average.
+# ===========================================================================
+score_attribute:
+  - code: "COMPLETION_RATE"
+    name: "Completion Rate"
+    name_id: "Tingkat Penyelesaian"
+    description: "Fraction of orders that reached Order-delivered without cancellation."
+    unit: "ratio"          # 0.0 .. 1.0
+  - code: "RETURN_RATE"
+    name: "Return Rate"
+    name_id: "Tingkat Pengembalian"
+    description: "Fraction of delivered orders that ended with a refund / return."
+    unit: "ratio"
+  - code: "RESPONSE_TIME"
+    name: "Response Time"
+    name_id: "Waktu Respon"
+    description: "Average hours between buyer signal (issue / cancel) and seller acknowledgement."
+    unit: "hours"
+  - code: "RESOLUTION_TIME"
+    name: "Resolution Time"
+    name_id: "Waktu Penyelesaian"
+    description: "Average hours between issue acknowledgement and terminal resolution."
+    unit: "hours"
+  - code: "RATING_AVG"
+    name: "Rating Average"
+    name_id: "Rata-rata Rating"
+    description: "Average post-fulfillment rating across all rated orders in the window."
+    unit: "rating"         # 1.0 .. 5.0
+
+# ===========================================================================
+# Score band codes  (score.band)
+# The headline reputation bucket derived from the per-attribute signals.
+# Thresholds anchor on COMPLETION_RATE first (the strongest signal) and
+# RETURN_RATE second; RESPONSE_TIME / RESOLUTION_TIME / RATING_AVG modulate.
+# Deterministic mapping lives in beckn-protocol score.py compute_score_band.
+# ===========================================================================
+score_band:
+  - code: "EXCELLENT"
+    name: "Excellent"
+    name_id: "Sangat Baik"
+    description: "Top reputation bucket; all signals strongly positive."
+    thresholds:
+      min_completion_rate: 0.95   # >= 95% delivered
+      max_return_rate: 0.05       # <= 5% refunded
+      min_rating_avg: 4.5
+  - code: "GOOD"
+    name: "Good"
+    name_id: "Baik"
+    description: "Healthy reputation; minor or short-term blemishes."
+    thresholds:
+      min_completion_rate: 0.85
+      max_return_rate: 0.10
+      min_rating_avg: 4.0
+  - code: "FAIR"
+    name: "Fair"
+    name_id: "Cukup"
+    description: "Reputation needs attention; multiple signals trending negative."
+    thresholds:
+      min_completion_rate: 0.70
+      max_return_rate: 0.20
+      min_rating_avg: 3.0
+  - code: "POOR"
+    name: "Poor"
+    name_id: "Kurang"
+    description: "Fall-through bucket below FAIR thresholds."
+    thresholds: {}              # fall-through

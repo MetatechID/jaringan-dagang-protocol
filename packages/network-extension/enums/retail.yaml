@@ -1,0 +1,411 @@
+# Indonesia Network Extension Layer - Retail Protocol Enums (ONDC:RET11)
+#
+# Localizes the canonical ONDC Retail (RET) protocol enumerations to the
+# Indonesian network. Scope is intentionally limited to what the packaged
+# F&B sub-domain ONDC:RET11 needs for the search / select / confirm flow
+# that Safiya (safiyafood.jaringan-dagang.id) transacts on. This is a
+# localization layer (English `name` + Bahasa `name_id` + Beckn mapping
+# where relevant) -- it does NOT invent codes beyond the upstream set.
+#
+# Upstream sources (do not drift the codes from these):
+#   - Order / fulfillment state + payment type:
+#     ONDC-Official/ONDC-RET-Specifications @ release-2.0.2
+#       api/components/enums/{orderstatus,fulfillments,payment}.yaml
+#   - Standardized error codes:
+#     ONDC-Official/ONDC-RET-Specifications @ release-2.0.2
+#       api/components/error_codes/ErrorCodes/ErrorCodes.yaml
+#   - Cancel / return reason codes:
+#     ONDC-Official/ONDC-RET-Specifications @ release-2.0.2
+#       api/components/error_codes/Cancellation/Cancellation.yaml
+#   - Item statutory / packaged-commodity attribute keys:
+#     ONDC-Official/ONDC-RET-Specifications @ draft-b2c-1.2.5
+#       api/components/examples/B2C{,-F&B}/.../02_on_search*.yaml
+#
+# Beckn transport base for this family is nic2004:52110 (see
+# domains/retail.yaml -> ONDC:RET11). The Beckn order/fulfillment state
+# vocabulary is identical to ONDC's for RET (Created/Accepted/... and the
+# fulfillment descriptor codes), so `beckn_*` mappings are 1:1 unless noted.
+
+version: "1.0.0"
+domain: "ONDC:RET"
+sub_domain: "ONDC:RET11"        # Makanan & Minuman Kemasan (Packaged F&B)
+beckn_domain: "nic2004:52110"
+
+# ===========================================================================
+# Order state codes  (order.state)
+# Beckn core order states; ONDC RET reuses them verbatim. 1:1 Beckn mapping.
+# ===========================================================================
+order_states:
+  - code: "Created"
+    name: "Created"
+    name_id: "Dibuat"
+    description: "The order has been created by the buyer app."
+    beckn_state: "Created"
+  - code: "Accepted"
+    name: "Accepted"
+    name_id: "Diterima Penjual"
+    description: "The order has been accepted by the seller app."
+    beckn_state: "Accepted"
+  - code: "In-progress"
+    name: "In-progress"
+    name_id: "Sedang Diproses"
+    description: "The order is in progress."
+    beckn_state: "In-progress"
+  - code: "Completed"
+    name: "Completed"
+    name_id: "Selesai"
+    description: "The order has been delivered to the buyer."
+    beckn_state: "Completed"
+  - code: "Cancelled"
+    name: "Cancelled"
+    name_id: "Dibatalkan"
+    description: "The order has been cancelled."
+    beckn_state: "Cancelled"
+
+# ===========================================================================
+# Fulfillment state codes  (fulfillment.state.descriptor.code)
+# ONDC RET fulfillment lifecycle. Beckn carries these verbatim in the
+# fulfillment state descriptor; mapping is 1:1.
+# ===========================================================================
+fulfillment_states:
+  - code: "Pending"
+    name: "Pending"
+    name_id: "Menunggu"
+    description: "The initial state of the fulfillment."
+    beckn_state: "Pending"
+  - code: "Packed"
+    name: "Packed"
+    name_id: "Dikemas"
+    description: "The fulfillment has been packed."
+    beckn_state: "Packed"
+  - code: "Agent-assigned"
+    name: "Agent assigned"
+    name_id: "Kurir Ditugaskan"
+    description: "The fulfillment state when the agent has been assigned for the order."
+    beckn_state: "Agent-assigned"
+  - code: "Searching-for-agent"
+    name: "Searching for agent"
+    name_id: "Mencari Kurir"
+    description: "Logistics Service Provider is searching for an agent to be assigned."
+    beckn_state: "Searching-for-agent"
+  - code: "Order-picked-up"
+    name: "Order picked up"
+    name_id: "Pesanan Diambil"
+    description: "The fulfillment has been picked up."
+    beckn_state: "Order-picked-up"
+  - code: "Out-for-delivery"
+    name: "Out for delivery"
+    name_id: "Sedang Diantar"
+    description: "The agent is out for delivery."
+    beckn_state: "Out-for-delivery"
+  - code: "Order-delivered"
+    name: "Order delivered"
+    name_id: "Pesanan Diterima"
+    description: "The fulfillment has been successfully delivered."
+    beckn_state: "Order-delivered"
+  - code: "Cancelled"
+    name: "Cancelled"
+    name_id: "Dibatalkan"
+    description: "The fulfillment has been cancelled."
+    beckn_state: "Cancelled"
+
+# Pre-order serviceability state (returned at search/select time).
+fulfillment_pre_order_states:
+  - code: "Serviceable"
+    name: "Serviceable"
+    name_id: "Dapat Dilayani"
+    description: "If the location is serviceable."
+  - code: "Non-serviceable"
+    name: "Non-serviceable"
+    name_id: "Tidak Dapat Dilayani"
+    description: "If the location is non-serviceable."
+
+# ===========================================================================
+# Fulfillment type codes  (fulfillment.type)
+# ===========================================================================
+fulfillment_types:
+  - code: "Delivery"
+    name: "Delivery"
+    name_id: "Pengiriman"
+    description: "When buyer wants the order to be delivered."
+    beckn_type: "Delivery"
+  - code: "Self-Pickup"
+    name: "Self pickup"
+    name_id: "Ambil Sendiri"
+    description: "When buyer wants to self-pickup the order."
+    beckn_type: "Self-Pickup"
+
+# ===========================================================================
+# Payment type codes  (payment.type)
+# ===========================================================================
+payment_types:
+  - code: "PRE-FULFILLMENT"
+    name: "Prepaid"
+    name_id: "Bayar di Muka"
+    description: "Prepaid payment, i.e. payment will be done during order confirmation."
+    beckn_payment_type: "PRE-FULFILLMENT"
+  - code: "ON-FULFILLMENT"
+    name: "Cash on delivery"
+    name_id: "Bayar di Tempat (COD)"
+    description: "Payment will be done on delivery."
+    beckn_payment_type: "ON-FULFILLMENT"
+
+# ===========================================================================
+# Cancellation reason codes  (used in /cancel, /update -> cancellation)
+# Verbatim ONDC RET cancellation reason set. `name_id` localizes the reason
+# text to Bahasa. `triggers_rto` / `usable_by` / `part_cancel` preserved
+# from upstream so the seller can validate who may use a code and whether
+# a return-to-origin is implied. Codes are strings (kept zero-padded as in
+# the spec).
+# ===========================================================================
+cancellation_reasons:
+  - code: "001"
+    name: "Price of one or more items changed, buyer asked for additional payment"
+    name_id: "Harga satu atau lebih barang berubah sehingga pembeli diminta membayar tambahan"
+    triggers_rto: false
+    usable_by: "BNP"
+    part_cancel: false
+  - code: "002"
+    name: "One or more items in the order not available"
+    name_id: "Satu atau lebih barang dalam pesanan tidak tersedia"
+    triggers_rto: false
+    usable_by: "SNP"
+    part_cancel: true
+  - code: "003"
+    name: "Product available at lower than order price"
+    name_id: "Produk tersedia dengan harga lebih murah dari harga pesanan"
+    triggers_rto: true
+    usable_by: "BNP"
+    part_cancel: false
+  - code: "005"
+    name: "Merchant rejected the order"
+    name_id: "Penjual menolak pesanan"
+    triggers_rto: false
+    usable_by: "SNP"
+    part_cancel: false
+  - code: "006"
+    name: "Order / fulfillment not received as per buyer app TAT SLA"
+    name_id: "Pesanan / pengiriman tidak diterima sesuai SLA waktu aplikasi pembeli"
+    triggers_rto: true
+    usable_by: "BNP"
+    part_cancel: false
+  - code: "007"
+    name: "Order / fulfillment not received as per logistics buyer app TAT SLA"
+    name_id: "Pesanan / pengiriman tidak diterima sesuai SLA waktu aplikasi logistik pembeli"
+    triggers_rto: true
+    usable_by: "LBNP"
+    part_cancel: false
+  - code: "008"
+    name: "Order / fulfillment not ready for pickup"
+    name_id: "Pesanan / pengiriman belum siap diambil"
+    triggers_rto: false
+    usable_by: "LSP"
+    part_cancel: false
+  - code: "009"
+    name: "Wrong product delivered"
+    name_id: "Produk yang dikirim salah"
+    triggers_rto: true
+    usable_by: "BNP"
+    part_cancel: false
+  - code: "010"
+    name: "Buyer wants to modify address / other order details"
+    name_id: "Pembeli ingin mengubah alamat / detail pesanan lain"
+    triggers_rto: true
+    usable_by: "BNP"
+    part_cancel: false
+  - code: "011"
+    name: "Buyer not found or cannot be contacted"
+    name_id: "Pembeli tidak ditemukan atau tidak dapat dihubungi"
+    triggers_rto: true
+    usable_by: "LSP / SNP"
+    part_cancel: false
+  - code: "012"
+    name: "Buyer does not want product any more"
+    name_id: "Pembeli tidak lagi menginginkan produk"
+    triggers_rto: true
+    usable_by: "LSP / SNP"
+    part_cancel: true
+  - code: "013"
+    name: "Buyer refused to accept delivery"
+    name_id: "Pembeli menolak menerima pengiriman"
+    triggers_rto: true
+    usable_by: "LSP / SNP"
+    part_cancel: false
+  - code: "014"
+    name: "Address not found"
+    name_id: "Alamat tidak ditemukan"
+    triggers_rto: true
+    usable_by: "LSP / SNP"
+    part_cancel: false
+  - code: "015"
+    name: "Buyer not available at location"
+    name_id: "Pembeli tidak berada di lokasi"
+    triggers_rto: true
+    usable_by: "LSP / SNP"
+    part_cancel: false
+  - code: "016"
+    name: "Accident / rain / strike / vehicle issues"
+    name_id: "Kecelakaan / hujan / mogok / masalah kendaraan"
+    triggers_rto: false
+    usable_by: "LSP"
+    part_cancel: false
+  - code: "017"
+    name: "Order delivery delayed or not possible"
+    name_id: "Pengiriman pesanan tertunda atau tidak memungkinkan"
+    triggers_rto: false
+    usable_by: "LSP"
+    part_cancel: false
+  - code: "018"
+    name: "Delivery pin code not serviceable"
+    name_id: "Kode pos pengiriman tidak dapat dilayani"
+    triggers_rto: false
+    usable_by: "SNP"
+    part_cancel: false
+  - code: "019"
+    name: "Pickup pin code not serviceable"
+    name_id: "Kode pos penjemputan tidak dapat dilayani"
+    triggers_rto: false
+    usable_by: "SNP"
+    part_cancel: false
+  - code: "020"
+    name: "Order lost in transit"
+    name_id: "Pesanan hilang dalam pengiriman"
+    triggers_rto: false
+    usable_by: "LSP / SNP"
+    part_cancel: false
+  - code: "021"
+    name: "Packed order not complete"
+    name_id: "Pesanan yang dikemas tidak lengkap"
+    triggers_rto: false
+    usable_by: "LSP"
+    part_cancel: false
+  - code: "022"
+    name: "Payment failed or TTL expired (seller side)"
+    name_id: "Pembayaran gagal atau TTL kedaluwarsa (sisi penjual)"
+    triggers_rto: false
+    usable_by: "SNP"
+    part_cancel: false
+  - code: "023"
+    name: "Payment failed or TTL expired (buyer side)"
+    name_id: "Pembayaran gagal atau TTL kedaluwarsa (sisi pembeli)"
+    triggers_rto: false
+    usable_by: "BNP"
+    part_cancel: false
+
+# ===========================================================================
+# Return reason codes  (used in /update return flow -> @ondc/org/return_reason_id)
+# Standardized ONDC RET return-reason set. Localized to Bahasa.
+# ===========================================================================
+return_reasons:
+  - code: "001"
+    name: "Buyer does not want product any more"
+    name_id: "Pembeli tidak lagi menginginkan produk"
+  - code: "002"
+    name: "Product available at lower than order price"
+    name_id: "Produk tersedia dengan harga lebih murah dari harga pesanan"
+  - code: "003"
+    name: "Product damaged or not in usable state"
+    name_id: "Produk rusak atau tidak dalam kondisi layak pakai"
+  - code: "004"
+    name: "Product is of incorrect quantity or size"
+    name_id: "Produk dalam jumlah atau ukuran yang salah"
+  - code: "005"
+    name: "Product delivered is different from what was shown and ordered"
+    name_id: "Produk yang dikirim berbeda dari yang ditampilkan dan dipesan"
+  - code: "006"
+    name: "Product is defective or does not work properly"
+    name_id: "Produk cacat atau tidak berfungsi dengan baik"
+
+# ===========================================================================
+# Item statutory / packaged-commodity attribute keys
+#
+# ONDC RET carries these as ONDC-namespaced item tag groups. For packaged
+# F&B (RET11) two groups apply. `key` is the ONDC-standard sub-attribute
+# code carried in the Beckn tag list; `name_id` is the Bahasa label and
+# `id_note` records the Indonesian regulatory equivalent of the (originally
+# Indian) statutory requirement (BPOM = food/drug authority; BPJPH = halal
+# certification body; netto / berat bersih = net quantity; kedaluwarsa =
+# expiry; negara asal = country of origin).
+# ===========================================================================
+item_statutory_attributes:
+
+  # Group code: @ondc/org/statutory_reqs_packaged_commodities
+  statutory_reqs_packaged_commodities:
+    group_code: "@ondc/org/statutory_reqs_packaged_commodities"
+    name: "Packaged commodity statutory requirements"
+    name_id: "Persyaratan Statutori Komoditas Kemasan"
+    attributes:
+      - key: "manufacturer_or_packer_name"
+        name: "Manufacturer or packer name"
+        name_id: "Nama Produsen atau Pengemas"
+      - key: "manufacturer_or_packer_address"
+        name: "Manufacturer or packer address"
+        name_id: "Alamat Produsen atau Pengemas"
+      - key: "common_or_generic_name_of_commodity"
+        name: "Common or generic name of commodity"
+        name_id: "Nama Umum atau Generik Komoditas"
+      - key: "net_quantity_or_measure_of_commodity_in_pkg"
+        name: "Net quantity or measure of commodity in package"
+        name_id: "Kuantitas Bersih (Netto / Berat Bersih)"
+      - key: "month_year_of_manufacture_packing_import"
+        name: "Month and year of manufacture / packing / import"
+        name_id: "Bulan dan Tahun Produksi / Pengemasan / Impor"
+
+  # Group code: @ondc/org/statutory_reqs_prepackaged_food
+  # Indonesia mapping: brand_owner / importer license -> Izin Edar BPOM;
+  # nutritional info -> Informasi Nilai Gizi; halal status is carried as a
+  # prepackaged-food statutory attribute (BPJPH / sertifikasi halal).
+  statutory_reqs_prepackaged_food:
+    group_code: "@ondc/org/statutory_reqs_prepackaged_food"
+    name: "Prepackaged food statutory requirements"
+    name_id: "Persyaratan Statutori Pangan Olahan Terkemas"
+    attributes:
+      - key: "nutritional_info"
+        name: "Nutritional information"
+        name_id: "Informasi Nilai Gizi"
+      - key: "additives_info"
+        name: "Additives information"
+        name_id: "Informasi Bahan Tambahan Pangan"
+      - key: "brand_owner_FSSAI_license_no"
+        name: "Brand owner food-authority license number"
+        name_id: "Nomor Izin Edar BPOM Pemilik Merek"
+      - key: "other_FSSAI_license_no"
+        name: "Other food-authority license number"
+        name_id: "Nomor Izin Edar BPOM Lainnya"
+      - key: "importer_FSSAI_license_no"
+        name: "Importer food-authority license number"
+        name_id: "Nomor Izin Edar BPOM Importir"
+
+# General item-level ONDC commerce attributes (carried as Beckn item tags
+# in this network -- see beckn-protocol ondc_tags.build_item_ondc_tags).
+# These are ONDC-standard `@ondc/org/*` item keys used at RET11
+# search/select/confirm.
+item_commerce_attributes:
+  - key: "returnable"
+    name: "Returnable"
+    name_id: "Dapat Dikembalikan"
+    description: "Whether the item is returnable; defaults to true except make-to-order."
+  - key: "cancellable"
+    name: "Cancellable"
+    name_id: "Dapat Dibatalkan"
+    description: "Whether the item is cancellable; defaults to true except make-to-order."
+  - key: "return_window"
+    name: "Return window"
+    name_id: "Jendela Pengembalian"
+    description: "ISO 8601 duration during which a return is accepted (e.g. P7D)."
+  - key: "seller_pickup_return"
+    name: "Seller pickup on return"
+    name_id: "Penjemputan oleh Penjual saat Retur"
+    description: "Whether seller is responsible for pick up of item for return."
+  - key: "time_to_ship"
+    name: "Time to ship"
+    name_id: "Waktu Pengemasan / Siap Kirim"
+    description: "ISO 8601 duration to pack & hand over the item (e.g. PT30M)."
+  - key: "available_on_cod"
+    name: "Available on COD"
+    name_id: "Tersedia untuk COD"
+    description: "Whether the item can be paid by cash on delivery."
+  - key: "contact_details_consumer_care"
+    name: "Consumer care contact details"
+    name_id: "Detail Kontak Layanan Konsumen"
+    description: "Consumer care contact, format: name,email,phone."

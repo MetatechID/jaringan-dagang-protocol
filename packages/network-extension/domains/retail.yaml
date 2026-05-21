@@ -1,0 +1,124 @@
+# Indonesia Network Extension Layer - Retail Domain
+# Beckn domain configuration for retail commerce in Indonesia
+
+domain:
+  code: "ONDC:RET"
+  name: "Retail"
+  name_id: "Ritel"
+  description: "Retail commerce domain covering physical and digital goods sold through online marketplaces"
+  beckn_domain: "nic2004:52110"
+  version: "1.0.0"
+
+sub_domains:
+  - code: "ONDC:RET10"
+    name: "Grocery"
+    name_id: "Sembako & Bahan Pokok"
+    description: "Daily essentials, fresh produce, staples, and household grocery items"
+    beckn_domain: "nic2004:52110"
+    examples:
+      - "Beras"
+      - "Minyak goreng"
+      - "Gula pasir"
+      - "Telur"
+      - "Sayur mayur"
+
+  - code: "ONDC:RET11"
+    name: "F&B (Packaged)"
+    name_id: "Makanan & Minuman Kemasan"
+    description: "Packaged food and beverages including snacks, canned goods, and bottled drinks"
+    beckn_domain: "nic2004:52110"
+    examples:
+      - "Indomie"
+      - "Teh Botol Sosro"
+      - "Kopi Kapal Api"
+      - "Chitato"
+
+  - code: "ONDC:RET12"
+    name: "Fashion"
+    name_id: "Fashion & Pakaian"
+    description: "Clothing, footwear, accessories, and traditional Indonesian garments"
+    beckn_domain: "nic2004:52311"
+    examples:
+      - "Batik"
+      - "Kebaya"
+      - "Sepatu"
+      - "Tas"
+
+  - code: "ONDC:RET13"
+    name: "Electronics"
+    name_id: "Elektronik"
+    description: "Consumer electronics, gadgets, appliances, and accessories"
+    beckn_domain: "nic2004:52312"
+    examples:
+      - "Smartphone"
+      - "Laptop"
+      - "Televisi"
+      - "Kulkas"
+
+  - code: "ONDC:RET14"
+    name: "Home & Living"
+    name_id: "Rumah Tangga & Perabotan"
+    description: "Furniture, home decor, kitchenware, and home improvement products"
+    beckn_domain: "nic2004:52313"
+    examples:
+      - "Perabot rumah tangga"
+      - "Alat dapur"
+      - "Dekorasi rumah"
+
+  - code: "ONDC:RET15"
+    name: "Health & Beauty"
+    name_id: "Kesehatan & Kecantikan"
+    description: "Personal care, cosmetics, health supplements, and traditional jamu products"
+    beckn_domain: "nic2004:52314"
+    examples:
+      - "Skincare"
+      - "Jamu"
+      - "Vitamin"
+      - "Kosmetik"
+
+  - code: "ONDC:RET16"
+    name: "Agriculture & Farm"
+    name_id: "Pertanian"
+    description: "Agricultural products, seeds, fertilizers, and farm equipment"
+    beckn_domain: "nic2004:52315"
+    examples:
+      - "Bibit tanaman"
+      - "Pupuk"
+      - "Alat pertanian"
+
+  - code: "ONDC:RET17"
+    name: "Handicrafts & UMKM"
+    name_id: "Kerajinan & Produk UMKM"
+    description: "Handmade crafts, artisan goods, and micro/small enterprise products unique to Indonesian regions"
+    beckn_domain: "nic2004:52316"
+    examples:
+      - "Kerajinan rotan"
+      - "Tenun ikat"
+      - "Ukiran kayu"
+      - "Gerabah"
+
+  - code: "ONDC:RET18"
+    name: "Books & Stationery"
+    name_id: "Buku & Alat Tulis"
+    description: "Books, stationery, educational materials, and office supplies"
+    beckn_domain: "nic2004:52317"
+    examples:
+      - "Buku pelajaran"
+      - "Novel"
+      - "Alat tulis kantor"
+
+  - code: "ONDC:RET19"
+    name: "Mother & Baby"
+    name_id: "Ibu & Bayi"
+    description: "Maternity products, baby care, children clothing, and toys"
+    beckn_domain: "nic2004:52318"
+    examples:
+      - "Susu formula"
+      - "Popok bayi"
+      - "Mainan anak"
+      - "Perlengkapan bayi"
+
+tax_config:
+  ppn_rate: 0.11
+  ppn_label: "PPN (Pajak Pertambahan Nilai)"
+  currency: "IDR"

@@ -1,0 +1,54 @@
+{
+  "brand_slug": "antarestar",
+  "brand_name": "ANTARESTAR",
+  "products": [
+    {
+      "sku": "ANT-VLM-CRINKLE-NAVY-L",
+      "slug": "valmora-crinkle-jacket",
+      "name": "ANTARESTAR Official Jaket Crinkle Valmora",
+      "tagline": "Lightweight crinkle windbreaker. Daily wind protection.",
+      "description": "Bahan crinkle ringan dan tahan air. Cocok untuk aktivitas harian, riding, atau perjalanan singkat. Unisex casual fit.",
+      "price_idr": 425000,
+      "compare_at_price_idr": 750000,
+      "image": "/brands/antarestar/products/valmora-1.svg",
+      "gallery": [
+        "/brands/antarestar/products/valmora-1.svg",
+        "/brands/antarestar/products/valmora-2.svg",
+        "/brands/antarestar/products/valmora-3.svg"
+      ],
+      "options": {
+        "size": ["M", "L", "XL", "XXL"],
+        "color": ["Navy", "Grey", "Black"]
+      }
+    },
+    {
+      "sku": "ANT-EVEREST-DAYPACK-25L",
+      "slug": "everest-daypack",
+      "name": "ANTARESTAR Daypack Everest 25L",
+      "tagline": "Compact 25L daypack with laptop sleeve.",
+      "description": "Tahan air, padded laptop sleeve hingga 15 inch, kompartemen organizer untuk EDC. Cocok untuk kerja, kuliah, dan trip.",
+      "price_idr": 285000,
+      "compare_at_price_idr": 450000,
+      "image": "/brands/antarestar/products/daypack-1.svg",
+      "gallery": [
+        "/brands/antarestar/products/daypack-1.svg"
+      ],
+      "options": {
+        "color": ["Black", "Olive", "Navy"]
+      }
+    },
+    {
+      "sku": "ANT-COOK-SET-2P",
+      "slug": "camping-cook-set-2p",
+      "name": "ANTARESTAR Camping Cook Set 2-Person",
+      "tagline": "Stainless cook set for two.",
+      "description": "Set masak camping ringan untuk 2 orang. Stainless food-grade, lengkap dengan panci, wajan kecil, mangkok, dan peralatan makan.",
+      "price_idr": 199000,
+      "compare_at_price_idr": 320000,
+      "image": "/brands/antarestar/products/cookset-1.svg",
+      "gallery": [
+        "/brands/antarestar/products/cookset-1.svg"
+      ]
+    }
+  ]
+}

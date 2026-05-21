@@ -1,0 +1,170 @@
+# Indonesia Network Extension Layer - Logistics Domain
+# Beckn domain configuration for logistics and delivery services in Indonesia
+
+domain:
+  code: "ONDC:LOG"
+  name: "Logistics"
+  name_id: "Logistik"
+  description: "Logistics and delivery services covering last-mile delivery, freight, and inter-island shipping across the Indonesian archipelago"
+  beckn_domain: "nic2004:60232"
+  version: "1.0.0"
+
+sub_domains:
+  - code: "ONDC:LOG10"
+    name: "Express Delivery"
+    name_id: "Pengiriman Ekspres"
+    description: "Same-day and instant delivery services within a city"
+    beckn_domain: "nic2004:60232"
+    max_sla_hours: 6
+
+  - code: "ONDC:LOG11"
+    name: "Standard Parcel"
+    name_id: "Paket Reguler"
+    description: "Standard parcel delivery with 2-5 day SLA across Java and major islands"
+    beckn_domain: "nic2004:60232"
+    max_sla_days: 5
+
+  - code: "ONDC:LOG12"
+    name: "Economy Parcel"
+    name_id: "Paket Ekonomi"
+    description: "Budget-friendly shipping with longer delivery times, suitable for non-urgent parcels"
+    beckn_domain: "nic2004:60232"
+    max_sla_days: 10
+
+  - code: "ONDC:LOG13"
+    name: "Inter-Island Cargo"
+    name_id: "Kargo Antar Pulau"
+    description: "Freight and cargo services between Indonesian islands via sea and air"
+    beckn_domain: "nic2004:61100"
+    transport_modes:
+      - "Laut (Sea)"
+      - "Udara (Air)"
+      - "Darat + Laut (Land + Sea)"
+
+  - code: "ONDC:LOG14"
+    name: "Cold Chain"
+    name_id: "Rantai Dingin"
+    description: "Temperature-controlled delivery for perishable goods, frozen food, and pharmaceuticals"
+    beckn_domain: "nic2004:60233"
+    temperature_ranges:
+      - label: "Chilled"
+        label_id: "Pendingin"
+        min_celsius: 2
+        max_celsius: 8
+      - label: "Frozen"
+        label_id: "Beku"
+        min_celsius: -25
+        max_celsius: -18
+
+  - code: "ONDC:LOG15"
+    name: "Bulk & Freight"
+    name_id: "Kargo & Muatan Besar"
+    description: "Large-volume freight, trucking, and bulk logistics services"
+    beckn_domain: "nic2004:60230"
+    vehicle_types:
+      - "Pickup"
+      - "CDE (Colt Diesel Engkel)"
+      - "CDD (Colt Diesel Double)"
+      - "Fuso"
+      - "Tronton"
+      - "Trailer"
+
+  - code: "ONDC:LOG16"
+    name: "Warehouse & Fulfillment"
+    name_id: "Gudang & Fulfillment"
+    description: "Warehousing, inventory storage, and order fulfillment services"
+    beckn_domain: "nic2004:63030"
+
+vehicle_categories:
+  - code: "MOTORCYCLE"
+    name: "Motorcycle"
+    name_id: "Motor"
+    max_weight_kg: 20
+    max_dimensions_cm: "50x40x40"
+    suitable_for: ["ONDC:LOG10", "ONDC:LOG11"]
+
+  - code: "CAR"
+    name: "Car"
+    name_id: "Mobil"
+    max_weight_kg: 100
+    max_dimensions_cm: "100x80x60"
+    suitable_for: ["ONDC:LOG10", "ONDC:LOG11"]
+
+  - code: "VAN"
+    name: "Van"
+    name_id: "Van"
+    max_weight_kg: 500
+    max_dimensions_cm: "200x150x150"
+    suitable_for: ["ONDC:LOG11", "ONDC:LOG12"]
+
+  - code: "PICKUP_TRUCK"
+    name: "Pickup Truck"
+    name_id: "Mobil Bak / Pickup"
+    max_weight_kg: 1000
+    max_dimensions_cm: "250x160x100"
+    suitable_for: ["ONDC:LOG12", "ONDC:LOG15"]
+
+  - code: "TRUCK_CDE"
+    name: "CDE Truck"
+    name_id: "Truk Engkel (CDE)"
+    max_weight_kg: 4000
+    suitable_for: ["ONDC:LOG13", "ONDC:LOG15"]
+
+  - code: "TRUCK_CDD"
+    name: "CDD Truck"
+    name_id: "Truk Double (CDD)"
+    max_weight_kg: 8000
+    suitable_for: ["ONDC:LOG13", "ONDC:LOG15"]
+
+shipping_zones:
+  - code: "ZONE_INTRACITY"
+    name: "Intra-city"
+    name_id: "Dalam Kota"
+    description: "Delivery within the same city/kabupaten"
+    typical_sla_days: 1
+
+  - code: "ZONE_INTRAPROVINCE"
+    name: "Intra-province"
+    name_id: "Dalam Provinsi"
+    description: "Delivery within the same province"
+    typical_sla_days: 2
+
+  - code: "ZONE_JAVA"
+    name: "Java Island"
+    name_id: "Pulau Jawa"
+    description: "Inter-city delivery within Java island"
+    typical_sla_days: 3
+
+  - code: "ZONE_SUMATRA"
+    name: "Sumatra Island"
+    name_id: "Pulau Sumatera"
+    description: "Delivery within or to Sumatra island"
+    typical_sla_days: 4
+
+  - code: "ZONE_KALIMANTAN"
+    name: "Kalimantan Island"
+    name_id: "Pulau Kalimantan"
+    description: "Delivery within or to Kalimantan island"
+    typical_sla_days: 5
+
+  - code: "ZONE_SULAWESI"
+    name: "Sulawesi Island"
+    name_id: "Pulau Sulawesi"
+    description: "Delivery within or to Sulawesi island"
+    typical_sla_days: 5
+
+  - code: "ZONE_BALI_NUSATENGGARA"
+    name: "Bali & Nusa Tenggara"
+    name_id: "Bali & Nusa Tenggara"
+    description: "Delivery within or to Bali, NTB, and NTT"
+    typical_sla_days: 4
+
+  - code: "ZONE_PAPUA_MALUKU"
+    name: "Papua & Maluku"
+    name_id: "Papua & Maluku"
+    description: "Delivery within or to Papua and Maluku regions"
+    typical_sla_days: 7
+
+tax_config:
+  ppn_rate: 0.11
+  currency: "IDR"

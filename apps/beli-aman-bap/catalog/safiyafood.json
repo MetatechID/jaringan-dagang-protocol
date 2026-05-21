@@ -1,0 +1,1030 @@
+{
+  "brand_slug": "safiyafood",
+  "brand_name": "Safiya Food",
+  "products": [
+    {
+      "sku": "SAF-SUK-500",
+      "slug": "kurma-sukari",
+      "name": "Kurma Sukari King Dates",
+      "tagline": "Premium golden Sukkari dates from Saudi Arabia.",
+      "description": "Kurma Sukari premium dari Saudi Arabia. Tekstur lembut, rasa karamel manis, warna keemasan. Salah satu kurma raja yang populer di kalangan keluarga.",
+      "price_idr": 89000,
+      "compare_at_price_idr": 135000,
+      "image": "/brands/safiyafood/products/kurma-sukari-front.svg",
+      "gallery": [
+        "/brands/safiyafood/products/kurma-sukari-front.svg",
+        "/brands/safiyafood/products/kurma-sukari-side.svg",
+        "/brands/safiyafood/products/kurma-sukari-info.svg",
+        "/brands/safiyafood/products/saf-suk-500.svg",
+        "/brands/safiyafood/products/saf-suk-850.svg",
+        "/brands/safiyafood/products/saf-suk-1k.svg",
+        "/brands/safiyafood/products/saf-suk-3k.svg"
+      ],
+      "category": "Kurma",
+      "beckn_category_id": "food-beverages-dates",
+      "badges": [
+        "Halal",
+        "BPOM RI",
+        "Premium"
+      ],
+      "option_axes": [
+        {
+          "name": "size",
+          "values": [
+            "500g",
+            "850g",
+            "1kg",
+            "3kg"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "sku": "SAF-SUK-500",
+          "label": "500g",
+          "option_values": {
+            "size": "500g"
+          },
+          "price_idr": 89000,
+          "compare_at_price_idr": 135000,
+          "weight_grams": 540,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-suk-500.svg",
+          "image_index": 3
+        },
+        {
+          "sku": "SAF-SUK-850",
+          "label": "850g",
+          "option_values": {
+            "size": "850g"
+          },
+          "price_idr": 139000,
+          "compare_at_price_idr": 195000,
+          "weight_grams": 900,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-suk-850.svg",
+          "image_index": 4
+        },
+        {
+          "sku": "SAF-SUK-1K",
+          "label": "1kg",
+          "option_values": {
+            "size": "1kg"
+          },
+          "price_idr": 159000,
+          "compare_at_price_idr": 235000,
+          "weight_grams": 1060,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-suk-1k.svg",
+          "image_index": 5
+        },
+        {
+          "sku": "SAF-SUK-3K",
+          "label": "3kg",
+          "option_values": {
+            "size": "3kg"
+          },
+          "price_idr": 425000,
+          "compare_at_price_idr": 685000,
+          "weight_grams": 3100,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-suk-3k.svg",
+          "image_index": 6
+        }
+      ]
+    },
+    {
+      "sku": "SAF-AJW-500",
+      "slug": "kurma-ajwa",
+      "name": "Kurma Ajwa Madinah",
+      "tagline": "Kurma Nabi — soft, sweet, authentic from Madinah.",
+      "description": "Kurma Ajwa Madinah — Kurma Nabi yang lembut dan kenyal. Manisnya bersahaja dengan sentuhan karamel. Berkualitas premium langsung dari kebun Madinah.",
+      "price_idr": 169000,
+      "compare_at_price_idr": 245000,
+      "image": "/brands/safiyafood/products/kurma-ajwa-front.svg",
+      "gallery": [
+        "/brands/safiyafood/products/kurma-ajwa-front.svg",
+        "/brands/safiyafood/products/kurma-ajwa-side.svg",
+        "/brands/safiyafood/products/kurma-ajwa-info.svg",
+        "/brands/safiyafood/products/saf-ajw-500.svg",
+        "/brands/safiyafood/products/saf-ajw-850.svg",
+        "/brands/safiyafood/products/saf-ajw-1k.svg"
+      ],
+      "category": "Kurma",
+      "beckn_category_id": "food-beverages-dates",
+      "badges": [
+        "Halal",
+        "BPOM RI",
+        "Premium"
+      ],
+      "option_axes": [
+        {
+          "name": "size",
+          "values": [
+            "500g",
+            "850g",
+            "1kg"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "sku": "SAF-AJW-500",
+          "label": "500g",
+          "option_values": {
+            "size": "500g"
+          },
+          "price_idr": 169000,
+          "compare_at_price_idr": 245000,
+          "weight_grams": 540,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-ajw-500.svg",
+          "image_index": 3
+        },
+        {
+          "sku": "SAF-AJW-850",
+          "label": "850g",
+          "option_values": {
+            "size": "850g"
+          },
+          "price_idr": 265000,
+          "compare_at_price_idr": 385000,
+          "weight_grams": 900,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-ajw-850.svg",
+          "image_index": 4
+        },
+        {
+          "sku": "SAF-AJW-1K",
+          "label": "1kg",
+          "option_values": {
+            "size": "1kg"
+          },
+          "price_idr": 315000,
+          "compare_at_price_idr": 445000,
+          "weight_grams": 1060,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-ajw-1k.svg",
+          "image_index": 5
+        }
+      ]
+    },
+    {
+      "sku": "SAF-TNT-500",
+      "slug": "kurma-tunisia-tangkai",
+      "name": "Kurma Tunisia Tangkai",
+      "tagline": "Branch-dried Tunisia dates, still on the stem.",
+      "description": "Kurma Tunisia Tangkai (Branched) — masih melekat di tangkainya, alami, dan tampil cantik di meja iftar. Cocok untuk hadiah.",
+      "price_idr": 79000,
+      "compare_at_price_idr": 119000,
+      "image": "/brands/safiyafood/products/kurma-tunisia-tangkai-front.svg",
+      "gallery": [
+        "/brands/safiyafood/products/kurma-tunisia-tangkai-front.svg",
+        "/brands/safiyafood/products/kurma-tunisia-tangkai-side.svg",
+        "/brands/safiyafood/products/saf-tnt-500.svg",
+        "/brands/safiyafood/products/saf-tnt-1k.svg"
+      ],
+      "category": "Kurma",
+      "beckn_category_id": "food-beverages-dates",
+      "badges": [
+        "Halal",
+        "BPOM RI",
+        "Premium"
+      ],
+      "option_axes": [
+        {
+          "name": "size",
+          "values": [
+            "500g",
+            "1kg"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "sku": "SAF-TNT-500",
+          "label": "500g",
+          "option_values": {
+            "size": "500g"
+          },
+          "price_idr": 79000,
+          "compare_at_price_idr": 119000,
+          "weight_grams": 540,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-tnt-500.svg",
+          "image_index": 2
+        },
+        {
+          "sku": "SAF-TNT-1K",
+          "label": "1kg",
+          "option_values": {
+            "size": "1kg"
+          },
+          "price_idr": 145000,
+          "compare_at_price_idr": 215000,
+          "weight_grams": 1060,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-tnt-1k.svg",
+          "image_index": 3
+        }
+      ]
+    },
+    {
+      "sku": "SAF-TMD-500",
+      "slug": "kurma-tunisia-madu",
+      "name": "Kurma Tunisia Madu Deglet Noor",
+      "tagline": "Honey-soft Deglet Noor dates from Tunisia.",
+      "description": "Kurma Tunisia Deglet Noor — varietas 'Queen of Dates' dengan rasa madu khas dan tekstur semi-kering yang halus.",
+      "price_idr": 75000,
+      "compare_at_price_idr": 115000,
+      "image": "/brands/safiyafood/products/kurma-tunisia-madu-front.svg",
+      "gallery": [
+        "/brands/safiyafood/products/kurma-tunisia-madu-front.svg",
+        "/brands/safiyafood/products/kurma-tunisia-madu-side.svg",
+        "/brands/safiyafood/products/saf-tmd-500.svg",
+        "/brands/safiyafood/products/saf-tmd-1k.svg"
+      ],
+      "category": "Kurma",
+      "beckn_category_id": "food-beverages-dates",
+      "badges": [
+        "Halal",
+        "BPOM RI",
+        "Premium"
+      ],
+      "option_axes": [
+        {
+          "name": "size",
+          "values": [
+            "500g",
+            "1kg"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "sku": "SAF-TMD-500",
+          "label": "500g",
+          "option_values": {
+            "size": "500g"
+          },
+          "price_idr": 75000,
+          "compare_at_price_idr": 115000,
+          "weight_grams": 540,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-tmd-500.svg",
+          "image_index": 2
+        },
+        {
+          "sku": "SAF-TMD-1K",
+          "label": "1kg",
+          "option_values": {
+            "size": "1kg"
+          },
+          "price_idr": 139000,
+          "compare_at_price_idr": 205000,
+          "weight_grams": 1060,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-tmd-1k.svg",
+          "image_index": 3
+        }
+      ]
+    },
+    {
+      "sku": "SAF-KHA-500",
+      "slug": "kurma-khalas",
+      "name": "Kurma Khalas Vacuum",
+      "tagline": "Caramel-toned Khalas dates, vacuum-sealed.",
+      "description": "Kurma Khalas dengan tekstur kenyal, rasa karamel-toffee, dan vacuum-sealed untuk kesegaran maksimum.",
+      "price_idr": 69000,
+      "compare_at_price_idr": 105000,
+      "image": "/brands/safiyafood/products/kurma-khalas-front.svg",
+      "gallery": [
+        "/brands/safiyafood/products/kurma-khalas-front.svg",
+        "/brands/safiyafood/products/kurma-khalas-side.svg",
+        "/brands/safiyafood/products/saf-kha-500.svg",
+        "/brands/safiyafood/products/saf-kha-1k.svg"
+      ],
+      "category": "Kurma",
+      "beckn_category_id": "food-beverages-dates",
+      "badges": [
+        "Halal",
+        "BPOM RI",
+        "Premium"
+      ],
+      "option_axes": [
+        {
+          "name": "size",
+          "values": [
+            "500g",
+            "1kg"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "sku": "SAF-KHA-500",
+          "label": "500g",
+          "option_values": {
+            "size": "500g"
+          },
+          "price_idr": 69000,
+          "compare_at_price_idr": 105000,
+          "weight_grams": 540,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-kha-500.svg",
+          "image_index": 2
+        },
+        {
+          "sku": "SAF-KHA-1K",
+          "label": "1kg",
+          "option_values": {
+            "size": "1kg"
+          },
+          "price_idr": 125000,
+          "compare_at_price_idr": 195000,
+          "weight_grams": 1060,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-kha-1k.svg",
+          "image_index": 3
+        }
+      ]
+    },
+    {
+      "sku": "SAF-MUS-FS-300",
+      "slug": "muesli-fruit-seed",
+      "name": "Safiya Muesli Fruit & Seed",
+      "tagline": "Rolled oats, raisins, almonds, pumpkin & sunflower seeds.",
+      "description": "Sereal sehat dengan rolled oat, rice crispy, biji labu, biji bunga matahari, almond, kismis, dan kurma. Tinggi serat, vitamin, dan mineral.",
+      "price_idr": 65000,
+      "compare_at_price_idr": 89000,
+      "image": "/brands/safiyafood/products/muesli-fruit-seed-front.svg",
+      "gallery": [
+        "/brands/safiyafood/products/muesli-fruit-seed-front.svg",
+        "/brands/safiyafood/products/muesli-fruit-seed-side.svg",
+        "/brands/safiyafood/products/muesli-fruit-seed-info.svg",
+        "/brands/safiyafood/products/saf-mus-fs-300.svg",
+        "/brands/safiyafood/products/saf-mus-fs-500.svg",
+        "/brands/safiyafood/products/saf-mus-fs-1k.svg"
+      ],
+      "category": "Sereal & Granola",
+      "beckn_category_id": "food-beverages-cereal",
+      "badges": [
+        "Halal",
+        "BPOM RI",
+        "Premium"
+      ],
+      "option_axes": [
+        {
+          "name": "size",
+          "values": [
+            "300g",
+            "500g",
+            "1kg"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "sku": "SAF-MUS-FS-300",
+          "label": "300g",
+          "option_values": {
+            "size": "300g"
+          },
+          "price_idr": 65000,
+          "compare_at_price_idr": 89000,
+          "weight_grams": 320,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-mus-fs-300.svg",
+          "image_index": 3
+        },
+        {
+          "sku": "SAF-MUS-FS-500",
+          "label": "500g",
+          "option_values": {
+            "size": "500g"
+          },
+          "price_idr": 95000,
+          "compare_at_price_idr": 135000,
+          "weight_grams": 540,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-mus-fs-500.svg",
+          "image_index": 4
+        },
+        {
+          "sku": "SAF-MUS-FS-1K",
+          "label": "1kg",
+          "option_values": {
+            "size": "1kg"
+          },
+          "price_idr": 165000,
+          "compare_at_price_idr": 245000,
+          "weight_grams": 1060,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-mus-fs-1k.svg",
+          "image_index": 5
+        }
+      ]
+    },
+    {
+      "sku": "SAF-MUS-CM-300",
+      "slug": "muesli-choco-milk",
+      "name": "Safiya Muesli Choco Milk",
+      "tagline": "Chocolate cocoa muesli with chia seed.",
+      "description": "Muesli coklat dengan tambahan chiaseed. Tinggi serat dan antioksidan, cocok untuk sarapan cepat dan bergizi.",
+      "price_idr": 69000,
+      "compare_at_price_idr": 95000,
+      "image": "/brands/safiyafood/products/muesli-choco-milk-front.svg",
+      "gallery": [
+        "/brands/safiyafood/products/muesli-choco-milk-front.svg",
+        "/brands/safiyafood/products/muesli-choco-milk-side.svg",
+        "/brands/safiyafood/products/muesli-choco-milk-info.svg",
+        "/brands/safiyafood/products/saf-mus-cm-300.svg",
+        "/brands/safiyafood/products/saf-mus-cm-500.svg"
+      ],
+      "category": "Sereal & Granola",
+      "beckn_category_id": "food-beverages-cereal",
+      "badges": [
+        "Halal",
+        "BPOM RI",
+        "Premium"
+      ],
+      "option_axes": [
+        {
+          "name": "size",
+          "values": [
+            "300g",
+            "500g"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "sku": "SAF-MUS-CM-300",
+          "label": "300g",
+          "option_values": {
+            "size": "300g"
+          },
+          "price_idr": 69000,
+          "compare_at_price_idr": 95000,
+          "weight_grams": 320,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-mus-cm-300.svg",
+          "image_index": 3
+        },
+        {
+          "sku": "SAF-MUS-CM-500",
+          "label": "500g",
+          "option_values": {
+            "size": "500g"
+          },
+          "price_idr": 99000,
+          "compare_at_price_idr": 145000,
+          "weight_grams": 540,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-mus-cm-500.svg",
+          "image_index": 4
+        }
+      ]
+    },
+    {
+      "sku": "SAF-BYC-300",
+      "slug": "berry-yogurt-cereal",
+      "name": "Safiya Berry Yogurt Cereal",
+      "tagline": "Yogurt-coated cereal with mixed berry crunch.",
+      "description": "Sereal renyah dengan lapisan yogurt dan campuran berry. Tinggi serat, rendah lemak, cocok untuk diet sehat.",
+      "price_idr": 75000,
+      "compare_at_price_idr": 105000,
+      "image": "/brands/safiyafood/products/berry-yogurt-cereal-front.svg",
+      "gallery": [
+        "/brands/safiyafood/products/berry-yogurt-cereal-front.svg",
+        "/brands/safiyafood/products/berry-yogurt-cereal-side.svg",
+        "/brands/safiyafood/products/saf-byc-300.svg",
+        "/brands/safiyafood/products/saf-byc-500.svg"
+      ],
+      "category": "Sereal & Granola",
+      "beckn_category_id": "food-beverages-cereal",
+      "badges": [
+        "Halal",
+        "BPOM RI",
+        "Premium"
+      ],
+      "option_axes": [
+        {
+          "name": "size",
+          "values": [
+            "300g",
+            "500g"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "sku": "SAF-BYC-300",
+          "label": "300g",
+          "option_values": {
+            "size": "300g"
+          },
+          "price_idr": 75000,
+          "compare_at_price_idr": 105000,
+          "weight_grams": 320,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-byc-300.svg",
+          "image_index": 2
+        },
+        {
+          "sku": "SAF-BYC-500",
+          "label": "500g",
+          "option_values": {
+            "size": "500g"
+          },
+          "price_idr": 119000,
+          "compare_at_price_idr": 169000,
+          "weight_grams": 540,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-byc-500.svg",
+          "image_index": 3
+        }
+      ]
+    },
+    {
+      "sku": "SAF-CHI-250",
+      "slug": "chia-seed",
+      "name": "Safiya Chia Seed",
+      "tagline": "Premium black chia seed — high omega-3 & fiber.",
+      "description": "Chia seed hitam premium. Sumber omega-3, serat, kalsium, dan protein nabati. Cocok untuk smoothie, oatmeal, atau pudding.",
+      "price_idr": 49000,
+      "compare_at_price_idr": 75000,
+      "image": "/brands/safiyafood/products/chia-seed-front.svg",
+      "gallery": [
+        "/brands/safiyafood/products/chia-seed-front.svg",
+        "/brands/safiyafood/products/chia-seed-side.svg",
+        "/brands/safiyafood/products/saf-chi-250.svg",
+        "/brands/safiyafood/products/saf-chi-500.svg"
+      ],
+      "category": "Healthy Pantry",
+      "beckn_category_id": "food-beverages-pantry",
+      "badges": [
+        "Halal",
+        "BPOM RI",
+        "Premium"
+      ],
+      "option_axes": [
+        {
+          "name": "size",
+          "values": [
+            "250g",
+            "500g"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "sku": "SAF-CHI-250",
+          "label": "250g",
+          "option_values": {
+            "size": "250g"
+          },
+          "price_idr": 49000,
+          "compare_at_price_idr": 75000,
+          "weight_grams": 280,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-chi-250.svg",
+          "image_index": 2
+        },
+        {
+          "sku": "SAF-CHI-500",
+          "label": "500g",
+          "option_values": {
+            "size": "500g"
+          },
+          "price_idr": 85000,
+          "compare_at_price_idr": 125000,
+          "weight_grams": 540,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-chi-500.svg",
+          "image_index": 3
+        }
+      ]
+    },
+    {
+      "sku": "SAF-BMR-1K",
+      "slug": "beras-merah",
+      "name": "Safiya Beras Merah Organik",
+      "tagline": "Organic red rice, low GI, rich in fiber.",
+      "description": "Beras merah organik — low GI, kaya serat, mineral, dan antioksidan. Alternatif sehat pengganti beras putih.",
+      "price_idr": 39000,
+      "compare_at_price_idr": 55000,
+      "image": "/brands/safiyafood/products/beras-merah-front.svg",
+      "gallery": [
+        "/brands/safiyafood/products/beras-merah-front.svg",
+        "/brands/safiyafood/products/beras-merah-side.svg",
+        "/brands/safiyafood/products/saf-bmr-1k.svg",
+        "/brands/safiyafood/products/saf-bmr-2k.svg"
+      ],
+      "category": "Healthy Pantry",
+      "beckn_category_id": "food-beverages-pantry",
+      "badges": [
+        "Halal",
+        "BPOM RI",
+        "Premium"
+      ],
+      "option_axes": [
+        {
+          "name": "size",
+          "values": [
+            "1kg",
+            "2kg"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "sku": "SAF-BMR-1K",
+          "label": "1kg",
+          "option_values": {
+            "size": "1kg"
+          },
+          "price_idr": 39000,
+          "compare_at_price_idr": 55000,
+          "weight_grams": 1060,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-bmr-1k.svg",
+          "image_index": 2
+        },
+        {
+          "sku": "SAF-BMR-2K",
+          "label": "2kg",
+          "option_values": {
+            "size": "2kg"
+          },
+          "price_idr": 72000,
+          "compare_at_price_idr": 105000,
+          "weight_grams": 2100,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-bmr-2k.svg",
+          "image_index": 3
+        }
+      ]
+    },
+    {
+      "sku": "SAF-HIM-250",
+      "slug": "garam-himalaya",
+      "name": "Safiya Garam Himalaya Pink Salt",
+      "tagline": "Pure Himalayan pink salt, mineral-rich.",
+      "description": "Garam Himalaya pink salt — kaya mineral, lebih sehat dibanding garam meja biasa. Cocok untuk masakan rumahan.",
+      "price_idr": 32000,
+      "compare_at_price_idr": 49000,
+      "image": "/brands/safiyafood/products/garam-himalaya-front.svg",
+      "gallery": [
+        "/brands/safiyafood/products/garam-himalaya-front.svg",
+        "/brands/safiyafood/products/garam-himalaya-side.svg",
+        "/brands/safiyafood/products/saf-him-250.svg",
+        "/brands/safiyafood/products/saf-him-500.svg"
+      ],
+      "category": "Healthy Pantry",
+      "beckn_category_id": "food-beverages-pantry",
+      "badges": [
+        "Halal",
+        "BPOM RI",
+        "Premium"
+      ],
+      "option_axes": [
+        {
+          "name": "size",
+          "values": [
+            "250g",
+            "500g"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "sku": "SAF-HIM-250",
+          "label": "250g",
+          "option_values": {
+            "size": "250g"
+          },
+          "price_idr": 32000,
+          "compare_at_price_idr": 49000,
+          "weight_grams": 280,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-him-250.svg",
+          "image_index": 2
+        },
+        {
+          "sku": "SAF-HIM-500",
+          "label": "500g",
+          "option_values": {
+            "size": "500g"
+          },
+          "price_idr": 55000,
+          "compare_at_price_idr": 79000,
+          "weight_grams": 540,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-him-500.svg",
+          "image_index": 3
+        }
+      ]
+    },
+    {
+      "sku": "SAF-SAF-1G",
+      "slug": "saffron",
+      "name": "Safiya Saffron Premium",
+      "tagline": "Grade A Persian saffron threads.",
+      "description": "Saffron Grade A asli Persia — bunga safron berkualitas premium dengan aroma dan warna kuning emas yang khas. Cocok untuk nasi kebuli, infused water, dan dessert.",
+      "price_idr": 85000,
+      "compare_at_price_idr": 125000,
+      "image": "/brands/safiyafood/products/saffron-front.svg",
+      "gallery": [
+        "/brands/safiyafood/products/saffron-front.svg",
+        "/brands/safiyafood/products/saffron-side.svg",
+        "/brands/safiyafood/products/saf-saf-1g.svg",
+        "/brands/safiyafood/products/saf-saf-3g.svg"
+      ],
+      "category": "Healthy Pantry",
+      "beckn_category_id": "food-beverages-pantry",
+      "badges": [
+        "Halal",
+        "BPOM RI",
+        "Premium"
+      ],
+      "option_axes": [
+        {
+          "name": "size",
+          "values": [
+            "1g",
+            "3g"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "sku": "SAF-SAF-1G",
+          "label": "1g",
+          "option_values": {
+            "size": "1g"
+          },
+          "price_idr": 85000,
+          "compare_at_price_idr": 125000,
+          "weight_grams": 20,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-saf-1g.svg",
+          "image_index": 2
+        },
+        {
+          "sku": "SAF-SAF-3G",
+          "label": "3g",
+          "option_values": {
+            "size": "3g"
+          },
+          "price_idr": 235000,
+          "compare_at_price_idr": 345000,
+          "weight_grams": 30,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-saf-3g.svg",
+          "image_index": 3
+        }
+      ]
+    },
+    {
+      "sku": "SAF-MAK-250",
+      "slug": "madu-akasia",
+      "name": "Safiya Madu Akasia",
+      "tagline": "Pure raw acacia honey — light & floral.",
+      "description": "Madu akasia murni raw — ringan, floral, tidak mudah mengkristal. Tinggi antioksidan, cocok untuk dikonsumsi setiap hari.",
+      "price_idr": 79000,
+      "compare_at_price_idr": 119000,
+      "image": "/brands/safiyafood/products/madu-akasia-front.svg",
+      "gallery": [
+        "/brands/safiyafood/products/madu-akasia-front.svg",
+        "/brands/safiyafood/products/madu-akasia-side.svg",
+        "/brands/safiyafood/products/saf-mak-250.svg",
+        "/brands/safiyafood/products/saf-mak-500.svg"
+      ],
+      "category": "Madu",
+      "beckn_category_id": "food-beverages-honey",
+      "badges": [
+        "Halal",
+        "BPOM RI",
+        "Premium"
+      ],
+      "option_axes": [
+        {
+          "name": "size",
+          "values": [
+            "250ml",
+            "500ml"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "sku": "SAF-MAK-250",
+          "label": "250ml",
+          "option_values": {
+            "size": "250ml"
+          },
+          "price_idr": 79000,
+          "compare_at_price_idr": 119000,
+          "weight_grams": 380,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-mak-250.svg",
+          "image_index": 2
+        },
+        {
+          "sku": "SAF-MAK-500",
+          "label": "500ml",
+          "option_values": {
+            "size": "500ml"
+          },
+          "price_idr": 145000,
+          "compare_at_price_idr": 215000,
+          "weight_grams": 720,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-mak-500.svg",
+          "image_index": 3
+        }
+      ]
+    },
+    {
+      "sku": "SAF-MBD-250",
+      "slug": "madu-baduy",
+      "name": "Safiya Madu Baduy Hutan",
+      "tagline": "Wild forest honey from Baduy, raw & unfiltered.",
+      "description": "Madu hutan dari suku Baduy, Banten. Raw dan unfiltered, dengan rasa kompleks dari beragam bunga hutan.",
+      "price_idr": 89000,
+      "compare_at_price_idr": 135000,
+      "image": "/brands/safiyafood/products/madu-baduy-front.svg",
+      "gallery": [
+        "/brands/safiyafood/products/madu-baduy-front.svg",
+        "/brands/safiyafood/products/madu-baduy-side.svg",
+        "/brands/safiyafood/products/saf-mbd-250.svg",
+        "/brands/safiyafood/products/saf-mbd-500.svg"
+      ],
+      "category": "Madu",
+      "beckn_category_id": "food-beverages-honey",
+      "badges": [
+        "Halal",
+        "BPOM RI",
+        "Premium"
+      ],
+      "option_axes": [
+        {
+          "name": "size",
+          "values": [
+            "250ml",
+            "500ml"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "sku": "SAF-MBD-250",
+          "label": "250ml",
+          "option_values": {
+            "size": "250ml"
+          },
+          "price_idr": 89000,
+          "compare_at_price_idr": 135000,
+          "weight_grams": 380,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-mbd-250.svg",
+          "image_index": 2
+        },
+        {
+          "sku": "SAF-MBD-500",
+          "label": "500ml",
+          "option_values": {
+            "size": "500ml"
+          },
+          "price_idr": 165000,
+          "compare_at_price_idr": 245000,
+          "weight_grams": 720,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-mbd-500.svg",
+          "image_index": 3
+        }
+      ]
+    },
+    {
+      "sku": "SAF-MMR-250",
+      "slug": "madu-murni",
+      "name": "Safiya Madu Murni",
+      "tagline": "Pure raw honey, multi-flora.",
+      "description": "Madu murni multi-flora — raw, tanpa campuran gula atau pengawet. Cocok untuk teh, masker wajah, atau langsung dikonsumsi.",
+      "price_idr": 69000,
+      "compare_at_price_idr": 105000,
+      "image": "/brands/safiyafood/products/madu-murni-front.svg",
+      "gallery": [
+        "/brands/safiyafood/products/madu-murni-front.svg",
+        "/brands/safiyafood/products/madu-murni-side.svg",
+        "/brands/safiyafood/products/saf-mmr-250.svg",
+        "/brands/safiyafood/products/saf-mmr-500.svg"
+      ],
+      "category": "Madu",
+      "beckn_category_id": "food-beverages-honey",
+      "badges": [
+        "Halal",
+        "BPOM RI",
+        "Premium"
+      ],
+      "option_axes": [
+        {
+          "name": "size",
+          "values": [
+            "250ml",
+            "500ml"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "sku": "SAF-MMR-250",
+          "label": "250ml",
+          "option_values": {
+            "size": "250ml"
+          },
+          "price_idr": 69000,
+          "compare_at_price_idr": 105000,
+          "weight_grams": 380,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-mmr-250.svg",
+          "image_index": 2
+        },
+        {
+          "sku": "SAF-MMR-500",
+          "label": "500ml",
+          "option_values": {
+            "size": "500ml"
+          },
+          "price_idr": 125000,
+          "compare_at_price_idr": 195000,
+          "weight_grams": 720,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-mmr-500.svg",
+          "image_index": 3
+        }
+      ]
+    },
+    {
+      "sku": "SAF-VCO-250",
+      "slug": "vco-virgin-coconut-oil",
+      "name": "Safiya VCO Virgin Coconut Oil",
+      "tagline": "Cold-pressed virgin coconut oil.",
+      "description": "Virgin Coconut Oil cold-pressed — minyak kelapa murni tanpa pemanasan. Tinggi MCT, baik untuk diet sehat, kulit, dan rambut.",
+      "price_idr": 65000,
+      "compare_at_price_idr": 95000,
+      "image": "/brands/safiyafood/products/vco-virgin-coconut-oil-front.svg",
+      "gallery": [
+        "/brands/safiyafood/products/vco-virgin-coconut-oil-front.svg",
+        "/brands/safiyafood/products/vco-virgin-coconut-oil-side.svg",
+        "/brands/safiyafood/products/saf-vco-250.svg",
+        "/brands/safiyafood/products/saf-vco-500.svg"
+      ],
+      "category": "Madu",
+      "beckn_category_id": "food-beverages-honey",
+      "badges": [
+        "Halal",
+        "BPOM RI",
+        "Premium"
+      ],
+      "option_axes": [
+        {
+          "name": "size",
+          "values": [
+            "250ml",
+            "500ml"
+          ]
+        }
+      ],
+      "variants": [
+        {
+          "sku": "SAF-VCO-250",
+          "label": "250ml",
+          "option_values": {
+            "size": "250ml"
+          },
+          "price_idr": 65000,
+          "compare_at_price_idr": 95000,
+          "weight_grams": 320,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-vco-250.svg",
+          "image_index": 2
+        },
+        {
+          "sku": "SAF-VCO-500",
+          "label": "500ml",
+          "option_values": {
+            "size": "500ml"
+          },
+          "price_idr": 119000,
+          "compare_at_price_idr": 175000,
+          "weight_grams": 600,
+          "stock": 200,
+          "image": "/brands/safiyafood/products/saf-vco-500.svg",
+          "image_index": 3
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "brand_slug": "gendes",
+  "brand_name": "Gendes",
+  "products": [
+    {
+      "sku": "GDS-WASH-BG-50",
+      "slug": "sweet-bubblegum-wash-50ml",
+      "name": "Gendes Sweet Aromatic Feminine Care Wash Foam Bubble Gum 50ml",
+      "tagline": "Sweet feminine wash with food-grade flavour.",
+      "description": "Foam wash dengan 5 bioaktif (Manjakani, Daun Bidara, Piper Betle, Niacinamide, B5). pH-balanced, dermatology tested, BPOM certified.",
+      "price_idr": 68000,
+      "compare_at_price_idr": 138000,
+      "image": "/brands/gendes/products/wash-bg-50-1.svg",
+      "gallery": [
+        "/brands/gendes/products/wash-bg-50-1.svg",
+        "/brands/gendes/products/wash-bg-50-2.svg",
+        "/brands/gendes/products/wash-bg-50-3.svg"
+      ],
+      "options": {
+        "flavour": ["Bubble Gum", "Peach", "Vanilla", "Strawberry"]
+      },
+      "badges": ["BPOM", "Halal", "Dermatology Tested"]
+    },
+    {
+      "sku": "GDS-SPRAY-PCH-30",
+      "slug": "sweet-peach-spray-30ml",
+      "name": "Gendes Feminine Spray Peach 30ml",
+      "tagline": "Refreshing spray on the go.",
+      "description": "Spray ringan untuk pemakaian sepanjang hari. Aroma peach lembut, food-grade flavour, tidak lengket.",
+      "price_idr": 48000,
+      "compare_at_price_idr": 95000,
+      "image": "/brands/gendes/products/spray-peach-1.svg",
+      "gallery": [
+        "/brands/gendes/products/spray-peach-1.svg"
+      ]
+    },
+    {
+      "sku": "GDS-BUNDLE-3PK",
+      "slug": "starter-bundle-3pk",
+      "name": "Gendes Starter Bundle (Wash + Spray + Travel Pouch)",
+      "tagline": "All-in-one starter set.",
+      "description": "Bundle hemat: foam wash 50ml, spray 30ml, dan travel pouch. Sempurna untuk pemula atau hadiah.",
+      "price_idr": 138000,
+      "compare_at_price_idr": 245000,
+      "image": "/brands/gendes/products/bundle-1.svg",
+      "gallery": [
+        "/brands/gendes/products/bundle-1.svg"
+      ]
+    }
+  ]
+}

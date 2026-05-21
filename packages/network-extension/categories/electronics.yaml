@@ -1,0 +1,244 @@
+# Indonesia Network Extension Layer - Electronics Category Taxonomy
+# Indonesian electronics categories for retail domain
+
+version: "1.0.0"
+domain: "ONDC:RET13"
+
+categories:
+  - code: "ELEC_HP"
+    name: "Mobile Phones"
+    name_id: "Handphone & Smartphone"
+    description: "Smartphones, feature phones, and mobile phone accessories"
+    beckn_category_id: "Mobile Phones"
+    sub_categories:
+      - code: "ELEC_HP_SMARTPHONE"
+        name: "Smartphones"
+        name_id: "Smartphone"
+        description: "Android and iOS smartphones"
+        examples: ["Samsung Galaxy", "iPhone", "Xiaomi Redmi", "OPPO", "Vivo"]
+
+      - code: "ELEC_HP_AKSESORIS"
+        name: "Phone Accessories"
+        name_id: "Aksesoris HP"
+        description: "Cases, screen protectors, chargers, and phone accessories"
+        examples: ["Casing HP", "Tempered glass", "Charger", "Kabel data", "Power bank"]
+
+      - code: "ELEC_HP_TABLET"
+        name: "Tablets"
+        name_id: "Tablet"
+        description: "Android tablets, iPads, and tablet accessories"
+        examples: ["iPad", "Samsung Tab", "Xiaomi Pad"]
+
+  - code: "ELEC_KOMPUTER"
+    name: "Computers"
+    name_id: "Komputer & Laptop"
+    description: "Laptops, desktops, and computer peripherals"
+    beckn_category_id: "Computers and Laptops"
+    sub_categories:
+      - code: "ELEC_KOMPUTER_LAPTOP"
+        name: "Laptops"
+        name_id: "Laptop"
+        description: "Notebook computers for personal, business, and gaming use"
+        examples: ["ASUS", "Lenovo", "HP", "Acer", "MacBook"]
+
+      - code: "ELEC_KOMPUTER_DESKTOP"
+        name: "Desktop PCs"
+        name_id: "PC Desktop"
+        description: "Desktop computers, all-in-ones, and mini PCs"
+        examples: ["PC rakitan", "All-in-one PC", "Mini PC"]
+
+      - code: "ELEC_KOMPUTER_MONITOR"
+        name: "Monitors"
+        name_id: "Monitor"
+        description: "Computer monitors and display screens"
+        examples: ["Monitor LED", "Monitor gaming", "Monitor 4K"]
+
+      - code: "ELEC_KOMPUTER_KOMPONEN"
+        name: "Computer Components"
+        name_id: "Komponen Komputer"
+        description: "Internal hardware components for PC building"
+        examples: ["Processor", "VGA / GPU", "RAM", "SSD", "Motherboard", "PSU"]
+
+      - code: "ELEC_KOMPUTER_PERIFERAL"
+        name: "Peripherals"
+        name_id: "Periferal & Aksesoris"
+        description: "Keyboards, mice, webcams, and other external devices"
+        examples: ["Keyboard", "Mouse", "Webcam", "Headset", "Speaker", "USB hub"]
+
+      - code: "ELEC_KOMPUTER_PRINTER"
+        name: "Printers & Scanners"
+        name_id: "Printer & Scanner"
+        description: "Inkjet, laser printers, and multifunction devices"
+        examples: ["Printer inkjet", "Printer laser", "Scanner", "Printer foto"]
+
+  - code: "ELEC_TV"
+    name: "Television & Video"
+    name_id: "TV & Video"
+    description: "Televisions, streaming devices, and video equipment"
+    beckn_category_id: "Televisions"
+    sub_categories:
+      - code: "ELEC_TV_LED"
+        name: "LED & Smart TV"
+        name_id: "TV LED & Smart TV"
+        description: "LED, OLED, QLED, and smart televisions"
+        examples: ["Samsung Smart TV", "LG OLED", "TCL Android TV", "Xiaomi TV"]
+
+      - code: "ELEC_TV_STREAMING"
+        name: "Streaming Devices"
+        name_id: "Perangkat Streaming"
+        description: "TV boxes, streaming sticks, and media players"
+        examples: ["Android TV Box", "Chromecast", "Fire TV Stick"]
+
+      - code: "ELEC_TV_PROYEKTOR"
+        name: "Projectors"
+        name_id: "Proyektor"
+        description: "Home and portable projectors"
+
+  - code: "ELEC_AUDIO"
+    name: "Audio"
+    name_id: "Audio & Musik"
+    description: "Speakers, headphones, earbuds, and audio equipment"
+    beckn_category_id: "Audio Equipment"
+    sub_categories:
+      - code: "ELEC_AUDIO_EARPHONE"
+        name: "Earphones & Earbuds"
+        name_id: "Earphone & Earbuds"
+        description: "Wired and wireless earphones, TWS earbuds"
+        examples: ["AirPods", "Samsung Buds", "TWS murah"]
+
+      - code: "ELEC_AUDIO_HEADPHONE"
+        name: "Headphones"
+        name_id: "Headphone"
+        description: "Over-ear and on-ear headphones"
+        examples: ["Headphone gaming", "Headphone Bluetooth", "Headphone studio"]
+
+      - code: "ELEC_AUDIO_SPEAKER"
+        name: "Speakers"
+        name_id: "Speaker"
+        description: "Bluetooth speakers, soundbars, and portable speakers"
+        examples: ["Speaker Bluetooth", "Soundbar", "Smart speaker"]
+
+  - code: "ELEC_KAMERA"
+    name: "Cameras"
+    name_id: "Kamera & Fotografi"
+    description: "Digital cameras, action cameras, and photography equipment"
+    beckn_category_id: "Cameras"
+    sub_categories:
+      - code: "ELEC_KAMERA_DSLR"
+        name: "DSLR & Mirrorless"
+        name_id: "Kamera DSLR & Mirrorless"
+        description: "Professional and semi-professional cameras"
+        examples: ["Canon EOS", "Nikon", "Sony Alpha", "Fujifilm"]
+
+      - code: "ELEC_KAMERA_ACTION"
+        name: "Action Cameras"
+        name_id: "Kamera Aksi"
+        description: "Compact waterproof action cameras"
+        examples: ["GoPro", "DJI Action", "Insta360"]
+
+      - code: "ELEC_KAMERA_DRONE"
+        name: "Drones"
+        name_id: "Drone"
+        description: "Consumer and professional drones with cameras"
+        examples: ["DJI Mini", "DJI Mavic", "DJI Air"]
+
+      - code: "ELEC_KAMERA_CCTV"
+        name: "CCTV & Security Cameras"
+        name_id: "CCTV & Kamera Keamanan"
+        description: "Home security cameras and CCTV systems"
+        examples: ["IP Camera", "CCTV set", "Ring doorbell", "Xiaomi CCTV"]
+
+      - code: "ELEC_KAMERA_AKSESORIS"
+        name: "Camera Accessories"
+        name_id: "Aksesoris Kamera"
+        description: "Tripods, lenses, memory cards, and camera bags"
+        examples: ["Tripod", "Lensa", "Memory card", "Tas kamera", "Gimbal"]
+
+  - code: "ELEC_RUMAH"
+    name: "Home Appliances"
+    name_id: "Peralatan Rumah Tangga Elektronik"
+    description: "Electronic home appliances for kitchen, laundry, and household use"
+    beckn_category_id: "Home Appliances"
+    sub_categories:
+      - code: "ELEC_RUMAH_DAPUR"
+        name: "Kitchen Appliances"
+        name_id: "Peralatan Dapur"
+        description: "Electronic kitchen appliances"
+        examples: ["Rice cooker", "Blender", "Air fryer", "Microwave", "Kompor listrik"]
+
+      - code: "ELEC_RUMAH_CUCI"
+        name: "Laundry Appliances"
+        name_id: "Mesin Cuci & Setrika"
+        description: "Washing machines, dryers, and irons"
+        examples: ["Mesin cuci", "Pengering", "Setrika", "Setrika uap"]
+
+      - code: "ELEC_RUMAH_PENDINGIN"
+        name: "Cooling & Heating"
+        name_id: "Pendingin & Pemanas"
+        description: "Air conditioners, fans, water heaters, and refrigerators"
+        examples: ["AC", "Kulkas", "Kipas angin", "Water heater", "Dispenser"]
+
+      - code: "ELEC_RUMAH_KEBERSIHAN"
+        name: "Cleaning Appliances"
+        name_id: "Alat Kebersihan Elektronik"
+        description: "Vacuum cleaners, air purifiers, and electronic cleaning tools"
+        examples: ["Vacuum cleaner", "Robot vacuum", "Air purifier", "Pel listrik"]
+
+  - code: "ELEC_GAMING"
+    name: "Gaming"
+    name_id: "Gaming & Konsol"
+    description: "Gaming consoles, accessories, and gaming peripherals"
+    beckn_category_id: "Gaming"
+    sub_categories:
+      - code: "ELEC_GAMING_KONSOL"
+        name: "Game Consoles"
+        name_id: "Konsol Game"
+        description: "Home and portable gaming consoles"
+        examples: ["PlayStation", "Nintendo Switch", "Xbox"]
+
+      - code: "ELEC_GAMING_AKSESORIS"
+        name: "Gaming Accessories"
+        name_id: "Aksesoris Gaming"
+        description: "Controllers, gaming chairs, and peripherals"
+        examples: ["Controller", "Gaming chair", "Mouse gaming", "Keyboard mechanical"]
+
+  - code: "ELEC_WEARABLE"
+    name: "Wearable Tech"
+    name_id: "Perangkat Wearable"
+    description: "Smartwatches, fitness trackers, and wearable technology"
+    beckn_category_id: "Wearable Technology"
+    sub_categories:
+      - code: "ELEC_WEARABLE_SMARTWATCH"
+        name: "Smartwatches"
+        name_id: "Jam Tangan Pintar"
+        description: "Full-featured smartwatches with app support"
+        examples: ["Apple Watch", "Samsung Galaxy Watch", "Amazfit"]
+
+      - code: "ELEC_WEARABLE_FITNESS"
+        name: "Fitness Trackers"
+        name_id: "Fitness Tracker"
+        description: "Activity and health tracking bands"
+        examples: ["Xiaomi Mi Band", "Fitbit", "Garmin"]
+
+  - code: "ELEC_JARINGAN"
+    name: "Networking"
+    name_id: "Perangkat Jaringan"
+    description: "Routers, modems, and networking equipment"
+    beckn_category_id: "Networking Equipment"
+    sub_categories:
+      - code: "ELEC_JARINGAN_ROUTER"
+        name: "Routers & Modems"
+        name_id: "Router & Modem"
+        description: "WiFi routers, mesh systems, and modems"
+        examples: ["Router WiFi 6", "Mesh WiFi", "MiFi", "Modem 4G/5G"]
+
+      - code: "ELEC_JARINGAN_SWITCH"
+        name: "Switches & Hubs"
+        name_id: "Switch & Hub"
+        description: "Network switches and ethernet hubs"
+
+      - code: "ELEC_JARINGAN_KABEL"
+        name: "Cables & Connectors"
+        name_id: "Kabel & Konektor"
+        description: "Network cables, adapters, and connectors"
+        examples: ["Kabel LAN", "Kabel HDMI", "Kabel USB-C", "Converter"]

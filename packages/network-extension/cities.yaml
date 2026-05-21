@@ -1,0 +1,414 @@
+# Indonesia Network Extension Layer - City Registry
+# Major Indonesian cities with Beckn city codes using telephone area codes
+# Format: std:XXX where XXX is the Indonesian phone area code
+
+version: "1.0.0"
+country:
+  code: "IND"
+  name: "Indonesia"
+  name_id: "Indonesia"
+  iso_3166_alpha2: "ID"
+  iso_3166_alpha3: "IDN"
+  currency: "IDR"
+  default_language: "id"
+
+cities:
+  # --- DKI Jakarta & Greater Jakarta (Jabodetabek) ---
+  - code: "std:021"
+    name: "Jakarta"
+    name_id: "Jakarta"
+    description: "Capital city and national economic center"
+    province: "DKI Jakarta"
+    province_id: "DKI Jakarta"
+    island: "Java"
+    latitude: -6.2088
+    longitude: 106.8456
+    timezone: "Asia/Jakarta"
+    beckn_city_code: "std:021"
+    tier: 1
+
+  - code: "std:021"
+    name: "Depok"
+    name_id: "Depok"
+    description: "Satellite city south of Jakarta, part of Jabodetabek metropolitan area"
+    province: "Jawa Barat"
+    province_id: "Jawa Barat"
+    island: "Java"
+    latitude: -6.4025
+    longitude: 106.7942
+    timezone: "Asia/Jakarta"
+    beckn_city_code: "std:021"
+    tier: 2
+    note: "Shares area code with Jakarta"
+
+  - code: "std:021"
+    name: "Tangerang"
+    name_id: "Tangerang"
+    description: "Industrial and residential city west of Jakarta, includes Tangerang Selatan"
+    province: "Banten"
+    province_id: "Banten"
+    island: "Java"
+    latitude: -6.1783
+    longitude: 106.6319
+    timezone: "Asia/Jakarta"
+    beckn_city_code: "std:021"
+    tier: 2
+    note: "Shares area code with Jakarta"
+
+  - code: "std:021"
+    name: "Bekasi"
+    name_id: "Bekasi"
+    description: "Major residential and industrial city east of Jakarta"
+    province: "Jawa Barat"
+    province_id: "Jawa Barat"
+    island: "Java"
+    latitude: -6.2383
+    longitude: 106.9756
+    timezone: "Asia/Jakarta"
+    beckn_city_code: "std:021"
+    tier: 2
+    note: "Shares area code with Jakarta"
+
+  # --- Java (Outside Jabodetabek) ---
+  - code: "std:031"
+    name: "Surabaya"
+    name_id: "Surabaya"
+    description: "Second largest city, capital of East Java province and major port city"
+    province: "Jawa Timur"
+    province_id: "Jawa Timur"
+    island: "Java"
+    latitude: -7.2575
+    longitude: 112.7521
+    timezone: "Asia/Jakarta"
+    beckn_city_code: "std:031"
+    tier: 1
+
+  - code: "std:022"
+    name: "Bandung"
+    name_id: "Bandung"
+    description: "Capital of West Java, major educational and creative economy hub"
+    province: "Jawa Barat"
+    province_id: "Jawa Barat"
+    island: "Java"
+    latitude: -6.9175
+    longitude: 107.6191
+    timezone: "Asia/Jakarta"
+    beckn_city_code: "std:022"
+    tier: 1
+
+  - code: "std:024"
+    name: "Semarang"
+    name_id: "Semarang"
+    description: "Capital of Central Java, major trade and logistics hub"
+    province: "Jawa Tengah"
+    province_id: "Jawa Tengah"
+    island: "Java"
+    latitude: -6.9666
+    longitude: 110.4196
+    timezone: "Asia/Jakarta"
+    beckn_city_code: "std:024"
+    tier: 1
+
+  - code: "std:0274"
+    name: "Yogyakarta"
+    name_id: "Yogyakarta"
+    description: "Cultural capital of Java, center for Javanese arts and education"
+    province: "DI Yogyakarta"
+    province_id: "DI Yogyakarta"
+    island: "Java"
+    latitude: -7.7956
+    longitude: 110.3695
+    timezone: "Asia/Jakarta"
+    beckn_city_code: "std:0274"
+    tier: 2
+
+  - code: "std:0341"
+    name: "Malang"
+    name_id: "Malang"
+    description: "Major city in East Java known for education and cool highland climate"
+    province: "Jawa Timur"
+    province_id: "Jawa Timur"
+    island: "Java"
+    latitude: -7.9666
+    longitude: 112.6326
+    timezone: "Asia/Jakarta"
+    beckn_city_code: "std:0341"
+    tier: 2
+
+  - code: "std:0271"
+    name: "Solo"
+    name_id: "Surakarta (Solo)"
+    description: "Historic Javanese city, center for batik trade and traditional culture"
+    province: "Jawa Tengah"
+    province_id: "Jawa Tengah"
+    island: "Java"
+    latitude: -7.5755
+    longitude: 110.8243
+    timezone: "Asia/Jakarta"
+    beckn_city_code: "std:0271"
+    tier: 2
+
+  - code: "std:0251"
+    name: "Bogor"
+    name_id: "Bogor"
+    description: "Highland city south of Jakarta, known for agriculture and botanical gardens"
+    province: "Jawa Barat"
+    province_id: "Jawa Barat"
+    island: "Java"
+    latitude: -6.5971
+    longitude: 106.8060
+    timezone: "Asia/Jakarta"
+    beckn_city_code: "std:0251"
+    tier: 2
+
+  - code: "std:0231"
+    name: "Cirebon"
+    name_id: "Cirebon"
+    description: "Coastal city in West Java, historical trade port and batik center"
+    province: "Jawa Barat"
+    province_id: "Jawa Barat"
+    island: "Java"
+    latitude: -6.7320
+    longitude: 108.5523
+    timezone: "Asia/Jakarta"
+    beckn_city_code: "std:0231"
+    tier: 3
+
+  - code: "std:0265"
+    name: "Tasikmalaya"
+    name_id: "Tasikmalaya"
+    description: "City in West Java known for handicrafts and embroidery (bordir)"
+    province: "Jawa Barat"
+    province_id: "Jawa Barat"
+    island: "Java"
+    latitude: -7.3274
+    longitude: 108.2208
+    timezone: "Asia/Jakarta"
+    beckn_city_code: "std:0265"
+    tier: 3
+
+  - code: "std:0266"
+    name: "Sukabumi"
+    name_id: "Sukabumi"
+    description: "City in West Java with growing agricultural and light manufacturing sectors"
+    province: "Jawa Barat"
+    province_id: "Jawa Barat"
+    island: "Java"
+    latitude: -6.9277
+    longitude: 106.9300
+    timezone: "Asia/Jakarta"
+    beckn_city_code: "std:0266"
+    tier: 3
+
+  # --- Sumatra ---
+  - code: "std:061"
+    name: "Medan"
+    name_id: "Medan"
+    description: "Largest city in Sumatra, capital of North Sumatra province"
+    province: "Sumatera Utara"
+    province_id: "Sumatera Utara"
+    island: "Sumatra"
+    latitude: 3.5952
+    longitude: 98.6722
+    timezone: "Asia/Jakarta"
+    beckn_city_code: "std:061"
+    tier: 1
+
+  - code: "std:0711"
+    name: "Palembang"
+    name_id: "Palembang"
+    description: "Capital of South Sumatra, historic trade city on Musi River"
+    province: "Sumatera Selatan"
+    province_id: "Sumatera Selatan"
+    island: "Sumatra"
+    latitude: -2.9761
+    longitude: 104.7754
+    timezone: "Asia/Jakarta"
+    beckn_city_code: "std:0711"
+    tier: 2
+
+  - code: "std:0751"
+    name: "Padang"
+    name_id: "Padang"
+    description: "Capital of West Sumatra, known for Minangkabau culture and Padang cuisine"
+    province: "Sumatera Barat"
+    province_id: "Sumatera Barat"
+    island: "Sumatra"
+    latitude: -0.9471
+    longitude: 100.4172
+    timezone: "Asia/Jakarta"
+    beckn_city_code: "std:0751"
+    tier: 2
+
+  - code: "std:0761"
+    name: "Pekanbaru"
+    name_id: "Pekanbaru"
+    description: "Capital of Riau province, major oil and palm oil industry center"
+    province: "Riau"
+    province_id: "Riau"
+    island: "Sumatra"
+    latitude: 0.5071
+    longitude: 101.4478
+    timezone: "Asia/Jakarta"
+    beckn_city_code: "std:0761"
+    tier: 2
+
+  - code: "std:0721"
+    name: "Bandar Lampung"
+    name_id: "Bandar Lampung"
+    description: "Capital of Lampung province, gateway between Java and Sumatra"
+    province: "Lampung"
+    province_id: "Lampung"
+    island: "Sumatra"
+    latitude: -5.3971
+    longitude: 105.2668
+    timezone: "Asia/Jakarta"
+    beckn_city_code: "std:0721"
+    tier: 2
+
+  - code: "std:0778"
+    name: "Batam"
+    name_id: "Batam"
+    description: "Free trade zone island city near Singapore, major electronics manufacturing"
+    province: "Kepulauan Riau"
+    province_id: "Kepulauan Riau"
+    island: "Sumatra"
+    latitude: 1.0456
+    longitude: 104.0305
+    timezone: "Asia/Jakarta"
+    beckn_city_code: "std:0778"
+    tier: 2
+
+  - code: "std:0741"
+    name: "Jambi"
+    name_id: "Jambi"
+    description: "Capital of Jambi province, center for rubber and palm oil trade"
+    province: "Jambi"
+    province_id: "Jambi"
+    island: "Sumatra"
+    latitude: -1.6101
+    longitude: 103.6131
+    timezone: "Asia/Jakarta"
+    beckn_city_code: "std:0741"
+    tier: 3
+
+  # --- Bali & Nusa Tenggara ---
+  - code: "std:0361"
+    name: "Denpasar"
+    name_id: "Denpasar"
+    description: "Capital of Bali province, tourism and cultural center"
+    province: "Bali"
+    province_id: "Bali"
+    island: "Bali"
+    latitude: -8.6500
+    longitude: 115.2167
+    timezone: "Asia/Makassar"
+    beckn_city_code: "std:0361"
+    tier: 1
+
+  - code: "std:0370"
+    name: "Mataram"
+    name_id: "Mataram"
+    description: "Capital of West Nusa Tenggara (NTB), gateway to Lombok tourism"
+    province: "Nusa Tenggara Barat"
+    province_id: "Nusa Tenggara Barat"
+    island: "Lombok"
+    latitude: -8.5833
+    longitude: 116.1167
+    timezone: "Asia/Makassar"
+    beckn_city_code: "std:0370"
+    tier: 3
+
+  - code: "std:0380"
+    name: "Kupang"
+    name_id: "Kupang"
+    description: "Capital of East Nusa Tenggara (NTT), easternmost major city in Nusa Tenggara"
+    province: "Nusa Tenggara Timur"
+    province_id: "Nusa Tenggara Timur"
+    island: "Timor"
+    latitude: -10.1772
+    longitude: 123.6070
+    timezone: "Asia/Makassar"
+    beckn_city_code: "std:0380"
+    tier: 3
+
+  # --- Kalimantan ---
+  - code: "std:0542"
+    name: "Balikpapan"
+    name_id: "Balikpapan"
+    description: "Major port and oil city in East Kalimantan, near the new capital Nusantara (IKN)"
+    province: "Kalimantan Timur"
+    province_id: "Kalimantan Timur"
+    island: "Kalimantan"
+    latitude: -1.2654
+    longitude: 116.8311
+    timezone: "Asia/Makassar"
+    beckn_city_code: "std:0542"
+    tier: 2
+
+  - code: "std:0561"
+    name: "Pontianak"
+    name_id: "Pontianak"
+    description: "Capital of West Kalimantan, located on the equator"
+    province: "Kalimantan Barat"
+    province_id: "Kalimantan Barat"
+    island: "Kalimantan"
+    latitude: -0.0263
+    longitude: 109.3425
+    timezone: "Asia/Jakarta"
+    beckn_city_code: "std:0561"
+    tier: 2
+
+  - code: "std:0511"
+    name: "Banjarmasin"
+    name_id: "Banjarmasin"
+    description: "Capital of South Kalimantan, known as the city of a thousand rivers"
+    province: "Kalimantan Selatan"
+    province_id: "Kalimantan Selatan"
+    island: "Kalimantan"
+    latitude: -3.3186
+    longitude: 114.5944
+    timezone: "Asia/Makassar"
+    beckn_city_code: "std:0511"
+    tier: 2
+
+  # --- Sulawesi ---
+  - code: "std:0411"
+    name: "Makassar"
+    name_id: "Makassar"
+    description: "Largest city in eastern Indonesia, capital of South Sulawesi, major trade hub"
+    province: "Sulawesi Selatan"
+    province_id: "Sulawesi Selatan"
+    island: "Sulawesi"
+    latitude: -5.1477
+    longitude: 119.4327
+    timezone: "Asia/Makassar"
+    beckn_city_code: "std:0411"
+    tier: 1
+
+  - code: "std:0431"
+    name: "Manado"
+    name_id: "Manado"
+    description: "Capital of North Sulawesi, gateway to Bunaken marine park"
+    province: "Sulawesi Utara"
+    province_id: "Sulawesi Utara"
+    island: "Sulawesi"
+    latitude: 1.4748
+    longitude: 124.8421
+    timezone: "Asia/Makassar"
+    beckn_city_code: "std:0431"
+    tier: 2
+
+  # --- Maluku ---
+  - code: "std:0911"
+    name: "Ambon"
+    name_id: "Ambon"
+    description: "Capital of Maluku province, historic spice trade center"
+    province: "Maluku"
+    province_id: "Maluku"
+    island: "Ambon"
+    latitude: -3.6954
+    longitude: 128.1814
+    timezone: "Asia/Jayapura"
+    beckn_city_code: "std:0911"
+    tier: 3

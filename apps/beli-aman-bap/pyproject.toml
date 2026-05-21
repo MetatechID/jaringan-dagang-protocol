@@ -1,0 +1,28 @@
+[project]
+name = "beli-aman-bap"
+version = "0.1.0b0"
+description = "Reference BAP for the Jaringan Dagang network — buyer-protection (escrow) + Beckn /search /select /init /confirm /update. Apache-2.0."
+license = { text = "Apache-2.0" }
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.110.0",
+  "uvicorn[standard]>=0.27.0",
+  "greenlet<3.5",
+  "sqlalchemy[asyncio]>=2.0.25",
+  "asyncpg>=0.29.0",
+  "pydantic>=2.5.0",
+  "pydantic-settings>=2.1.0",
+  "httpx>=0.26.0",
+  "python-multipart>=0.0.6",
+  "firebase-admin>=6.5.0",
+  "mangum>=0.17.0",
+  "pynacl>=1.5.0",
+  "jaringan-dagang-beckn",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+jaringan-dagang-beckn = { workspace = true }

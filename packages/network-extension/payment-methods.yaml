@@ -1,0 +1,382 @@
+# Indonesia Network Extension Layer - Payment Methods
+# Indonesian payment methods mapped to Beckn Payment schema
+# All fees are exclusive of PPN (11%) unless noted
+
+version: "1.0.0"
+currency: "IDR"
+
+payment_methods:
+
+  # ==========================================================================
+  # QRIS (Quick Response Code Indonesian Standard)
+  # ==========================================================================
+  - code: "QRIS"
+    name: "QRIS"
+    name_id: "QRIS"
+    description: "National QR payment standard by Bank Indonesia, accepted across all banks and e-wallets"
+    beckn_payment_type: "ON-ORDER"
+    beckn_collected_by: "BAP"
+    type: "qr_code"
+    category: "qris"
+    operator: "Bank Indonesia"
+    fee:
+      type: "percentage"
+      value: 0.007
+      description: "MDR 0.7% charged to merchant"
+    settlement_window_hours: 24
+    supported_flows:
+      - "pre-paid"
+    tags:
+      - key: "interoperable"
+        value: "true"
+      - key: "regulated_by"
+        value: "Bank Indonesia"
+
+  # ==========================================================================
+  # Virtual Account (Bank Transfer)
+  # ==========================================================================
+  - code: "VA_BCA"
+    name: "BCA Virtual Account"
+    name_id: "Virtual Account BCA"
+    description: "Payment via BCA bank virtual account transfer"
+    beckn_payment_type: "ON-ORDER"
+    beckn_collected_by: "BPP"
+    type: "virtual_account"
+    category: "bank_transfer"
+    bank_code: "014"
+    bank_name: "Bank Central Asia"
+    fee:
+      type: "flat"
+      value: 4000
+      currency: "IDR"
+      description: "Flat fee per transaction"
+    settlement_window_hours: 24
+    supported_flows:
+      - "pre-paid"
+
+  - code: "VA_BNI"
+    name: "BNI Virtual Account"
+    name_id: "Virtual Account BNI"
+    description: "Payment via BNI bank virtual account transfer"
+    beckn_payment_type: "ON-ORDER"
+    beckn_collected_by: "BPP"
+    type: "virtual_account"
+    category: "bank_transfer"
+    bank_code: "009"
+    bank_name: "Bank Negara Indonesia"
+    fee:
+      type: "flat"
+      value: 4000
+      currency: "IDR"
+      description: "Flat fee per transaction"
+    settlement_window_hours: 24
+    supported_flows:
+      - "pre-paid"
+
+  - code: "VA_BRI"
+    name: "BRI Virtual Account"
+    name_id: "Virtual Account BRI"
+    description: "Payment via BRI bank virtual account transfer"
+    beckn_payment_type: "ON-ORDER"
+    beckn_collected_by: "BPP"
+    type: "virtual_account"
+    category: "bank_transfer"
+    bank_code: "002"
+    bank_name: "Bank Rakyat Indonesia"
+    fee:
+      type: "flat"
+      value: 4000
+      currency: "IDR"
+      description: "Flat fee per transaction"
+    settlement_window_hours: 24
+    supported_flows:
+      - "pre-paid"
+
+  - code: "VA_MANDIRI"
+    name: "Mandiri Virtual Account"
+    name_id: "Virtual Account Mandiri"
+    description: "Payment via Bank Mandiri virtual account transfer"
+    beckn_payment_type: "ON-ORDER"
+    beckn_collected_by: "BPP"
+    type: "virtual_account"
+    category: "bank_transfer"
+    bank_code: "008"
+    bank_name: "Bank Mandiri"
+    fee:
+      type: "flat"
+      value: 4000
+      currency: "IDR"
+      description: "Flat fee per transaction"
+    settlement_window_hours: 24
+    supported_flows:
+      - "pre-paid"
+
+  - code: "VA_PERMATA"
+    name: "Permata Virtual Account"
+    name_id: "Virtual Account Permata"
+    description: "Payment via Bank Permata virtual account transfer"
+    beckn_payment_type: "ON-ORDER"
+    beckn_collected_by: "BPP"
+    type: "virtual_account"
+    category: "bank_transfer"
+    bank_code: "013"
+    bank_name: "Bank Permata"
+    fee:
+      type: "flat"
+      value: 4000
+      currency: "IDR"
+      description: "Flat fee per transaction"
+    settlement_window_hours: 24
+    supported_flows:
+      - "pre-paid"
+
+  - code: "VA_BSI"
+    name: "BSI Virtual Account"
+    name_id: "Virtual Account BSI"
+    description: "Payment via Bank Syariah Indonesia virtual account transfer"
+    beckn_payment_type: "ON-ORDER"
+    beckn_collected_by: "BPP"
+    type: "virtual_account"
+    category: "bank_transfer"
+    bank_code: "451"
+    bank_name: "Bank Syariah Indonesia"
+    fee:
+      type: "flat"
+      value: 4000
+      currency: "IDR"
+      description: "Flat fee per transaction"
+    settlement_window_hours: 24
+    supported_flows:
+      - "pre-paid"
+    tags:
+      - key: "sharia_compliant"
+        value: "true"
+
+  # ==========================================================================
+  # E-Wallets (Dompet Digital)
+  # ==========================================================================
+  - code: "EWALLET_GOPAY"
+    name: "GoPay"
+    name_id: "GoPay"
+    description: "Gojek e-wallet, widely used for ride-hailing and daily transactions"
+    beckn_payment_type: "ON-ORDER"
+    beckn_collected_by: "BAP"
+    type: "e_wallet"
+    category: "e_wallet"
+    operator: "PT Dompet Anak Bangsa (Gojek)"
+    fee:
+      type: "percentage"
+      value: 0.02
+      description: "2% MDR charged to merchant"
+    settlement_window_hours: 48
+    supported_flows:
+      - "pre-paid"
+    tags:
+      - key: "app_deeplink"
+        value: "gojek://gopay/pay"
+
+  - code: "EWALLET_OVO"
+    name: "OVO"
+    name_id: "OVO"
+    description: "Popular e-wallet integrated with Grab and Tokopedia ecosystem"
+    beckn_payment_type: "ON-ORDER"
+    beckn_collected_by: "BAP"
+    type: "e_wallet"
+    category: "e_wallet"
+    operator: "PT Visionet Internasional"
+    fee:
+      type: "percentage"
+      value: 0.02
+      description: "2% MDR charged to merchant"
+    settlement_window_hours: 48
+    supported_flows:
+      - "pre-paid"
+    tags:
+      - key: "app_deeplink"
+        value: "ovo://pay"
+
+  - code: "EWALLET_DANA"
+    name: "DANA"
+    name_id: "DANA"
+    description: "Digital wallet backed by Ant Financial, widely accepted online and offline"
+    beckn_payment_type: "ON-ORDER"
+    beckn_collected_by: "BAP"
+    type: "e_wallet"
+    category: "e_wallet"
+    operator: "PT Espay Debit Indonesia Koe"
+    fee:
+      type: "percentage"
+      value: 0.02
+      description: "2% MDR charged to merchant"
+    settlement_window_hours: 48
+    supported_flows:
+      - "pre-paid"
+    tags:
+      - key: "app_deeplink"
+        value: "dana://pay"
+
+  - code: "EWALLET_SHOPEEPAY"
+    name: "ShopeePay"
+    name_id: "ShopeePay"
+    description: "Shopee e-commerce platform digital wallet"
+    beckn_payment_type: "ON-ORDER"
+    beckn_collected_by: "BAP"
+    type: "e_wallet"
+    category: "e_wallet"
+    operator: "PT AirPay International Indonesia"
+    fee:
+      type: "percentage"
+      value: 0.02
+      description: "2% MDR charged to merchant"
+    settlement_window_hours: 48
+    supported_flows:
+      - "pre-paid"
+    tags:
+      - key: "app_deeplink"
+        value: "shopee://pay"
+
+  - code: "EWALLET_LINKAJA"
+    name: "LinkAja"
+    name_id: "LinkAja"
+    description: "State-owned enterprise digital wallet, strong in government and bill payments"
+    beckn_payment_type: "ON-ORDER"
+    beckn_collected_by: "BAP"
+    type: "e_wallet"
+    category: "e_wallet"
+    operator: "PT Fintek Karya Digital"
+    fee:
+      type: "percentage"
+      value: 0.02
+      description: "2% MDR charged to merchant"
+    settlement_window_hours: 48
+    supported_flows:
+      - "pre-paid"
+    tags:
+      - key: "sharia_mode_available"
+        value: "true"
+      - key: "app_deeplink"
+        value: "linkaja://pay"
+
+  # ==========================================================================
+  # Cards (Kartu Kredit / Debit)
+  # ==========================================================================
+  - code: "CARD_VISA"
+    name: "Visa"
+    name_id: "Kartu Visa"
+    description: "Visa credit and debit card payments"
+    beckn_payment_type: "ON-ORDER"
+    beckn_collected_by: "BAP"
+    type: "card"
+    category: "card"
+    network: "Visa"
+    card_types:
+      - "credit"
+      - "debit"
+    fee:
+      type: "percentage"
+      value: 0.025
+      description: "2.5% MDR for domestic cards"
+    fee_international:
+      type: "percentage"
+      value: 0.035
+      description: "3.5% MDR for international cards"
+    settlement_window_hours: 48
+    supported_flows:
+      - "pre-paid"
+
+  - code: "CARD_MASTERCARD"
+    name: "Mastercard"
+    name_id: "Kartu Mastercard"
+    description: "Mastercard credit and debit card payments"
+    beckn_payment_type: "ON-ORDER"
+    beckn_collected_by: "BAP"
+    type: "card"
+    category: "card"
+    network: "Mastercard"
+    card_types:
+      - "credit"
+      - "debit"
+    fee:
+      type: "percentage"
+      value: 0.025
+      description: "2.5% MDR for domestic cards"
+    fee_international:
+      type: "percentage"
+      value: 0.035
+      description: "3.5% MDR for international cards"
+    settlement_window_hours: 48
+    supported_flows:
+      - "pre-paid"
+
+  # ==========================================================================
+  # Retail / Over-the-Counter (Gerai Ritel)
+  # ==========================================================================
+  - code: "RETAIL_ALFAMART"
+    name: "Alfamart"
+    name_id: "Bayar di Alfamart"
+    description: "Cash payment at Alfamart convenience store counters across Indonesia"
+    beckn_payment_type: "ON-ORDER"
+    beckn_collected_by: "BPP"
+    type: "over_the_counter"
+    category: "retail_outlet"
+    operator: "PT Sumber Alfaria Trijaya Tbk"
+    fee:
+      type: "flat"
+      value: 5000
+      currency: "IDR"
+      description: "Flat fee per transaction"
+    settlement_window_hours: 72
+    supported_flows:
+      - "pre-paid"
+    tags:
+      - key: "payment_code_ttl_hours"
+        value: "24"
+      - key: "outlet_count_approx"
+        value: "17000"
+
+  - code: "RETAIL_INDOMARET"
+    name: "Indomaret"
+    name_id: "Bayar di Indomaret"
+    description: "Cash payment at Indomaret convenience store counters across Indonesia"
+    beckn_payment_type: "ON-ORDER"
+    beckn_collected_by: "BPP"
+    type: "over_the_counter"
+    category: "retail_outlet"
+    operator: "PT Indomarco Prismatama"
+    fee:
+      type: "flat"
+      value: 5000
+      currency: "IDR"
+      description: "Flat fee per transaction"
+    settlement_window_hours: 72
+    supported_flows:
+      - "pre-paid"
+    tags:
+      - key: "payment_code_ttl_hours"
+        value: "24"
+      - key: "outlet_count_approx"
+        value: "21000"
+
+  # ==========================================================================
+  # Cash on Delivery
+  # ==========================================================================
+  - code: "COD"
+    name: "Cash on Delivery"
+    name_id: "Bayar di Tempat (COD)"
+    description: "Payment in cash upon delivery of goods, widely used across Indonesia"
+    beckn_payment_type: "ON-FULFILLMENT"
+    beckn_collected_by: "BPP"
+    type: "cash"
+    category: "cod"
+    fee:
+      type: "percentage"
+      value: 0.03
+      description: "3% COD fee charged to merchant for handling"
+    settlement_window_hours: 120
+    supported_flows:
+      - "post-paid"
+    tags:
+      - key: "max_amount"
+        value: "5000000"
+      - key: "requires_exact_change"
+        value: "false"

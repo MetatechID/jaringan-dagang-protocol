@@ -1,0 +1,142 @@
+# Indonesia Network Extension Layer - ONDC RSP (Reconciliation & Settlement
+# Protocol) v1 Enums
+#
+# Localizes the canonical ONDC RSP enumerations for the post-purchase
+# settlement-record exchange between NPs on the Indonesian network. v1 is
+# scoped to emit / receive signed settlement records (one settle / on_settle
+# round-trip per order); the actual money movement (NACH, bank rails, RBI
+# settlement files) stays operator-driven and is deferred to v2.
+#
+# Upstream sources (codes are NOT invented here):
+#   - Settlement type / status / basis / window:
+#     ONDC-Official/protocol-network-extension @ release-1.0.0
+#       enums/rsp/settlement_type.yaml
+#       enums/rsp/settlement_status.yaml
+#       enums/rsp/settlement_basis.yaml
+#       enums/rsp/settlement_window.yaml
+#   - RSP-specific error codes (95xxx):
+#     ONDC-Official/protocol-network-extension @ release-1.0.0
+#       error_codes/rsp/ErrorCodes.yaml
+#
+# Beckn transport base remains nic2004:52110 (the RSP /settle and /on_settle
+# messages ride the same Beckn signed envelope as RET11 /select/confirm).
+
+version: "1.0.0"
+domain: "ONDC:RET"
+sub_domain: "ONDC:RET11"        # Makanan & Minuman Kemasan (Packaged F&B)
+beckn_domain: "nic2004:52110"
+
+# ===========================================================================
+# Settlement type codes  (settlement.type)
+# How the inter-NP money movement is rail-routed once the settlement is
+# agreed. v1 emits records only; the operator picks the actual rail.
+# ===========================================================================
+settlement_type:
+  - code: "NEFT"
+    name: "NEFT"
+    name_id: "NEFT"
+    description: "National Electronic Funds Transfer (Indonesia: BI-FAST / SKNBI batch)."
+  - code: "IMPS"
+    name: "IMPS"
+    name_id: "IMPS"
+    description: "Immediate Payment Service (Indonesia: BI-FAST real-time)."
+  - code: "RTGS"
+    name: "RTGS"
+    name_id: "RTGS"
+    description: "Real-Time Gross Settlement (Indonesia: BI-RTGS for high-value)."
+  - code: "UPI"
+    name: "UPI"
+    name_id: "QRIS"
+    description: "Retail instant payment rail (mapped to QRIS on the Indonesian network)."
+  - code: "BANK"
+    name: "Bank Transfer"
+    name_id: "Transfer Bank"
+    description: "Generic inter-bank transfer when no specific rail is requested."
+
+# ===========================================================================
+# Settlement status codes  (settlement.status)
+# State of the settlement record between the NP-PG <-> NP-counterparty pair.
+# v1 distinguishes PAID / NOT_PAID / PARTIAL_PAID; FAILED and DISPUTED move
+# to v2 with the actual rail integration.
+# ===========================================================================
+settlement_status:
+  - code: "NOT_PAID"
+    name: "Not Paid"
+    name_id: "Belum Dibayar"
+    description: "Settlement record acknowledged; money has not yet moved."
+  - code: "PAID"
+    name: "Paid"
+    name_id: "Sudah Dibayar"
+    description: "Settlement complete; counterparty has received funds."
+  - code: "PARTIAL_PAID"
+    name: "Partial Paid"
+    name_id: "Sebagian Dibayar"
+    description: "Counterparty has received a partial payment; remaining amount pending."
+
+# ===========================================================================
+# Settlement basis codes  (settlement.basis)
+# What triggers the settlement window's clock. v1 retail uses DELIVERY
+# (matches the @ondc/org/settlement_basis tag emitted on /on_confirm).
+# ===========================================================================
+settlement_basis:
+  - code: "DELIVERY"
+    name: "Delivery"
+    name_id: "Pengiriman"
+    description: "Settlement clock starts when fulfillment reaches Order-delivered."
+  - code: "PICKUP"
+    name: "Pickup"
+    name_id: "Pengambilan"
+    description: "Settlement clock starts on pickup confirmation (buyer self-pickup)."
+  - code: "RECEIPT"
+    name: "Receipt"
+    name_id: "Penerimaan"
+    description: "Settlement clock starts when buyer signals receipt (post-delivery confirmation)."
+
+# ===========================================================================
+# Settlement window codes  (settlement.window)
+# ISO 8601 duration codes for how long after settlement_basis the counterparty
+# expects to be settled by. v1 retail standardizes on P1D (T+1) per ONDC RET.
+# ===========================================================================
+settlement_window:
+  - code: "P1D"
+    name: "T+1 Day"
+    name_id: "T+1 Hari"
+    duration_iso8601: "P1D"
+    description: "Settlement due 1 calendar day after the basis event."
+  - code: "P3D"
+    name: "T+3 Days"
+    name_id: "T+3 Hari"
+    duration_iso8601: "P3D"
+    description: "Settlement due 3 calendar days after the basis event."
+  - code: "P7D"
+    name: "T+7 Days"
+    name_id: "T+7 Hari"
+    duration_iso8601: "P7D"
+    description: "Settlement due 7 calendar days after the basis event."
+
+# ===========================================================================
+# RSP-specific error codes (used in /settle, /on_settle)
+# Localized from ONDC protocol-network-extension error_codes/rsp. v1 anchors
+# on the codes the per-order settlement-record path can actually emit.
+# ===========================================================================
+rsp_error_codes:
+  - code: "95001"
+    name: "Invalid Settlement Record"
+    name_id: "Catatan Penyelesaian Tidak Valid"
+    description: "Settlement record could not be processed - invalid basis / window / counterparty."
+  - code: "95002"
+    name: "Order not eligible"
+    name_id: "Pesanan Tidak Memenuhi Syarat"
+    description: "Order state does not permit raising a settlement record (e.g. not delivered)."
+  - code: "95003"
+    name: "Settlement already recorded"
+    name_id: "Penyelesaian Sudah Dicatat"
+    description: "A settlement record already exists for this order; cannot re-emit."
+  - code: "95004"
+    name: "Settlement amount mismatch"
+    name_id: "Jumlah Penyelesaian Tidak Cocok"
+    description: "Counterparty's computed settlement amount differs from sender's."
+  - code: "95005"
+    name: "Reconciliation window closed"
+    name_id: "Jendela Rekonsiliasi Ditutup"
+    description: "Settlement received after the reconciliation window has closed."

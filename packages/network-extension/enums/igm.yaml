@@ -1,0 +1,161 @@
+# Indonesia Network Extension Layer - ONDC IGM (Issue & Grievance Management) Enums
+#
+# Localizes the canonical ONDC IGM v1 protocol enumerations to the Indonesian
+# network for the post-purchase grievance flow (issue / on_issue /
+# issue_status / on_issue_status). YAGNI-narrow: scope is the refund-request
+# Issue path that ONDC:RET11 (Safiya, packaged F&B) needs for buyer disputes
+# tracked through to seller resolution.
+#
+# Upstream sources (codes are NOT invented here):
+#   - Issue category / sub_category / actions:
+#     ONDC-Official/protocol-network-extension @ release-1.0.0
+#       enums/igm/issue_category.yaml
+#       enums/igm/issue_sub_category.yaml
+#       enums/igm/respondent_action.yaml
+#       enums/igm/complainant_action.yaml
+#   - IGM-specific error codes:
+#     ONDC-Official/protocol-network-extension @ release-1.0.0
+#       error_codes/igm/ErrorCodes.yaml
+#
+# Beckn transport base remains nic2004:52110 (the IGM messages ride the same
+# Beckn signed envelope as RET11 /select//confirm). The IGM action set is the
+# overlay on top of Beckn ``/issue`` / ``/on_issue`` (and the rarely-used
+# ``/issue_status`` / ``/on_issue_status``).
+
+version: "1.0.0"
+domain: "ONDC:RET"
+sub_domain: "ONDC:RET11"        # Makanan & Minuman Kemasan (Packaged F&B)
+beckn_domain: "nic2004:52110"
+
+# ===========================================================================
+# Issue category codes  (issue.category)
+# Top-level grouping for what the complaint is about. ONDC IGM v1 set; the
+# refund-request scope this network uses is the ITEM category, but we
+# localize the full enum so future scopes (FULFILLMENT etc) don't churn
+# the YAML.
+# ===========================================================================
+issue_category:
+  - code: "ITEM"
+    name: "Item"
+    name_id: "Barang"
+    description: "Complaint relates to the item / SKU itself (missing, damaged, wrong, quality)."
+  - code: "ORDER"
+    name: "Order"
+    name_id: "Pesanan"
+    description: "Complaint relates to the order as a whole (billing, total, cancellation)."
+  - code: "FULFILLMENT"
+    name: "Fulfillment"
+    name_id: "Pengiriman"
+    description: "Complaint relates to the fulfillment / delivery (delay, damage in transit, wrong address)."
+  - code: "AGENT"
+    name: "Agent"
+    name_id: "Kurir"
+    description: "Complaint relates to the delivery agent's behaviour."
+  - code: "PAYMENT"
+    name: "Payment"
+    name_id: "Pembayaran"
+    description: "Complaint relates to payment / settlement (charged but not paid, refund not received)."
+  - code: "PAYMENT-FNB"
+    name: "Payment (F&B)"
+    name_id: "Pembayaran (Makanan & Minuman)"
+    description: "Payment complaint sub-bucket scoped to F&B (RET11) - mirrors ONDC IGM v1."
+
+# ===========================================================================
+# Issue sub-category codes  (issue.sub_category)
+# Refund-relevant ITEM sub-categories from the ONDC IGM v1 set. Only ITM*
+# codes are localized for v1 (matches the narrow refund-request scope).
+# ===========================================================================
+issue_sub_category:
+  - code: "ITM01"
+    name: "Missing items"
+    name_id: "Barang Tidak Lengkap"
+    category: "ITEM"
+    description: "One or more items from the order were not delivered to the buyer."
+  - code: "ITM02"
+    name: "Item not received"
+    name_id: "Barang Tidak Diterima"
+    category: "ITEM"
+    description: "The order is marked as delivered but the buyer did not receive it."
+  - code: "ITM03"
+    name: "Quantity issue"
+    name_id: "Masalah Kuantitas"
+    category: "ITEM"
+    description: "Buyer received the wrong quantity (less than ordered)."
+  - code: "ITM04"
+    name: "Item mismatch"
+    name_id: "Barang Tidak Sesuai"
+    category: "ITEM"
+    description: "Buyer received a different item than what was ordered."
+  - code: "ITM05"
+    name: "Quality issue"
+    name_id: "Masalah Kualitas"
+    category: "ITEM"
+    description: "Item received was damaged, defective, expired or otherwise not of acceptable quality."
+
+# ===========================================================================
+# Respondent action codes  (issue.resolution.actions[].respondent_action)
+# The actions the BPP (seller) can take in response to the Issue.
+# ===========================================================================
+respondent_action:
+  - code: "PROCESSING"
+    name: "Processing"
+    name_id: "Sedang Diproses"
+    description: "Seller has acknowledged the Issue and is investigating / actioning it."
+  - code: "RESOLVED"
+    name: "Resolved"
+    name_id: "Selesai"
+    description: "Seller has resolved the Issue (e.g. issued a refund)."
+  - code: "REJECTED"
+    name: "Rejected"
+    name_id: "Ditolak"
+    description: "Seller has reviewed the Issue and is rejecting it (no refund / action)."
+  - code: "ESCALATE"
+    name: "Escalate"
+    name_id: "Eskalasi"
+    description: "Seller is escalating the Issue (multi-party / IGP path) - not in v1 scope."
+
+# ===========================================================================
+# Complainant action codes  (issue.resolution.actions[].complainant_action)
+# The actions the BAP-side complainant (buyer) can take. v1 only uses OPEN
+# (when first raising) and CLOSE (when accepting resolution).
+# ===========================================================================
+complainant_action:
+  - code: "OPEN"
+    name: "Open"
+    name_id: "Dibuka"
+    description: "Buyer is opening the Issue."
+  - code: "CLOSE"
+    name: "Close"
+    name_id: "Ditutup"
+    description: "Buyer is accepting the resolution and closing the Issue."
+  - code: "ESCALATE"
+    name: "Escalate"
+    name_id: "Eskalasi"
+    description: "Buyer is escalating the Issue past the seller - not in v1 scope."
+
+# ===========================================================================
+# IGM-specific error codes (used in /issue, /on_issue, /issue_status)
+# Localized from ONDC protocol-network-extension error_codes/igm. v1 anchors
+# on the codes the refund-request path can actually emit.
+# ===========================================================================
+igm_error_codes:
+  - code: "90001"
+    name: "Invalid Issue"
+    name_id: "Pengaduan Tidak Valid"
+    description: "Issue could not be processed - invalid category / sub_category / order reference."
+  - code: "90002"
+    name: "Stale Issue"
+    name_id: "Pengaduan Kedaluwarsa"
+    description: "Issue raised after the IGM grievance window has expired."
+  - code: "90003"
+    name: "Issue not found"
+    name_id: "Pengaduan Tidak Ditemukan"
+    description: "Referenced issue_id does not exist on the respondent side."
+  - code: "90004"
+    name: "Issue already resolved"
+    name_id: "Pengaduan Sudah Diselesaikan"
+    description: "Cannot update or re-open an Issue that is already in a terminal state."
+  - code: "90005"
+    name: "Order not eligible"
+    name_id: "Pesanan Tidak Memenuhi Syarat"
+    description: "Order state does not permit raising an Issue (e.g. already refunded or pre-payment)."

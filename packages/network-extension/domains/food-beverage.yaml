@@ -1,0 +1,128 @@
+# Indonesia Network Extension Layer - Food & Beverage Domain
+# Beckn domain configuration for prepared food and beverage services in Indonesia
+
+domain:
+  code: "ONDC:FNB"
+  name: "Food & Beverage"
+  name_id: "Makanan & Minuman"
+  description: "Prepared food and beverage services including restaurants, warungs, street food, and cloud kitchens"
+  beckn_domain: "nic2004:55101"
+  version: "1.0.0"
+
+sub_domains:
+  - code: "ONDC:FNB10"
+    name: "Restaurant"
+    name_id: "Restoran"
+    description: "Dine-in restaurants, casual dining, and fine dining establishments"
+    beckn_domain: "nic2004:55101"
+    outlet_types:
+      - "Restoran"
+      - "Rumah Makan"
+      - "Cafe"
+
+  - code: "ONDC:FNB11"
+    name: "Warung & Street Food"
+    name_id: "Warung & Kaki Lima"
+    description: "Traditional warungs, street food stalls, and kaki lima vendors"
+    beckn_domain: "nic2004:55102"
+    outlet_types:
+      - "Warung Makan"
+      - "Kaki Lima"
+      - "Pedagang Keliling"
+      - "Angkringan"
+
+  - code: "ONDC:FNB12"
+    name: "Cloud Kitchen"
+    name_id: "Dapur Bersama"
+    description: "Delivery-only kitchens and shared kitchen operations"
+    beckn_domain: "nic2004:55103"
+    outlet_types:
+      - "Cloud Kitchen"
+      - "Ghost Kitchen"
+
+  - code: "ONDC:FNB13"
+    name: "Bakery & Pastry"
+    name_id: "Roti & Kue"
+    description: "Bakeries, pastry shops, and traditional Indonesian cake sellers"
+    beckn_domain: "nic2004:55104"
+    outlet_types:
+      - "Toko Roti"
+      - "Toko Kue"
+      - "Jajanan Pasar"
+
+  - code: "ONDC:FNB14"
+    name: "Beverages"
+    name_id: "Minuman"
+    description: "Beverage shops including coffee, tea, juice, and traditional Indonesian drinks"
+    beckn_domain: "nic2004:55105"
+    outlet_types:
+      - "Kedai Kopi"
+      - "Warkop"
+      - "Juice Bar"
+      - "Es Campur / Cendol"
+
+  - code: "ONDC:FNB15"
+    name: "Catering"
+    name_id: "Katering"
+    description: "Catering services for events, offices, and daily meal subscriptions"
+    beckn_domain: "nic2004:55106"
+    outlet_types:
+      - "Katering Harian"
+      - "Katering Acara"
+      - "Nasi Kotak"
+      - "Tumpeng"
+
+  - code: "ONDC:FNB16"
+    name: "Halal Certified"
+    name_id: "Bersertifikat Halal"
+    description: "Establishments with MUI halal certification"
+    beckn_domain: "nic2004:55107"
+    certification:
+      authority: "BPJPH (Badan Penyelenggara Jaminan Produk Halal)"
+      previous_authority: "MUI (Majelis Ulama Indonesia)"
+
+fulfillment_types:
+  - code: "FNB-DELIVERY"
+    name: "Delivery"
+    name_id: "Pesan Antar"
+    description: "Food delivery to customer address"
+    beckn_fulfillment_type: "Delivery"
+
+  - code: "FNB-PICKUP"
+    name: "Self Pickup"
+    name_id: "Ambil Sendiri"
+    description: "Customer picks up order at outlet"
+    beckn_fulfillment_type: "Self-Pickup"
+
+  - code: "FNB-DINEIN"
+    name: "Dine In"
+    name_id: "Makan di Tempat"
+    description: "Customer dines at the establishment"
+    beckn_fulfillment_type: "Dine-In"
+
+order_tags:
+  - code: "SPICE_LEVEL"
+    name: "Spice Level"
+    name_id: "Tingkat Kepedasan"
+    values:
+      - "Tidak Pedas"
+      - "Pedas Sedikit"
+      - "Pedas Sedang"
+      - "Pedas Banget"
+      - "Pedas Gila"
+
+  - code: "DIETARY"
+    name: "Dietary Preference"
+    name_id: "Preferensi Diet"
+    values:
+      - "Halal"
+      - "Vegetarian"
+      - "Vegan"
+      - "Tanpa Gluten"
+      - "Tanpa MSG"
+
+tax_config:
+  ppn_rate: 0.11
+  pb1_rate: 0.10
+  pb1_label: "PB1 (Pajak Restoran)"
+  currency: "IDR"

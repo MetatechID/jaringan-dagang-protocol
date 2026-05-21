@@ -1,0 +1,232 @@
+# Indonesia Network Extension Layer - Food Category Taxonomy
+# Indonesian food categories for retail and F&B domains
+
+version: "1.0.0"
+domain: "ONDC:RET11"
+
+categories:
+  - code: "FOOD_SNACK"
+    name: "Snacks"
+    name_id: "Makanan Ringan"
+    description: "Packaged snacks, chips, crackers, and traditional Indonesian snack foods"
+    beckn_category_id: "Snacks and Namkeen"
+    sub_categories:
+      - code: "FOOD_SNACK_KERIPIK"
+        name: "Chips & Crackers"
+        name_id: "Keripik & Kerupuk"
+        description: "Potato chips, cassava chips, shrimp crackers, and other crispy snacks"
+        examples: ["Keripik singkong", "Kerupuk udang", "Emping melinjo", "Chitato"]
+
+      - code: "FOOD_SNACK_KACANG"
+        name: "Nuts & Seeds"
+        name_id: "Kacang-kacangan"
+        description: "Roasted peanuts, cashews, and seasoned nut mixes"
+        examples: ["Kacang tanah", "Kacang mete", "Kacang atom", "Dua Kelinci"]
+
+      - code: "FOOD_SNACK_KERING"
+        name: "Dried Snacks"
+        name_id: "Makanan Kering"
+        description: "Dried fruits, jerky, dried fish snacks"
+        examples: ["Dendeng", "Ikan asin", "Sale pisang", "Manisan"]
+
+      - code: "FOOD_SNACK_TRADISIONAL"
+        name: "Traditional Snacks"
+        name_id: "Jajanan Tradisional"
+        description: "Traditional Indonesian kueh and jajanan pasar"
+        examples: ["Onde-onde", "Klepon", "Lemper", "Bika Ambon"]
+
+  - code: "FOOD_BUMBU"
+    name: "Spices & Seasonings"
+    name_id: "Bumbu & Rempah"
+    description: "Indonesian spices, seasoning pastes, and cooking condiments"
+    beckn_category_id: "Masala and Seasoning"
+    sub_categories:
+      - code: "FOOD_BUMBU_REMPAH"
+        name: "Whole Spices"
+        name_id: "Rempah Utuh"
+        description: "Whole spices used in Indonesian cooking"
+        examples: ["Kunyit", "Lengkuas", "Jahe", "Serai", "Daun salam", "Cengkeh", "Pala"]
+
+      - code: "FOOD_BUMBU_BUBUK"
+        name: "Ground Spices"
+        name_id: "Bumbu Bubuk"
+        description: "Pre-ground spice powders"
+        examples: ["Kunyit bubuk", "Ketumbar bubuk", "Merica bubuk", "Jintan"]
+
+      - code: "FOOD_BUMBU_JADI"
+        name: "Instant Seasoning"
+        name_id: "Bumbu Jadi / Instan"
+        description: "Ready-to-use seasoning pastes and instant spice mixes"
+        examples: ["Bumbu rendang", "Bumbu soto", "Bumbu nasi goreng", "Indofood bumbu"]
+
+      - code: "FOOD_BUMBU_SAMBAL"
+        name: "Chili Sauce & Sambal"
+        name_id: "Sambal & Saus Cabai"
+        description: "Chili sauces, sambals, and hot condiments"
+        examples: ["Sambal terasi", "Sambal matah", "Sambal bajak", "ABC sambal"]
+
+      - code: "FOOD_BUMBU_KECAP"
+        name: "Soy Sauce & Condiments"
+        name_id: "Kecap & Saus"
+        description: "Sweet soy sauce, salty soy sauce, oyster sauce, and other liquid condiments"
+        examples: ["Kecap manis", "Kecap asin", "Saus tiram", "Kecap Bango"]
+
+  - code: "FOOD_MINUMAN"
+    name: "Beverages"
+    name_id: "Minuman"
+    description: "Packaged drinks including water, tea, coffee, juice, and traditional beverages"
+    beckn_category_id: "Beverages"
+    sub_categories:
+      - code: "FOOD_MINUMAN_TEH"
+        name: "Tea"
+        name_id: "Teh"
+        description: "Packaged tea products including jasmine tea and traditional herbal teas"
+        examples: ["Teh Botol Sosro", "Teh Pucuk Harum", "Teh Sariwangi", "Teh Javana"]
+
+      - code: "FOOD_MINUMAN_KOPI"
+        name: "Coffee"
+        name_id: "Kopi"
+        description: "Coffee products from Indonesian origins"
+        examples: ["Kopi Kapal Api", "Kopi ABC", "Kopi Toraja", "Kopi luwak"]
+
+      - code: "FOOD_MINUMAN_JAMU"
+        name: "Jamu & Herbal Drinks"
+        name_id: "Jamu & Minuman Herbal"
+        description: "Traditional Javanese herbal medicine drinks"
+        examples: ["Jamu kunyit asam", "Jamu beras kencur", "Tolak Angin", "Antangin"]
+
+      - code: "FOOD_MINUMAN_SUSU"
+        name: "Milk & Dairy Drinks"
+        name_id: "Susu & Minuman Susu"
+        description: "Fresh milk, UHT milk, flavored milk, and yogurt drinks"
+        examples: ["Ultra Milk", "Indomilk", "Frisian Flag", "Yakult"]
+
+      - code: "FOOD_MINUMAN_SODA"
+        name: "Soft Drinks & Soda"
+        name_id: "Minuman Bersoda"
+        description: "Carbonated soft drinks and energy drinks"
+        examples: ["Coca-Cola", "Fanta", "Sprite", "Extra Joss"]
+
+      - code: "FOOD_MINUMAN_AIR"
+        name: "Water"
+        name_id: "Air Mineral"
+        description: "Bottled mineral water and drinking water"
+        examples: ["Aqua", "Le Minerale", "Pristine", "Club"]
+
+  - code: "FOOD_MIE"
+    name: "Noodles"
+    name_id: "Mie & Bihun"
+    description: "Instant noodles, dried noodles, and vermicelli"
+    beckn_category_id: "Noodles"
+    sub_categories:
+      - code: "FOOD_MIE_INSTAN"
+        name: "Instant Noodles"
+        name_id: "Mie Instan"
+        description: "Instant noodle products, a staple across Indonesia"
+        examples: ["Indomie", "Mie Sedaap", "Sarimi", "Pop Mie"]
+
+      - code: "FOOD_MIE_KERING"
+        name: "Dried Noodles"
+        name_id: "Mie Kering"
+        description: "Non-instant dried noodles for cooking"
+        examples: ["Mie telur", "Bihun", "Soun", "Kwetiau kering"]
+
+  - code: "FOOD_BERAS"
+    name: "Rice & Grains"
+    name_id: "Beras & Biji-bijian"
+    description: "Rice varieties and other grain products staple to Indonesian diet"
+    beckn_category_id: "Rice and Rice Products"
+    sub_categories:
+      - code: "FOOD_BERAS_PUTIH"
+        name: "White Rice"
+        name_id: "Beras Putih"
+        description: "Standard white rice varieties"
+        examples: ["Beras Rojolele", "Beras Pandan Wangi", "Beras IR64"]
+
+      - code: "FOOD_BERAS_MERAH"
+        name: "Brown & Red Rice"
+        name_id: "Beras Merah & Beras Coklat"
+        description: "Healthier rice alternatives"
+        examples: ["Beras merah", "Beras coklat", "Beras hitam"]
+
+      - code: "FOOD_BERAS_KETAN"
+        name: "Sticky Rice"
+        name_id: "Beras Ketan"
+        description: "Glutinous rice for traditional cakes and dishes"
+        examples: ["Ketan putih", "Ketan hitam"]
+
+  - code: "FOOD_MINYAK"
+    name: "Cooking Oil"
+    name_id: "Minyak Goreng"
+    description: "Cooking oils widely used in Indonesian cuisine"
+    beckn_category_id: "Edible Oils"
+    sub_categories:
+      - code: "FOOD_MINYAK_SAWIT"
+        name: "Palm Oil"
+        name_id: "Minyak Sawit"
+        description: "Palm-based cooking oil, the most common in Indonesia"
+        examples: ["Bimoli", "Filma", "Sania", "Tropical"]
+
+      - code: "FOOD_MINYAK_KELAPA"
+        name: "Coconut Oil"
+        name_id: "Minyak Kelapa"
+        description: "Coconut-based cooking oil and VCO"
+        examples: ["Minyak kelapa murni", "VCO", "Barco"]
+
+  - code: "FOOD_OLAHAN"
+    name: "Processed Foods"
+    name_id: "Makanan Olahan"
+    description: "Canned, frozen, and processed food products"
+    beckn_category_id: "Packaged Foods"
+    sub_categories:
+      - code: "FOOD_OLAHAN_KALENG"
+        name: "Canned Food"
+        name_id: "Makanan Kaleng"
+        description: "Canned fish, meat, vegetables, and fruits"
+        examples: ["Sarden ABC", "Kornet", "Bakso kaleng", "Buah kaleng"]
+
+      - code: "FOOD_OLAHAN_BEKU"
+        name: "Frozen Food"
+        name_id: "Makanan Beku"
+        description: "Frozen ready-to-cook and ready-to-eat products"
+        examples: ["Nugget", "Sosis", "Bakso beku", "Dimsum beku", "Fiesta"]
+
+      - code: "FOOD_OLAHAN_TEMPE_TAHU"
+        name: "Tempeh & Tofu Products"
+        name_id: "Tempe & Tahu"
+        description: "Soy-based products central to Indonesian cuisine"
+        examples: ["Tempe", "Tahu", "Oncom", "Tahu Sumedang"]
+
+  - code: "FOOD_GULA"
+    name: "Sugar & Sweeteners"
+    name_id: "Gula & Pemanis"
+    description: "Sugar products including palm sugar traditional to Indonesian cooking"
+    beckn_category_id: "Sugar and Sweeteners"
+    sub_categories:
+      - code: "FOOD_GULA_PASIR"
+        name: "Granulated Sugar"
+        name_id: "Gula Pasir"
+        description: "White and refined granulated sugar"
+
+      - code: "FOOD_GULA_MERAH"
+        name: "Palm Sugar"
+        name_id: "Gula Merah / Gula Jawa"
+        description: "Traditional palm sugar and coconut sugar"
+        examples: ["Gula Jawa", "Gula aren", "Gula kelapa"]
+
+  - code: "FOOD_SANTAN"
+    name: "Coconut Products"
+    name_id: "Santan & Kelapa"
+    description: "Coconut milk, desiccated coconut, and coconut cream"
+    beckn_category_id: "Coconut Products"
+    sub_categories:
+      - code: "FOOD_SANTAN_CAIR"
+        name: "Coconut Milk"
+        name_id: "Santan Cair"
+        description: "Packaged coconut milk and coconut cream"
+        examples: ["Kara", "Sun Kara", "Santan instan"]
+
+      - code: "FOOD_SANTAN_KELAPA_PARUT"
+        name: "Desiccated Coconut"
+        name_id: "Kelapa Parut"
+        description: "Shredded and desiccated coconut for cooking and baking"

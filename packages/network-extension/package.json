@@ -1,0 +1,16 @@
+{
+  "name": "@jaringan-dagang/network-extension",
+  "version": "0.1.0-beta.0",
+  "description": "ONDC-style localization for Indonesia — domain codes (RET, RET11), enum catalogs, error codes, city codes (std:021 Jakarta), payment methods (QRIS, VA). Consumed by Beckn implementations to emit ONDC-compliant envelopes.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MetatechID/jaringan-dagang-protocol.git",
+    "directory": "packages/network-extension"
+  },
+  "keywords": ["ondc", "beckn", "indonesia", "qris", "commerce"],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

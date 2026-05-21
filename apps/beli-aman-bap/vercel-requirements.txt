@@ -1,0 +1,9 @@
+fastapi>=0.110.0
+sqlalchemy[asyncio]>=2.0.25
+asyncpg>=0.29.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+httpx>=0.26.0
+firebase-admin>=6.5.0
+mangum>=0.17.0
+pynacl>=1.5.0

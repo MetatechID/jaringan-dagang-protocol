@@ -1,0 +1,32 @@
+{
+  "brand_slug": "yourbrand",
+  "brand_name": "YourBrand",
+  "products": [
+    {
+      "sku": "YB-HERO-PRODUCT-01",
+      "slug": "hero-product",
+      "name": "YourBrand Hero Product",
+      "tagline": "Your best-seller, with Beli Aman built in.",
+      "description": "Demo product card. Edit colors and copy via /yourbrand/customize?primary=#xxx&secondary=#yyy. Use this surface to show prospects what their site looks like with Beli Aman embedded.",
+      "price_idr": 199000,
+      "compare_at_price_idr": 299000,
+      "image": "/brands/yourbrand/products/hero-1.svg",
+      "gallery": [
+        "/brands/yourbrand/products/hero-1.svg"
+      ]
+    },
+    {
+      "sku": "YB-SECONDARY-02",
+      "slug": "secondary-product",
+      "name": "YourBrand Featured Item",
+      "tagline": "A second sample SKU for the demo grid.",
+      "description": "Lorem ipsum product description. Replace with real copy when onboarding a brand.",
+      "price_idr": 89000,
+      "compare_at_price_idr": 145000,
+      "image": "/brands/yourbrand/products/secondary-1.svg",
+      "gallery": [
+        "/brands/yourbrand/products/secondary-1.svg"
+      ]
+    }
+  ]
+}

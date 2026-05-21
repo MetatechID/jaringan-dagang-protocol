@@ -1,0 +1,17 @@
+{
+  "name": "@jaringan-dagang/channel-adapter",
+  "version": "0.1.0-beta.0",
+  "description": "Channel adapter contract: IncomingMessage / OutgoingMessage types + Renderer interface for web, WhatsApp, Messenger, Telegram, IG DM. Pure interface — no I/O.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MetatechID/jaringan-dagang-protocol.git",
+    "directory": "packages/channel-adapter"
+  },
+  "keywords": ["chatbot", "whatsapp", "messenger", "telegram", "channel-adapter"],
+  "type": "module",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

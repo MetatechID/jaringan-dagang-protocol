@@ -1,0 +1,33 @@
+[project]
+name = "jaringan-dagang-beckn"
+version = "0.1.0b0"
+description = "Beckn protocol library for Python — context builders, Ed25519 signing, envelope (de)serialization. Indonesian commerce (ONDC) flavoring lives in jaringan-dagang-network-extension."
+license = { text = "Apache-2.0" }
+readme = "README.md"
+authors = [{ name = "MetatechID" }]
+keywords = ["beckn", "ondc", "open-commerce", "jaringan-dagang", "indonesia"]
+classifiers = [
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3.12",
+]
+requires-python = ">=3.10"
+dependencies = [
+  "pynacl>=1.5.0",
+  "pydantic>=2.5.0",
+  "httpx>=0.26.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/MetatechID/jaringan-dagang-protocol"
+Repository = "https://github.com/MetatechID/jaringan-dagang-protocol"
+Source = "https://github.com/MetatechID/jaringan-dagang-protocol/tree/main/packages/beckn-protocol-py"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jaringan_dagang_beckn"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/", "README.md", "LICENSE"]

@@ -1,0 +1,350 @@
+# Indonesia Network Extension Layer - Logistics Providers
+# Indonesian courier and delivery services mapped to Beckn Fulfillment schema
+
+version: "1.0.0"
+
+logistics_providers:
+
+  # ==========================================================================
+  # JNE (Jalur Nugraha Ekakurir)
+  # ==========================================================================
+  - code: "JNE"
+    name: "JNE Express"
+    name_id: "JNE Express"
+    description: "One of Indonesia's largest courier companies with nationwide coverage"
+    operator: "PT Tiki Jalur Nugraha Ekakurir"
+    beckn_fulfillment_type: "Delivery"
+    beckn_provider_id: "jne.co.id"
+    website: "https://www.jne.co.id"
+    coverage: "nationwide"
+    tracking_url_template: "https://www.jne.co.id/id/tracking/trace/{tracking_id}"
+    services:
+      - code: "JNE_REG"
+        name: "JNE Reguler"
+        name_id: "JNE Reguler"
+        description: "Standard delivery service, 2-3 days within Java, 3-7 days outer islands"
+        beckn_category: "Standard Delivery"
+        sla:
+          java_days: "2-3"
+          outer_island_days: "3-7"
+        max_weight_kg: 30
+
+      - code: "JNE_YES"
+        name: "JNE YES (Yakin Esok Sampai)"
+        name_id: "JNE YES (Yakin Esok Sampai)"
+        description: "Next-day delivery guarantee for major cities across Indonesia"
+        beckn_category: "Express Delivery"
+        sla:
+          guaranteed_days: 1
+        max_weight_kg: 30
+
+      - code: "JNE_OKE"
+        name: "JNE OKE (Ongkos Kirim Ekonomis)"
+        name_id: "JNE OKE (Ongkos Kirim Ekonomis)"
+        description: "Economy shipping with lower cost and longer delivery time"
+        beckn_category: "Economy Delivery"
+        sla:
+          java_days: "3-5"
+          outer_island_days: "5-10"
+        max_weight_kg: 30
+
+  # ==========================================================================
+  # J&T Express
+  # ==========================================================================
+  - code: "JNT"
+    name: "J&T Express"
+    name_id: "J&T Express"
+    description: "Technology-driven express delivery service with strong e-commerce integration"
+    operator: "PT Global Jet Express"
+    beckn_fulfillment_type: "Delivery"
+    beckn_provider_id: "jet.co.id"
+    website: "https://www.jet.co.id"
+    coverage: "nationwide"
+    tracking_url_template: "https://www.jet.co.id/track?bill_code={tracking_id}"
+    services:
+      - code: "JNT_EZ"
+        name: "J&T EZ"
+        name_id: "J&T EZ"
+        description: "Regular delivery service with door-to-door pickup"
+        beckn_category: "Standard Delivery"
+        sla:
+          java_days: "2-3"
+          outer_island_days: "3-7"
+        max_weight_kg: 50
+
+      - code: "JNT_EXPRESS"
+        name: "J&T Express"
+        name_id: "J&T Express"
+        description: "Express delivery with faster processing"
+        beckn_category: "Express Delivery"
+        sla:
+          java_days: "1-2"
+          outer_island_days: "2-5"
+        max_weight_kg: 50
+
+  # ==========================================================================
+  # SiCepat Ekspres
+  # ==========================================================================
+  - code: "SICEPAT"
+    name: "SiCepat Ekspres"
+    name_id: "SiCepat Ekspres"
+    description: "Fast-growing express delivery company known for speed and reliability"
+    operator: "PT SiCepat Ekspres Indonesia"
+    beckn_fulfillment_type: "Delivery"
+    beckn_provider_id: "sicepat.com"
+    website: "https://www.sicepat.com"
+    coverage: "nationwide"
+    tracking_url_template: "https://www.sicepat.com/checkAwb/{tracking_id}"
+    services:
+      - code: "SICEPAT_REG"
+        name: "SiCepat REG"
+        name_id: "SiCepat REG"
+        description: "Regular delivery service for standard shipments"
+        beckn_category: "Standard Delivery"
+        sla:
+          java_days: "2-3"
+          outer_island_days: "3-7"
+        max_weight_kg: 30
+
+      - code: "SICEPAT_BEST"
+        name: "SiCepat BEST (Besok Sampai Tujuan)"
+        name_id: "SiCepat BEST (Besok Sampai Tujuan)"
+        description: "Next-day delivery guarantee to major cities"
+        beckn_category: "Express Delivery"
+        sla:
+          guaranteed_days: 1
+        max_weight_kg: 30
+
+      - code: "SICEPAT_GOKIL"
+        name: "SiCepat GOKIL (Garansi Ongkir Kilat)"
+        name_id: "SiCepat GOKIL (Garansi Ongkir Kilat)"
+        description: "Economy express service with competitive pricing"
+        beckn_category: "Economy Delivery"
+        sla:
+          java_days: "3-5"
+          outer_island_days: "5-10"
+        max_weight_kg: 30
+
+  # ==========================================================================
+  # AnterAja
+  # ==========================================================================
+  - code: "ANTERAJA"
+    name: "AnterAja"
+    name_id: "AnterAja"
+    description: "Tech-driven logistics company with flexible delivery options"
+    operator: "PT Tri Adi Bersama"
+    beckn_fulfillment_type: "Delivery"
+    beckn_provider_id: "anteraja.id"
+    website: "https://anteraja.id"
+    coverage: "nationwide"
+    tracking_url_template: "https://anteraja.id/tracking/{tracking_id}"
+    services:
+      - code: "ANTERAJA_REG"
+        name: "AnterAja Regular"
+        name_id: "AnterAja Reguler"
+        description: "Standard delivery with reliable nationwide coverage"
+        beckn_category: "Standard Delivery"
+        sla:
+          java_days: "2-3"
+          outer_island_days: "3-7"
+        max_weight_kg: 30
+
+      - code: "ANTERAJA_ND"
+        name: "AnterAja Next Day"
+        name_id: "AnterAja Next Day"
+        description: "Next-day delivery for major metropolitan areas"
+        beckn_category: "Express Delivery"
+        sla:
+          guaranteed_days: 1
+        max_weight_kg: 30
+
+      - code: "ANTERAJA_SD"
+        name: "AnterAja Same Day"
+        name_id: "AnterAja Same Day"
+        description: "Same-day delivery within supported urban areas"
+        beckn_category: "Instant Delivery"
+        sla:
+          guaranteed_hours: 8
+        max_weight_kg: 10
+
+  # ==========================================================================
+  # Ninja Express
+  # ==========================================================================
+  - code: "NINJA"
+    name: "Ninja Express"
+    name_id: "Ninja Express"
+    description: "Southeast Asian logistics company with strong last-mile delivery network"
+    operator: "PT Ninja Logistics Indonesia"
+    beckn_fulfillment_type: "Delivery"
+    beckn_provider_id: "ninjaxpress.co"
+    website: "https://www.ninjaxpress.co/id-id"
+    coverage: "nationwide"
+    tracking_url_template: "https://www.ninjaxpress.co/id-id/tracking?id={tracking_id}"
+    services:
+      - code: "NINJA_STD"
+        name: "Ninja Standard"
+        name_id: "Ninja Standar"
+        description: "Standard parcel delivery across Indonesia"
+        beckn_category: "Standard Delivery"
+        sla:
+          java_days: "2-3"
+          outer_island_days: "3-7"
+        max_weight_kg: 30
+
+      - code: "NINJA_ND"
+        name: "Ninja Next Day"
+        name_id: "Ninja Next Day"
+        description: "Next-day delivery within major cities"
+        beckn_category: "Express Delivery"
+        sla:
+          guaranteed_days: 1
+        max_weight_kg: 30
+
+  # ==========================================================================
+  # Pos Indonesia
+  # ==========================================================================
+  - code: "POS"
+    name: "Pos Indonesia"
+    name_id: "Pos Indonesia"
+    description: "State-owned postal service with the widest coverage in Indonesia including remote areas"
+    operator: "PT Pos Indonesia (Persero)"
+    beckn_fulfillment_type: "Delivery"
+    beckn_provider_id: "posindonesia.co.id"
+    website: "https://www.posindonesia.co.id"
+    coverage: "nationwide"
+    tracking_url_template: "https://www.posindonesia.co.id/id/tracking/{tracking_id}"
+    services:
+      - code: "POS_KILAT"
+        name: "Pos Kilat Khusus"
+        name_id: "Pos Kilat Khusus"
+        description: "Priority delivery service with faster processing"
+        beckn_category: "Express Delivery"
+        sla:
+          java_days: "2-3"
+          outer_island_days: "3-5"
+        max_weight_kg: 50
+
+      - code: "POS_BIASA"
+        name: "Pos Reguler"
+        name_id: "Pos Reguler"
+        description: "Standard postal delivery, most affordable option with widest coverage"
+        beckn_category: "Economy Delivery"
+        sla:
+          java_days: "3-7"
+          outer_island_days: "7-14"
+        max_weight_kg: 50
+
+      - code: "POS_EXPRESS"
+        name: "Pos Express"
+        name_id: "Pos Express"
+        description: "Express next-day delivery for major cities"
+        beckn_category: "Express Delivery"
+        sla:
+          guaranteed_days: 1
+        max_weight_kg: 20
+
+  # ==========================================================================
+  # GoSend (Gojek)
+  # ==========================================================================
+  - code: "GOSEND"
+    name: "GoSend"
+    name_id: "GoSend"
+    description: "On-demand delivery service by Gojek using motorcycle and car couriers"
+    operator: "PT Aplikasi Karya Anak Bangsa (Gojek)"
+    beckn_fulfillment_type: "Delivery"
+    beckn_provider_id: "gojek.com"
+    website: "https://www.gojek.com/gosend"
+    coverage: "major_cities"
+    tracking_url_template: "gojek://gosend/track/{tracking_id}"
+    services:
+      - code: "GOSEND_INSTANT"
+        name: "GoSend Instant"
+        name_id: "GoSend Instan"
+        description: "Instant delivery via motorcycle courier, real-time tracking"
+        beckn_category: "Instant Delivery"
+        sla:
+          guaranteed_hours: 2
+        max_weight_kg: 7
+        max_dimensions_cm: "40x40x17"
+        vehicle: "motorcycle"
+
+      - code: "GOSEND_SAMEDAY"
+        name: "GoSend Same Day"
+        name_id: "GoSend Same Day"
+        description: "Same-day delivery with batch processing, lower cost than instant"
+        beckn_category: "Same Day Delivery"
+        sla:
+          guaranteed_hours: 8
+        max_weight_kg: 7
+        max_dimensions_cm: "40x40x17"
+        vehicle: "motorcycle"
+
+  # ==========================================================================
+  # GrabExpress
+  # ==========================================================================
+  - code: "GRABEXPRESS"
+    name: "GrabExpress"
+    name_id: "GrabExpress"
+    description: "On-demand delivery service by Grab using motorcycle and car couriers"
+    operator: "PT Solusi Transportasi Indonesia (Grab)"
+    beckn_fulfillment_type: "Delivery"
+    beckn_provider_id: "grab.com"
+    website: "https://www.grab.com/id/express"
+    coverage: "major_cities"
+    tracking_url_template: "grab://express/track/{tracking_id}"
+    services:
+      - code: "GRAB_INSTANT"
+        name: "GrabExpress Instant"
+        name_id: "GrabExpress Instan"
+        description: "Instant delivery via motorcycle courier with real-time GPS tracking"
+        beckn_category: "Instant Delivery"
+        sla:
+          guaranteed_hours: 2
+        max_weight_kg: 5
+        max_dimensions_cm: "36x36x36"
+        vehicle: "motorcycle"
+
+      - code: "GRAB_SAMEDAY"
+        name: "GrabExpress Same Day"
+        name_id: "GrabExpress Same Day"
+        description: "Affordable same-day delivery with flexible pickup window"
+        beckn_category: "Same Day Delivery"
+        sla:
+          guaranteed_hours: 6
+        max_weight_kg: 5
+        max_dimensions_cm: "36x36x36"
+        vehicle: "motorcycle"
+
+  # ==========================================================================
+  # ID Express
+  # ==========================================================================
+  - code: "IDEXPRESS"
+    name: "ID Express"
+    name_id: "ID Express"
+    description: "Indonesian express delivery service with growing nationwide network"
+    operator: "PT IDexpress Service Solution"
+    beckn_fulfillment_type: "Delivery"
+    beckn_provider_id: "idexpress.com"
+    website: "https://idexpress.com"
+    coverage: "nationwide"
+    tracking_url_template: "https://idexpress.com/tracking/{tracking_id}"
+    services:
+      - code: "IDE_STD"
+        name: "ID Express Standard"
+        name_id: "ID Express Standar"
+        description: "Standard delivery across Indonesia"
+        beckn_category: "Standard Delivery"
+        sla:
+          java_days: "2-3"
+          outer_island_days: "3-7"
+        max_weight_kg: 30
+
+      - code: "IDE_EXPRESS"
+        name: "ID Express"
+        name_id: "ID Express"
+        description: "Express delivery with priority handling"
+        beckn_category: "Express Delivery"
+        sla:
+          java_days: "1-2"
+          outer_island_days: "2-4"
+        max_weight_kg: 30
