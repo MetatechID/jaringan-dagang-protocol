@@ -13,8 +13,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -33,5 +31,13 @@ jobs:
         with:
           version: latest
       - run: uv sync
-      - run: uv run ruff check .
-      - run: uv run pytest
+      # ruff + pytest only run if there's actual Python code to check.
+      # Empty workspace skips these (the workspace members list is
+      # commented out in pyproject.toml until packages are migrated).
+      - run: |
+          if find packages apps -name '*.py' -not -path '*/.venv/*' 2>/dev/null | grep -q .; then
+            uv run ruff check .
+            uv run pytest
+          else
+            echo "No Python sources yet — skipping ruff + pytest"
+          fi

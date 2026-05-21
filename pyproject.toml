@@ -5,14 +5,19 @@ description = "Workspace root for the Python packages in jaringan-dagang-protoco
 license = { text = "Apache-2.0" }
 requires-python = ">=3.12"
 
+# Python workspace members are commented out until each package gets
+# its real pyproject.toml in migration Steps 2 + 4. Uncomment as
+# packages land. uv refuses to sync a workspace whose declared members
+# are missing pyproject.toml files.
 [tool.uv.workspace]
-members = [
-  "packages/beckn-protocol-py",
-  "packages/network-extension",
-  "apps/beli-aman-bap",
-  "apps/registry",
-  "apps/gateway",
-]
+members = []
+# members = [
+#   "packages/beckn-protocol-py",
+#   "packages/network-extension",
+#   "apps/beli-aman-bap",
+#   "apps/registry",
+#   "apps/gateway",
+# ]
 
 [tool.ruff]
 line-length = 100

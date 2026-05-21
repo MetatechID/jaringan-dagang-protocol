@@ -9,13 +9,13 @@
     "url": "git+https://github.com/MetatechID/jaringan-dagang-protocol.git"
   },
   "scripts": {
-    "build": "turbo run build",
-    "test": "turbo run test",
-    "lint": "turbo run lint",
-    "typecheck": "turbo run typecheck",
+    "build": "turbo run build --no-daemon",
+    "test": "turbo run test --no-daemon",
+    "lint": "turbo run lint --no-daemon",
+    "typecheck": "turbo run typecheck --no-daemon",
     "changeset": "changeset",
     "version": "changeset version",
-    "release": "turbo run build --filter=./packages/* && changeset publish"
+    "release": "turbo run build --no-daemon --filter='./packages/*' && changeset publish"
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.7",
