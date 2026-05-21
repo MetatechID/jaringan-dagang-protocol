@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 # Make this app's own modules importable as top-level (config, database, etc.)
@@ -66,6 +66,7 @@ def _should_reraise_canonical_failure(exc: BaseException) -> bool:
 
 from config import settings  # noqa: E402
 from database import engine  # noqa: E402
+from deps import require_admin_token  # noqa: E402
 from models import Base  # noqa: E402  (import side-effect: registers all models)
 
 logger = logging.getLogger(__name__)
@@ -263,13 +264,19 @@ async def health() -> dict[str, str]:
     return {"status": "ok", "service": settings.service_name}
 
 
-@app.get("/debug/config")
+@app.get("/debug/config", dependencies=[Depends(require_admin_token)])
 async def debug_config() -> dict:
+    # Admin-token-gated. Never echoes secrets — only flags presence.
     return {
         "subscriber_id": settings.subscriber_id,
         "subscriber_url": settings.subscriber_url,
-        "database_url": settings.database_url[:50] + "...",
+        "database_configured": bool(settings.database_url),
         "allowed_origins": _origins,
         "seller_bridge_enabled": settings.seller_bridge_enabled,
         "auto_release_days": settings.auto_release_days,
+        "xendit_configured": bool(settings.xendit_secret_key),
+        "xendit_webhook_configured": bool(settings.xendit_webhook_token),
+        "biteship_configured": bool(settings.biteship_api_key),
+        "biteship_webhook_configured": bool(settings.biteship_webhook_token),
+        "environment": settings.environment,
     }
