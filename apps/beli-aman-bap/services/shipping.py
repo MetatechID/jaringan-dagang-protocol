@@ -190,6 +190,14 @@ async def create_shipment(
         "items": items,
         "reference_id": reference_id,
     }
+    # Per-shipment tracking webhook. Biteship's dashboard doesn't expose a
+    # global webhook URL config — webhooks are bound per order via this
+    # field. Token in query param is how we auth (Biteship doesn't sign).
+    if settings.biteship_webhook_token:
+        payload["webhook_url"] = (
+            f"{settings.xendit_callback_base_url.rstrip('/')}"
+            f"/webhooks/biteship/tracking?token={settings.biteship_webhook_token}"
+        )
     # Drop the coordinate key entirely if origin didn't have it
     if payload.get("origin_coordinate") is None:
         payload.pop("origin_coordinate")

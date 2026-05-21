@@ -35,17 +35,20 @@ _LOG = logging.getLogger("beli_aman_bap.webhooks_biteship")
 router = APIRouter(prefix="/webhooks/biteship", tags=["webhooks"])
 
 
-def _verify(authorization: str | None) -> None:
+def _verify(authorization: str | None, token_query: str | None) -> None:
+    """Biteship's per-shipment ``webhook_url`` doesn't sign requests, so we
+    embed the token in the URL itself as ``?token=…``. Header-based auth is
+    accepted as a fallback if a future Biteship release does set Authorization.
+    """
     expected = settings.biteship_webhook_token
     if not expected:
         raise HTTPException(503, "BITESHIP_WEBHOOK_TOKEN not configured")
-    # Biteship's webhook config accepts a header. Default to ``Authorization:
-    # Bearer <token>`` but accept the bare token too.
-    if not authorization:
-        raise HTTPException(401, "Missing Authorization header")
-    if authorization == expected:
-        return
-    if authorization == f"Bearer {expected}":
+    candidates = {
+        authorization,
+        authorization.removeprefix("Bearer ") if authorization else None,
+        token_query,
+    }
+    if expected in candidates:
         return
     raise HTTPException(401, "Invalid Biteship webhook token")
 
@@ -66,7 +69,7 @@ async def tracking_callback(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Receive Biteship shipment status updates."""
-    _verify(authorization)
+    _verify(authorization, request.query_params.get("token"))
     body = await request.json()
 
     # Biteship payload shape varies slightly between v1/v2; tolerate both.
