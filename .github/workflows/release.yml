@@ -37,6 +37,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # Don't try to publish on the bootstrap commit. Once any package
+        # has a real version (≥0.1.0) + an actual changeset, this guard
+        # can be removed.
+        if: hashFiles('.changeset/*.md') != ''
 
       # PyPI publishing for Python packages happens via Trusted Publisher
       # (OIDC) — configured per-package once the first version ships.
