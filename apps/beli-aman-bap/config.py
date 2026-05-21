@@ -102,5 +102,26 @@ class Settings(BaseSettings):
     # --- Environment flag (controls test-only fallbacks like shipping mock) ---
     environment: str = "development"  # production | staging | development | test
 
+    # --- Passwordless OTP login (WA + email) ---
+    # whatsmeow sidecar HTTP base URL (jd-wa-whatsmeow). Empty in dev → OTPs
+    # are logged to stdout instead of sent. Production: http://127.0.0.1:7820.
+    wa_sidecar_url: str = ""
+    # Bearer secret that gates the sidecar's HTTP API. Must match the sidecar's
+    # ``WA_SIDECAR_SHARED_SECRET`` env var.
+    wa_sidecar_shared_secret: str = ""
+    # Inbox id used to send system OTPs through the multi-tenant sidecar.
+    # Pair this inbox to a dedicated WA number once (QR scan), then forget.
+    wa_sidecar_otp_inbox_id: str = "system-otp"
+
+    # SMTP for email OTP. When ``smtp_host`` is empty, the email_sender logs
+    # the OTP to stdout (dev mode). Karya1's defaults are:
+    #   SMTP_HOST=smtp.gmail.com  SMTP_PORT=587  SMTP_SECURE=false (STARTTLS)
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_secure: bool = False  # True → implicit TLS (port 465); False → STARTTLS on 587
+    smtp_user: str = ""
+    smtp_pass: str = ""
+    smtp_from: str = "Beli Aman <noreply@beliaman.com>"
+
 
 settings = Settings()

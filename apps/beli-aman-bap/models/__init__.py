@@ -2,6 +2,7 @@
 
 from .base import Base
 from .profile import BeliAmanProfile
+from .otp_code import OtpCode
 from .address import Address
 from .payment_method import PaymentMethod
 from .brand import Brand
@@ -31,6 +32,7 @@ from .bot_rest import (
 __all__ = [
     "Base",
     "BeliAmanProfile",
+    "OtpCode",
     "Address",
     "PaymentMethod",
     "Brand",

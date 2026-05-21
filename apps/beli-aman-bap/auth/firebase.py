@@ -60,3 +60,18 @@ def verify_id_token(id_token: str) -> dict[str, Any]:
     except Exception as e:
         logger.warning("Firebase ID token verification failed: %s", e)
         raise ValueError(f"Invalid Firebase ID token: {e}") from e
+
+
+def mint_custom_token(uid: str, claims: dict[str, Any] | None = None) -> str:
+    """Mint a Firebase custom token for ``uid``.
+
+    The SDK calls ``signInWithCustomToken(token)`` with the returned value;
+    Firebase then issues a regular ID token that flows through the existing
+    ``get_current_profile`` dependency unchanged. ``uid`` is the
+    ``BeliAmanProfile.id`` (UUID), so every sign-in method for the same
+    profile resolves to the same Firebase uid.
+    """
+    app = get_firebase_app()
+    token_bytes = fb_auth.create_custom_token(uid, developer_claims=claims, app=app)
+    # firebase_admin returns bytes; SDK wants a str.
+    return token_bytes.decode("utf-8") if isinstance(token_bytes, (bytes, bytearray)) else str(token_bytes)
