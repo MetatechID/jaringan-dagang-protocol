@@ -12,7 +12,6 @@ requires-python = ">=3.12"
 [tool.uv.workspace]
 members = [
   "packages/beckn-protocol-py",
-  "apps/beli-aman-bap",
 ]
 
 [tool.ruff]
