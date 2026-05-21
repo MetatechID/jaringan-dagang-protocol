@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from database import get_db
-from deps import get_current_profile
+from deps import get_current_profile, require_admin_token
 from models.address import Address
 from models.brand import Brand
 from models.escrow_ledger import EscrowEntryType, EscrowLedger
@@ -20,6 +20,7 @@ from models.order import Order, OrderState
 from models.order_event import OrderEvent
 from models.profile import BeliAmanProfile
 from services import catalog as catalog_service
+from services import escrow as escrow_service
 from services import pricing
 from services.state_machine import (
     StateTransitionError,
@@ -66,8 +67,8 @@ def _serialize_order(o: Order) -> dict[str, Any]:
         "payment_method_snapshot": o.payment_method_snapshot,
         "bap_id": o.bap_id,
         "bpp_id": o.bpp_id,
-        "shipped_simulated_at": o.shipped_simulated_at.isoformat() if o.shipped_simulated_at else None,
-        "delivered_simulated_at": o.delivered_simulated_at.isoformat() if o.delivered_simulated_at else None,
+        "shipped_at": o.shipped_at.isoformat() if o.shipped_at else None,
+        "delivered_at": o.delivered_at.isoformat() if o.delivered_at else None,
         "auto_release_at": o.auto_release_at.isoformat() if o.auto_release_at else None,
         "released_at": o.released_at.isoformat() if o.released_at else None,
         "created_at": o.created_at.isoformat(),
@@ -177,6 +178,7 @@ async def get_order(
         raise HTTPException(403, "Not your order")
 
     # Lazy auto-release: if RECEIVED and auto_release_at is in the past, release now.
+    # Note: escrow_service.release() also fires the Xendit disbursement.
     if (
         order.state == OrderState.RECEIVED
         and order.auto_release_at is not None
@@ -188,12 +190,10 @@ async def get_order(
                 actor="system:auto_release",
                 payload={"reason": "D+3 elapsed (lazy release on read)"},
             )
-            db.add(EscrowLedger(
-                order_id=order.id,
-                entry_type=EscrowEntryType.RELEASE,
-                amount_idr=order.total_idr,
+            await escrow_service.release(
+                db, order_id=order.id, amount_idr=order.total_idr,
                 description="Auto-release after D+3 (lazy)",
-            ))
+            )
             order.released_at = datetime.now(timezone.utc)
         except StateTransitionError:
             pass
@@ -291,3 +291,129 @@ async def advance_to_reviewed(
     except StateTransitionError as e:
         raise HTTPException(409, str(e))
     return _serialize_order(order)
+
+
+class BookShipmentIn(BaseModel):
+    courier_code: str
+    courier_service_code: str
+
+
+@router.post("/{order_id}/ship", dependencies=[Depends(require_admin_token)])
+async def book_shipment(
+    order_id: str,
+    body: BookShipmentIn,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Book a Biteship shipment for an ESCROW_HELD order.
+
+    Admin-token-auth: the seller dashboard calls this from a Next.js API
+    route that holds the BAP admin token server-side. Transitions the
+    order to FULFILLING and persists Biteship's AWB / tracking URL.
+    """
+    from services import shipping as shipping_service
+
+    order = await lock_order_for_update(db, order_id)
+    if order is None:
+        raise HTTPException(404, "Order not found")
+    if order.state != OrderState.ESCROW_HELD:
+        raise HTTPException(
+            409, f"Cannot book shipment in state {order.state.value}"
+        )
+
+    brand_q = await db.execute(select(Brand).where(Brand.id == order.brand_id))
+    brand = brand_q.scalar_one_or_none()
+    if brand is None:
+        raise HTTPException(500, "Brand not found for order")
+    if not brand.biteship_origin_address:
+        raise HTTPException(
+            500,
+            f"Brand '{brand.slug}' has no biteship_origin_address. Set it "
+            "in vibe-admin → Payouts & Fulfillment.",
+        )
+
+    if not order.shipping_address:
+        raise HTTPException(409, "Order has no shipping_address")
+
+    # Build Biteship items shape from the order line snapshot.
+    bs_items = [
+        {
+            "name": (i.get("name") or i.get("sku") or "item")[:255],
+            "description": (i.get("name") or "")[:255],
+            "value": int(i.get("unit_price_idr") or 0),
+            "weight": int(i.get("weight_grams") or 500),
+            "quantity": int(i.get("qty") or 1),
+        }
+        for i in (order.items or [])
+    ]
+
+    try:
+        response = await shipping_service.create_shipment(
+            origin=brand.biteship_origin_address,
+            destination=order.shipping_address,
+            items=bs_items,
+            courier_code=body.courier_code,
+            courier_service_code=body.courier_service_code,
+            reference_id=order.id,
+        )
+    except shipping_service.ShippingError as e:
+        raise HTTPException(502, f"Biteship booking failed: {e}")
+
+    order.biteship_order_id = response.get("id")
+    courier = (response.get("courier") or {})
+    order.fulfillment_awb = courier.get("waybill_id")
+    order.fulfillment_tracking_url = courier.get("tracking_url")
+    order.shipped_at = datetime.now(timezone.utc)
+
+    try:
+        await transition(
+            db, order, OrderState.FULFILLING,
+            actor="seller",
+            payload={
+                "courier_code": body.courier_code,
+                "courier_service_code": body.courier_service_code,
+                "biteship_order_id": response.get("id"),
+            },
+        )
+    except StateTransitionError as e:
+        raise HTTPException(409, str(e))
+
+    return _serialize_order(order)
+
+
+@router.post("/{order_id}/invoice")
+async def create_invoice(
+    order_id: str,
+    profile: BeliAmanProfile = Depends(get_current_profile),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Create (or return existing) Xendit hosted invoice for the order.
+
+    Replaces the legacy ``/confirm-payment`` mock. The SDK polls
+    ``GET /orders/{id}`` after this and waits for the webhook to flip
+    state to ESCROW_HELD.
+    """
+    from services import xendit_invoices
+
+    order = await lock_order_for_update(db, order_id)
+    if not order or order.profile_id != profile.id:
+        raise HTTPException(404, "Order not found")
+    if order.state != OrderState.CART_REVIEWED:
+        # Idempotent return if invoice already minted for this order
+        snap = order.payment_method_snapshot or {}
+        if snap.get("xendit_invoice_url"):
+            return {
+                "order_id": order.id,
+                "state": order.state.value,
+                "invoice_id": snap.get("xendit_invoice_id"),
+                "invoice_url": snap.get("xendit_invoice_url"),
+            }
+        raise HTTPException(409, f"Cannot create invoice in state {order.state.value}")
+
+    response = await xendit_invoices.create_invoice_for_order(db, order)
+    return {
+        "order_id": order.id,
+        "state": order.state.value,
+        "invoice_id": response.get("id"),
+        "invoice_url": response.get("invoice_url"),
+        "expires_at": response.get("expiry_date"),
+    }

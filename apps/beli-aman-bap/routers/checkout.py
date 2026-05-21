@@ -28,6 +28,7 @@ from config import settings
 from database import get_db
 from models.bot_rest import Cart, CartStatus
 from services import order_flow
+from services import xendit_invoices
 
 logger = logging.getLogger(__name__)
 
@@ -131,50 +132,19 @@ async def confirm_cart(
     cart.order_id = pseudo_order_id
     cart.payment_state = "pending"
 
-    # Mock-mode default: BAP-hosted mock-pay page keyed on the BAP
-    # cart_id. Independent of seller state — guarantees the bot has
-    # a working payment link to surface even when the Beckn /confirm
-    # round-trip drops items or assigns a different beckn_order_id.
-    # The backchannel poll below tries to override with the real
-    # seller-issued URL when it lands; until then, /api/v1/mock-pay
-    # below serves a "Mark paid (sandbox)" button.
-    cart.qr_image_url = (
-        f"https://api.beli-aman.metatech.id"
-        f"/api/v1/mock-pay/{cart.id}"
-    )
-
-    # Backchannel poll: the seller's /on_confirm callback to our
-    # /api/v1/beckn/on_confirm endpoint isn't reliably delivering on
-    # Vercel (cold-start drops the BackgroundTask before it fires,
-    # likely). Until that's fixed, query the seller's bot-auth'd
-    # payment-lookup endpoint right here so the bot has the
-    # Xendit / mock-checkout URL ready by the time it polls
-    # /checkout/{cart_id}/status. Short timeout, best-effort.
+    # Mint a real Xendit hosted invoice routed to the brand's XenPlatform
+    # sub-account (via the ``for-user-id`` header). The invoice URL is the
+    # canonical payment surface — works as both a QR-bearing checkout page
+    # and a direct-pay link. Funds land in the brand's Xendit balance, not
+    # ours. The matching ``invoice.paid`` webhook flips the cart and order
+    # to paid/ESCROW_HELD.
     try:
-        import httpx, os
-        seller_base = os.environ.get(
-            "DEFAULT_BPP_URL", "https://jaringan-dagang-seller-api.metatech.id/beckn"
-        ).rstrip("/")
-        # bpp_uri usually points at /beckn; strip that suffix to get the API root.
-        api_root = seller_base.removesuffix("/beckn")
-        bot_token = os.environ.get("BOT_API_TOKEN")
-        if bot_token:
-            async with httpx.AsyncClient(timeout=8.0) as client:
-                r = await client.get(
-                    f"{api_root}/api/orders/by-beckn-id/{pseudo_order_id}/payment",
-                    headers={"authorization": f"Bearer {bot_token}"},
-                )
-                if r.status_code == 200:
-                    data = r.json() or {}
-                    url = data.get("invoice_url") or data.get("xendit_invoice_url")
-                    if url:
-                        cart.qr_image_url = url
-                        logger.info(
-                            "Backchannel payment URL captured for cart %s: %s",
-                            cart.id, url,
-                        )
+        await xendit_invoices.create_invoice_for_cart(db, cart)
+    except HTTPException:
+        raise
     except Exception:
-        logger.exception("Backchannel payment-URL poll failed for cart %s", cart.id)
+        logger.exception("xendit invoice creation failed for cart %s", cart.id)
+        raise HTTPException(502, "Could not create Xendit invoice — see logs")
 
     return ConfirmOut(
         cart_id=cart.id,
@@ -215,54 +185,10 @@ async def checkout_status(
         if cart.payment_state == "pending":
             cart.payment_state = "expired"
 
-    # Lazy backfill from the seller's bot-facing payment endpoint. Two
-    # things can drift between BPP and BAP:
-    #   1. qr_image_url — if /confirm's backchannel poll missed it (cold
-    #      start, deploy lag), the cart has no payment link to show.
-    #   2. payment_state — the BPP learns of actual payment via Xendit
-    #      webhook; the BAP has no equivalent signal (handle_on_confirm
-    #      only fires on the Beckn confirm ACK, not on payment receipt),
-    #      so payment_state stays "pending" forever even after the buyer
-    #      pays. We poll the seller's /by-beckn-id/{id}/payment endpoint
-    #      (which returns the BPP's authoritative payment_status) and
-    #      propagate "paid" across. Best-effort; silent on failure.
-    needs_url = not cart.qr_image_url
-    needs_paid = cart.payment_state == "pending"
-    if cart.order_id and cart.status == CartStatus.CONFIRMED and (
-        needs_url or needs_paid
-    ):
-        try:
-            import httpx, os
-            seller_base = (
-                os.environ.get("DEFAULT_BPP_URL")
-                or "https://jaringan-dagang-seller-api.metatech.id/beckn"
-            ).rstrip("/")
-            api_root = seller_base.removesuffix("/beckn")
-            async with httpx.AsyncClient(timeout=6.0) as client:
-                r = await client.get(
-                    f"{api_root}/api/orders/by-beckn-id/{cart.order_id}/payment",
-                )
-                if r.status_code == 200:
-                    data = r.json() or {}
-                    url = data.get("invoice_url") or data.get("xendit_invoice_url")
-                    if url and not cart.qr_image_url:
-                        cart.qr_image_url = url
-                        logger.info(
-                            "lazy-backfilled payment URL for cart %s", cart.id
-                        )
-                    seller_pay = (data.get("payment_status") or "").lower()
-                    # Never overwrite a terminal state (cancelled/expired).
-                    if (
-                        seller_pay == "paid"
-                        and cart.payment_state not in ("cancelled", "expired", "paid")
-                    ):
-                        cart.payment_state = "paid"
-                        logger.info(
-                            "lazy-promoted payment_state=paid for cart %s "
-                            "(seller reported paid)", cart.id
-                        )
-        except Exception:
-            logger.exception("Lazy payment backfill failed for cart %s", cart.id)
+    # Xendit's ``invoice.paid`` webhook (routers/webhooks_xendit.py) is the
+    # authoritative signal that flips cart.payment_state to "paid". No
+    # lazy-backfill here — if the webhook hasn't fired yet the bot just
+    # sees payment_state="pending" and polls again.
 
     return StatusOut(
         cart_id=cart.id,

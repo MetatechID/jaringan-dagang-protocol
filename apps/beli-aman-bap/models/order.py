@@ -65,11 +65,16 @@ class Order(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     bpp_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     seller_order_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    # Mock fulfillment timeline (driven by /internal-mock/* admin endpoints)
-    shipped_simulated_at: Mapped[Optional[datetime]] = mapped_column(
+    # Fulfillment timeline. ``shipped_at`` is set when the seller books a
+    # Biteship shipment via POST /orders/{id}/ship; ``delivered_at`` is set
+    # by the Biteship tracking webhook on a "delivered" event.
+    # ``auto_release_at`` is computed from ``delivered_at +
+    # settings.auto_release_days`` (Jakarta-tz end-of-day) by
+    # services/release_clock.py.
+    shipped_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    delivered_simulated_at: Mapped[Optional[datetime]] = mapped_column(
+    delivered_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     auto_release_at: Mapped[Optional[datetime]] = mapped_column(
@@ -77,6 +82,13 @@ class Order(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     released_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+
+    # Biteship's internal shipment order id (returned by POST /v1/orders).
+    # We hit GET /v1/orders/{id} with this and Biteship webhooks deliver
+    # this in the ``order.id`` payload field.
+    biteship_order_id: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, index=True
     )
 
     # Fulfillment state synced from seller's BPP via Beckn /on_status

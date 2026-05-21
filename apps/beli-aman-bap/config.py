@@ -78,5 +78,29 @@ class Settings(BaseSettings):
     # --- Auto-release window for escrow (days after delivered) ---
     auto_release_days: int = 3
 
+    # --- Xendit (XenPlatform sub-account routing) ---
+    # Platform secret key. Used as Basic auth username. Per-invoice / per-
+    # disbursement routing is via the ``for-user-id`` header set from the
+    # brand's ``xendit_sub_account_id`` — funds custody stays with Xendit.
+    xendit_secret_key: str = ""
+    # Token Xendit signs callbacks with (set in Xendit dashboard → Settings →
+    # Callbacks). Verified against header ``x-callback-token``.
+    xendit_webhook_token: str = ""
+    # Public BAP base URL Xendit posts callbacks to. Used to construct
+    # invoice success/failure redirect URLs.
+    xendit_callback_base_url: str = "https://api.beli-aman.metatech.id"
+    # How long a Xendit Invoice stays valid before EXPIRED webhook fires.
+    xendit_invoice_duration_seconds: int = 86400  # 24h
+
+    # --- Biteship (live courier API) ---
+    biteship_api_base: str = "https://api.biteship.com"
+    biteship_api_key: str = ""
+    # Static token Biteship posts in the ``Authorization`` header on tracking
+    # webhooks (set in Biteship dashboard → Integrations → Webhooks).
+    biteship_webhook_token: str = ""
+
+    # --- Environment flag (controls test-only fallbacks like shipping mock) ---
+    environment: str = "development"  # production | staging | development | test
+
 
 settings = Settings()

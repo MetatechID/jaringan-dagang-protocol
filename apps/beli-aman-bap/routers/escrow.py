@@ -68,7 +68,7 @@ async def buyer_confirm_receipt(
             await transition(db, order, OrderState.RECEIVED,
                              actor=f"buyer:{profile.id}",
                              payload={"reason": "buyer marked received before carrier event"})
-            order.delivered_simulated_at = datetime.now(timezone.utc)
+            order.delivered_at = datetime.now(timezone.utc)
         except StateTransitionError as e:
             raise HTTPException(409, str(e))
 

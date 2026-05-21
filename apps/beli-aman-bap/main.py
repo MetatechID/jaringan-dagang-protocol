@@ -166,6 +166,8 @@ from routers.internal_mock import router as internal_mock_router  # noqa: E402
 from routers.shipping import router as shipping_router  # noqa: E402
 from routers.analytics import router as analytics_router  # noqa: E402
 from routers.storefront_integrations import router as storefront_integrations_router  # noqa: E402
+from routers.webhooks_xendit import router as webhooks_xendit_router  # noqa: E402
+from routers.webhooks_biteship import router as webhooks_biteship_router  # noqa: E402
 
 # Identity + Beckn routers import third-party deps. Import each defensively so
 # a missing/broken OPTIONAL THIRD-PARTY dep in either can NEVER crash the
@@ -243,6 +245,8 @@ app.include_router(internal_mock_router)
 app.include_router(shipping_router)
 app.include_router(analytics_router)
 app.include_router(storefront_integrations_router)
+app.include_router(webhooks_xendit_router)
+app.include_router(webhooks_biteship_router)
 if _IDENTITY_ROUTER_AVAILABLE and identity_router is not None:
     app.include_router(identity_router)
 if _BECKN_ROUTER_AVAILABLE and beckn_router is not None:
@@ -253,13 +257,6 @@ if _BOT_CART_ROUTER_AVAILABLE and bot_cart_router is not None:
     app.include_router(bot_cart_router, prefix="/api/v1")
 if _BOT_CHECKOUT_ROUTER_AVAILABLE and bot_checkout_router is not None:
     app.include_router(bot_checkout_router, prefix="/api/v1")
-
-# Mock-pay sandbox page (BAP-hosted): the bot's "Bayar di sini" link
-# points here when XENDIT_SECRET_KEY isn't configured. Always-mounted;
-# the only callers are bots that have a valid BAP cart_id.
-from routers.mock_pay import router as mock_pay_router  # noqa: E402
-app.include_router(mock_pay_router)
-
 
 @app.get("/health")
 async def health() -> dict[str, str]:

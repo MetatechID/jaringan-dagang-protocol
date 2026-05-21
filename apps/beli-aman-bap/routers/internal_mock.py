@@ -34,7 +34,7 @@ async def list_all_orders(db: AsyncSession = Depends(get_db)) -> list[dict]:
             "brand_id": o.brand_id,
             "total_idr": o.total_idr,
             "items": o.items,
-            "delivered_simulated_at": o.delivered_simulated_at.isoformat() if o.delivered_simulated_at else None,
+            "delivered_at": o.delivered_at.isoformat() if o.delivered_at else None,
             "auto_release_at": o.auto_release_at.isoformat() if o.auto_release_at else None,
             "released_at": o.released_at.isoformat() if o.released_at else None,
             "created_at": o.created_at.isoformat(),
@@ -52,7 +52,7 @@ async def mock_seller_shipped(order_id: str, db: AsyncSession = Depends(get_db))
         await transition(db, order, OrderState.FULFILLING, actor="admin:mock", payload={"event": "seller_shipped"})
     except StateTransitionError as e:
         raise HTTPException(409, str(e))
-    order.shipped_simulated_at = datetime.now(timezone.utc)
+    order.shipped_at = datetime.now(timezone.utc)
     return {"id": order.id, "state": order.state.value}
 
 
@@ -66,7 +66,7 @@ async def mock_delivered(order_id: str, db: AsyncSession = Depends(get_db)) -> d
     except StateTransitionError as e:
         raise HTTPException(409, str(e))
     now = datetime.now(timezone.utc)
-    order.delivered_simulated_at = now
+    order.delivered_at = now
     # Pin to Asia/Jakarta calendar day (spec §11) — not UTC + 72h.
     order.auto_release_at = compute_auto_release_at(now, settings.auto_release_days)
     return {

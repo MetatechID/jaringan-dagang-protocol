@@ -7,7 +7,7 @@ from .payment_method import PaymentMethod
 from .brand import Brand
 from .order import Order, OrderState
 from .order_event import OrderEvent
-from .escrow_ledger import EscrowLedger, EscrowEntryType
+from .escrow_ledger import EscrowLedger, EscrowEntryType, EscrowEntryStatus
 from .dispute import Dispute, DisputeStatus, DisputeReason
 from .order_rating import OrderRating
 from .storefront_event import StorefrontEvent
@@ -39,6 +39,7 @@ __all__ = [
     "OrderEvent",
     "EscrowLedger",
     "EscrowEntryType",
+    "EscrowEntryStatus",
     "Dispute",
     "DisputeStatus",
     "DisputeReason",

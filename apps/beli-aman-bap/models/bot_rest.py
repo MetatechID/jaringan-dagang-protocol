@@ -169,9 +169,18 @@ class Cart(Base):
         index=True,
     )
     # Surfaced to the bot post-confirm — extracted from /on_confirm.
+    # In v2 this points to the Xendit hosted-invoice URL (works as both a
+    # QR-bearing checkout page and a direct-pay URL — Xendit's hosted page
+    # renders QRIS + VA + e-wallet + retail on one screen).
     qr_image_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
     payment_state: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending"
+    )
+    # Xendit invoice id (PSP-side primary key on the hosted-invoice resource).
+    # Set when the BAP creates the invoice; looked up by the
+    # ``invoice.paid`` / ``invoice.expired`` webhook to find the cart.
+    xendit_invoice_id: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, index=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
