@@ -76,8 +76,6 @@ async def create_invoice_for_cart(db: AsyncSession, cart: Cart) -> dict:
     brand = await _resolve_brand_for_cart(db, cart)
 
     amount_idr = _cart_amount_idr(cart)
-    if amount_idr <= 0:
-        raise HTTPException(409, "Cart total is 0 — cannot create invoice")
 
     # Mock fallback: real Xendit needs (a) a brand row matched on bpp_id,
     # (b) brand.xendit_sub_account_id, (c) XENDIT_SECRET_KEY in env. While
@@ -85,11 +83,16 @@ async def create_invoice_for_cart(db: AsyncSession, cart: Cart) -> dict:
     # seller's /api/mock-checkout/{id} page so the bot still surfaces a
     # clickable checkout URL and the demo flow works end-to-end. Drop this
     # branch once Xendit verifies and XENDIT_SECRET_KEY is populated.
-    if (
+    mock_mode = (
         brand is None
         or not brand.xendit_sub_account_id
         or not getattr(settings, "xendit_secret_key", "")
-    ):
+    )
+
+    if not mock_mode and amount_idr <= 0:
+        raise HTTPException(409, "Cart total is 0 — cannot create invoice")
+
+    if mock_mode:
         mock_base = (
             getattr(settings, "mock_checkout_public_base", None)
             or "https://jaringan-dagang-seller-api.metatech.id"
