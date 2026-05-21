@@ -26,22 +26,12 @@ from services import xendit_client
 _LOG = logging.getLogger("beli_aman_bap.xendit_invoices")
 
 
-async def _resolve_brand_for_cart(db: AsyncSession, cart: Cart) -> Brand:
-    """Look up the cart's brand via its ``bpp_id``."""
+async def _resolve_brand_for_cart(db: AsyncSession, cart: Cart) -> Brand | None:
+    """Look up the cart's brand via its ``bpp_id``. Returns None if absent — caller
+    handles the mock-checkout fallback so we can demo end-to-end while Xendit
+    onboarding is pending."""
     result = await db.execute(select(Brand).where(Brand.bpp_id == cart.bpp_id))
-    brand = result.scalars().first()
-    if brand is None:
-        raise HTTPException(
-            500,
-            f"Cannot create invoice — no Brand matches bpp_id={cart.bpp_id!r}",
-        )
-    if not brand.xendit_sub_account_id:
-        raise HTTPException(
-            500,
-            f"Brand '{brand.slug}' has no xendit_sub_account_id configured. "
-            "Onboard the brand as a Xendit sub-account and set this in vibe-admin.",
-        )
-    return brand
+    return result.scalars().first()
 
 
 def _cart_amount_idr(cart: Cart) -> int:
@@ -88,6 +78,34 @@ async def create_invoice_for_cart(db: AsyncSession, cart: Cart) -> dict:
     amount_idr = _cart_amount_idr(cart)
     if amount_idr <= 0:
         raise HTTPException(409, "Cart total is 0 — cannot create invoice")
+
+    # Mock fallback: real Xendit needs (a) a brand row matched on bpp_id,
+    # (b) brand.xendit_sub_account_id, (c) XENDIT_SECRET_KEY in env. While
+    # the Xendit account is pending business verification, fall back to the
+    # seller's /api/mock-checkout/{id} page so the bot still surfaces a
+    # clickable checkout URL and the demo flow works end-to-end. Drop this
+    # branch once Xendit verifies and XENDIT_SECRET_KEY is populated.
+    if (
+        brand is None
+        or not brand.xendit_sub_account_id
+        or not getattr(settings, "xendit_secret_key", "")
+    ):
+        mock_base = (
+            getattr(settings, "mock_checkout_public_base", None)
+            or "https://jaringan-dagang-seller-api.metatech.id"
+        ).rstrip("/")
+        mock_invoice_id = f"dev-{cart.order_id or cart.id}"
+        cart.xendit_invoice_id = mock_invoice_id
+        cart.qr_image_url = f"{mock_base}/api/mock-checkout/{mock_invoice_id}"
+        _LOG.warning(
+            "create_invoice_for_cart: mock fallback for cart=%s bpp_id=%s "
+            "(brand=%s sub_account=%s xendit_key=%s)",
+            cart.id, cart.bpp_id,
+            getattr(brand, "slug", None),
+            getattr(brand, "xendit_sub_account_id", None),
+            bool(getattr(settings, "xendit_secret_key", "")),
+        )
+        return {"id": mock_invoice_id, "invoice_url": cart.qr_image_url, "mock": True}
 
     email, name = _customer_fields(cart)
     items = _items_for_xendit(cart)
