@@ -28,12 +28,9 @@ from database import get_db
 from models.profile import BeliAmanProfile
 from models.store_membership import StoreMembership
 
-# Network-wide super admins. These emails bypass every StoreMembership check
-# and see every store on both the seller dashboard and buyer Vibe admin.
-SUPER_ADMIN_EMAILS = {
-    "hallucinogenplus@gmail.com",
-    "lwastuargo@gmail.com",
-}
+# Network-wide super-admin status lives on ``profiles.is_super_admin`` and is
+# managed via ``scripts/seed_rbac.py`` (reads SUPER_ADMIN_BOOTSTRAP_EMAILS) +
+# the admin API. Sign-in here only reads the flag — it never grants it.
 
 
 async def _claim_pending_invites(db: AsyncSession, profile: BeliAmanProfile) -> None:
@@ -63,7 +60,6 @@ async def _get_or_create_profile(
 ) -> BeliAmanProfile:
     """Google-SSO path. Look up by google_sub → email → create."""
     email_lc = (email or "").lower()
-    is_super = email_lc in SUPER_ADMIN_EMAILS
 
     # 1) Match on google_sub (most specific).
     profile = (
@@ -89,7 +85,7 @@ async def _get_or_create_profile(
             display_name=display_name,
             photo_url=photo_url,
             last_seen_at=datetime.now(timezone.utc),
-            is_super_admin=is_super,
+            is_super_admin=False,
         )
         db.add(profile)
         await db.flush()
@@ -101,8 +97,6 @@ async def _get_or_create_profile(
             profile.display_name = display_name
         if photo_url and profile.photo_url != photo_url:
             profile.photo_url = photo_url
-        if is_super and not profile.is_super_admin:
-            profile.is_super_admin = True
 
     await _claim_pending_invites(db, profile)
     return profile
@@ -137,24 +131,18 @@ async def _get_or_create_profile_by_contact(
     else:
         raise ValueError(f"unsupported channel: {channel!r}")
 
-    is_super = (
-        channel == "email" and contact_lc in SUPER_ADMIN_EMAILS
-    )
-
     if existing is None:
         profile = BeliAmanProfile(
             email=contact_lc if channel == "email" else None,
             phone_e164=contact_lc if channel == "wa" else None,
             last_seen_at=datetime.now(timezone.utc),
-            is_super_admin=is_super,
+            is_super_admin=False,
         )
         db.add(profile)
         await db.flush()
     else:
         profile = existing
         profile.last_seen_at = datetime.now(timezone.utc)
-        if is_super and not profile.is_super_admin:
-            profile.is_super_admin = True
 
     await _claim_pending_invites(db, profile)
     return profile

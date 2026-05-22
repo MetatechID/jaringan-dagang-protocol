@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from database import get_db
-from deps import SUPER_ADMIN_EMAILS, get_current_profile, require_admin_token
+from deps import get_current_profile, require_admin_token
 from models.profile import BeliAmanProfile
 from models.store_membership import StoreMembership, StoreRole
 

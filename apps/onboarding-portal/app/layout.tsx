@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Navigation } from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
+import { AuthProvider } from "@/lib/auth-context";
+import SignInGate from "@/components/SignInGate";
 
 export const metadata: Metadata = {
   title: "Jaringan Dagang Network Dashboard",
@@ -17,9 +19,13 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className="min-h-screen bg-surface-900 text-slate-200 antialiased">
-        <Navigation />
-        <main className="min-h-[calc(100vh-64px-48px)]">{children}</main>
-        <Footer />
+        <AuthProvider>
+          <SignInGate>
+            <Navigation />
+            <main className="min-h-[calc(100vh-64px-48px)]">{children}</main>
+            <Footer />
+          </SignInGate>
+        </AuthProvider>
       </body>
     </html>
   );
