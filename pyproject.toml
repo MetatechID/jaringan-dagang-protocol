@@ -24,3 +24,9 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "packages/*/tests", "apps/*/tests"]
+markers = [
+  "browser: long-running browser/Playwright tests (real Chrome/Chromium). Run with `pytest -m browser`.",
+  "llm: tests that require a live LLM provider. Run with `pytest -m llm`.",
+]
+# Default: run only the unit tier. Override with `-m browser` or `-m llm` (the last `-m` wins).
+addopts = "-m 'not browser and not llm'"
