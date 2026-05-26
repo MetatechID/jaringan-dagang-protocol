@@ -22,3 +22,10 @@ class StorefrontIntegration(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     ga_measurement_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     fb_pixel_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # Server-only secrets — NEVER returned by the public GET endpoint that
+    # the storefront layout uses to fetch fb_pixel_id. Read directly from
+    # the DB by services/fb_capi.py to send server-side Purchase events to
+    # Meta's Conversions API on ESCROW_HELD.
+    fb_capi_access_token: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    fb_capi_test_event_code: Mapped[str | None] = mapped_column(String(64), nullable=True)

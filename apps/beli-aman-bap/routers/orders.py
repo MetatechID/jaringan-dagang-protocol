@@ -417,3 +417,75 @@ async def create_invoice(
         "invoice_url": response.get("invoice_url"),
         "expires_at": response.get("expiry_date"),
     }
+
+
+# ---------- Ad-attribution capture ----------
+
+
+# Whitelist of attribution fields we accept from the storefront. Anything
+# else in the body is dropped — defence against a buyer crafting arbitrary
+# JSON to bloat the column or leak through to Meta unfiltered.
+_ATTRIBUTION_ALLOWED_KEYS = {
+    "fbc",
+    "fbp",
+    "fbclid",
+    "user_agent",
+    "ip",
+    "landing_url",
+    "ctwa_clid",
+}
+
+
+class AttributionIn(BaseModel):
+    fbc: str | None = None
+    fbp: str | None = None
+    fbclid: str | None = None
+    user_agent: str | None = None
+    landing_url: str | None = None
+    ctwa_clid: str | None = None
+
+
+@router.post("/{order_id}/attribution")
+async def post_order_attribution(
+    order_id: str,
+    body: AttributionIn,
+    profile: BeliAmanProfile = Depends(get_current_profile),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Attach ad-attribution snapshot to an order.
+
+    Called by the storefront right after order creation (and again on the
+    /orders/{id} page as a backstop). The CAPI Purchase event fired from
+    mark_order_paid reads from this column to give Meta enough matching
+    data to credit the order back to the originating ad.
+
+    Idempotent: re-posting merges new non-null fields over existing ones.
+    Owner-authed: only the buyer who owns the order can set their own
+    attribution.
+    """
+    order = await lock_order_for_update(db, order_id)
+    if not order:
+        raise HTTPException(404, "Order not found")
+    if order.profile_id != profile.id:
+        raise HTTPException(403, "Not your order")
+
+    # IP is captured server-side (X-Forwarded-For honoured by upstream
+    # Caddy). The browser shouldn't pick its own IP.
+    # NB: we read the request via Starlette's contextvar machinery — but
+    # to keep this simple and not add a Request param to the signature
+    # mid-router, we skip IP capture for now. Meta CAPI matching is fine
+    # with fbc + UA + fbclid as the primary signals.
+
+    existing: dict = dict(order.attribution or {})
+    incoming = body.model_dump(exclude_none=True)
+    # Drop empty strings — caller meant "not set"
+    incoming = {k: v for k, v in incoming.items() if isinstance(v, str) and v.strip()}
+    # Defense-in-depth: only keep whitelisted keys
+    incoming = {k: v for k, v in incoming.items() if k in _ATTRIBUTION_ALLOWED_KEYS}
+    # Length caps so a malicious client can't blow up the column
+    incoming = {k: v[:1024] for k, v in incoming.items()}
+
+    existing.update(incoming)
+    order.attribution = existing
+    await db.flush()
+    return {"order_id": order.id, "attribution": order.attribution}

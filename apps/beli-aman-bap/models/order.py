@@ -122,3 +122,22 @@ class Order(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     settlement_reference: Mapped[Optional[str]] = mapped_column(
         String(255), nullable=True, index=True
     )
+
+    # Snapshot of ad-attribution data captured by the storefront when the
+    # order was created (or backfilled via POST /orders/{id}/attribution).
+    # Read by services/fb_capi.py to send a server-side Purchase event to
+    # Meta's Conversions API on ESCROW_HELD, which gives FB enough data to
+    # credit the order back to the originating ad — even when the browser
+    # Pixel event is lost to ad blockers / iOS ITP.
+    #
+    # Shape (all fields optional):
+    #   {
+    #     "fbc": "fb.1.<ts>.<fbclid>",
+    #     "fbp": "fb.1.<ts>.<random>",
+    #     "fbclid": "<id>",
+    #     "user_agent": "<UA>",
+    #     "ip": "<v4 or v6>",
+    #     "landing_url": "https://safiya.beliaman.com/?fbclid=...",
+    #     "ctwa_clid": "<click-to-WhatsApp id, if WA-originated>"
+    #   }
+    attribution: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
