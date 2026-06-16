@@ -220,6 +220,7 @@ def test_auto_merge_google_then_otp_email_match(db_factory):
                 db,
                 google_sub="g-sub-1",
                 email="alice@example.com",
+                email_verified=True,
                 display_name="Alice",
                 photo_url=None,
             )
@@ -251,6 +252,7 @@ def test_auto_merge_otp_then_google_email_match(db_factory):
                 db,
                 google_sub="g-sub-bob",
                 email="bob@example.com",
+                email_verified=True,
                 display_name="Bob",
                 photo_url="http://x/bob.png",
             )
@@ -259,6 +261,51 @@ def test_auto_merge_otp_then_google_email_match(db_factory):
             assert g.google_sub == "g-sub-bob"
             assert g.display_name == "Bob"
             assert g.photo_url == "http://x/bob.png"
+        await engine.dispose()
+
+    _run(go())
+
+
+def test_unverified_email_does_not_merge_or_hijack(db_factory):
+    """An unverified email claim must NOT resolve to / merge into an existing
+    profile (e.g. a pre-provisioned admin). It creates a fresh, email-less
+    profile and never escalates."""
+    async def go():
+        from sqlalchemy import select
+        from deps import _get_or_create_profile
+        from models.profile import BeliAmanProfile
+
+        engine, Session = await db_factory()
+        async with Session() as db:
+            # Pre-provisioned admin, email only (no google_sub yet) — exactly
+            # how seed_rbac --create-missing mints an admin before first login.
+            admin = BeliAmanProfile(email="admin@example.com", is_super_admin=True)
+            db.add(admin)
+            await db.commit()
+            admin_id = admin.id
+
+            # Attacker signs in via a provider that yields an UNVERIFIED email
+            # matching the admin's address.
+            g = await _get_or_create_profile(
+                db,
+                google_sub="attacker-sub",
+                email="admin@example.com",
+                email_verified=False,
+                display_name="Mallory",
+                photo_url=None,
+            )
+            await db.commit()
+
+            assert g.id != admin_id            # did NOT merge into the admin row
+            assert g.google_sub == "attacker-sub"
+            assert g.email is None             # unverified email not persisted
+            assert g.is_super_admin is False   # no escalation
+
+            admin_row = (await db.execute(
+                select(BeliAmanProfile).where(BeliAmanProfile.id == admin_id)
+            )).scalar_one()
+            assert admin_row.google_sub is None   # admin row untouched
+            assert admin_row.is_super_admin is True
         await engine.dispose()
 
     _run(go())

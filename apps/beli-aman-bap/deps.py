@@ -55,11 +55,18 @@ async def _get_or_create_profile(
     *,
     google_sub: str,
     email: str,
+    email_verified: bool,
     display_name: str | None,
     photo_url: str | None,
 ) -> BeliAmanProfile:
-    """Google-SSO path. Look up by google_sub → email → create."""
-    email_lc = (email or "").lower()
+    """Google-SSO path. Look up by google_sub → verified email → create."""
+    # Only trust the email claim for lookup / merge / persistence when the IdP
+    # marked it verified. An unverified email must never resolve to — or merge
+    # into — an existing profile: otherwise a provider that issues unverified
+    # emails (e.g. Firebase email/password self-signup) could hijack a
+    # pre-provisioned admin profile just by claiming its address. Google SSO
+    # always sets email_verified=true; the OTP path never comes through here.
+    email_lc = (email or "").lower() if email_verified else ""
 
     # 1) Match on google_sub (most specific).
     profile = (
@@ -192,6 +199,7 @@ async def get_current_profile(
         db,
         google_sub=decoded["sub"],
         email=decoded.get("email", ""),
+        email_verified=bool(decoded.get("email_verified", False)),
         display_name=decoded.get("name"),
         photo_url=decoded.get("picture"),
     )
