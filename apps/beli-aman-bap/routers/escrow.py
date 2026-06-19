@@ -84,4 +84,7 @@ async def buyer_confirm_receipt(
         description="Released — buyer confirmed receipt",
     )
     order.released_at = datetime.now(timezone.utc)
+    # Loyalty: earn points now the transaction is complete (idempotent per order).
+    from models.loyalty import accrue_for_order
+    await accrue_for_order(db, profile_id=order.profile_id, order_id=order.id, total_idr=order.total_idr)
     return {"id": order.id, "state": order.state.value}

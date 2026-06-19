@@ -201,6 +201,9 @@ async def get_order(
                 description="Auto-release after D+3 (lazy)",
             )
             order.released_at = datetime.now(timezone.utc)
+            # Loyalty: earn points on auto-release too (idempotent per order).
+            from models.loyalty import accrue_for_order
+            await accrue_for_order(db, profile_id=order.profile_id, order_id=order.id, total_idr=order.total_idr)
         except StateTransitionError:
             pass
 
