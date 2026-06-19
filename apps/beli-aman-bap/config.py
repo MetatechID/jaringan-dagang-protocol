@@ -99,6 +99,19 @@ class Settings(BaseSettings):
     # webhooks (set in Biteship dashboard → Integrations → Webhooks).
     biteship_webhook_token: str = ""
 
+    # --- Jubelio Shipment (live courier API) ---
+    # Sandbox base: https://api-shipment.sandbox.jubelio.com
+    # Production:   https://api-shipment.jubelio.com
+    jubelio_api_base: str = "https://api-shipment.sandbox.jubelio.com"
+    jubelio_client_id: str = ""
+    jubelio_client_secret: str = ""
+    # Shared secret Jubelio sends in the ``x-jubelio-signature`` header on
+    # webhook calls (set in Jubelio dashboard → Setting → Developer → Webhook).
+    jubelio_webhook_token: str = ""
+    # Which carrier drives rates + booking by default. Per-brand override via
+    # ``brand.jubelio_enabled``. Values: "jubelio" | "biteship".
+    default_carrier: str = "jubelio"
+
     # --- Environment flag (controls test-only fallbacks like shipping mock) ---
     environment: str = "development"  # production | staging | development | test
 

@@ -169,6 +169,7 @@ from routers.analytics import router as analytics_router  # noqa: E402
 from routers.storefront_integrations import router as storefront_integrations_router  # noqa: E402
 from routers.webhooks_xendit import router as webhooks_xendit_router  # noqa: E402
 from routers.webhooks_biteship import router as webhooks_biteship_router  # noqa: E402
+from routers.webhooks_jubelio import router as webhooks_jubelio_router  # noqa: E402
 
 # Identity + Beckn routers import third-party deps. Import each defensively so
 # a missing/broken OPTIONAL THIRD-PARTY dep in either can NEVER crash the
@@ -248,6 +249,7 @@ app.include_router(analytics_router)
 app.include_router(storefront_integrations_router)
 app.include_router(webhooks_xendit_router)
 app.include_router(webhooks_biteship_router)
+app.include_router(webhooks_jubelio_router)
 if _IDENTITY_ROUTER_AVAILABLE and identity_router is not None:
     app.include_router(identity_router)
 if _BECKN_ROUTER_AVAILABLE and beckn_router is not None:

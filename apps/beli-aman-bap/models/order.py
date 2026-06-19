@@ -91,6 +91,17 @@ class Order(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         String(64), nullable=True, index=True
     )
 
+    # Which carrier this shipment was booked with ("biteship" | "jubelio").
+    # Null until a shipment is booked. Keeps fulfillment_* generic so either
+    # carrier's webhook can drive the same columns.
+    carrier: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    # Jubelio's internal shipment id (returned by POST /shipments/create).
+    # Jubelio webhooks deliver it as ``shipment_id``; parallel to
+    # biteship_order_id.
+    jubelio_shipment_id: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+
     # Fulfillment state synced from seller's BPP via Beckn /on_status
     fulfillment_status: Mapped[Optional[str]] = mapped_column(
         String(32), nullable=True, index=True

@@ -44,3 +44,11 @@ class Brand(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Default courier preselected on the seller dashboard book-shipment
     # picker. Free-text Biteship courier_code + service_code joined by ":".
     biteship_default_courier: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # Per-brand carrier override. When True, rates + booking go through
+    # Jubelio instead of the global settings.default_carrier.
+    jubelio_enabled: Mapped[bool] = mapped_column(default=False, nullable=False)
+    # Jubelio pickup origin used as the ``origin`` payload on /shipments/create
+    # and the origin zipcode on /rates. Shape: {name, phone, email, address,
+    # area_id, zipcode, coordinate}.
+    jubelio_origin_address: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

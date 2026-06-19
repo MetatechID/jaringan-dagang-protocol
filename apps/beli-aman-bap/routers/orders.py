@@ -72,6 +72,11 @@ def _serialize_order(o: Order) -> dict[str, Any]:
         "delivered_at": o.delivered_at.isoformat() if o.delivered_at else None,
         "auto_release_at": o.auto_release_at.isoformat() if o.auto_release_at else None,
         "released_at": o.released_at.isoformat() if o.released_at else None,
+        # Fulfillment / carrier (generic across Biteship + Jubelio)
+        "carrier": getattr(o, "carrier", None),
+        "fulfillment_status": o.fulfillment_status,
+        "fulfillment_awb": o.fulfillment_awb,
+        "fulfillment_tracking_url": o.fulfillment_tracking_url,
         "created_at": o.created_at.isoformat(),
         "updated_at": o.updated_at.isoformat(),
     }
@@ -327,13 +332,14 @@ async def book_shipment(
     body: BookShipmentIn,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Book a Biteship shipment for an ESCROW_HELD order.
+    """Book a shipment for an ESCROW_HELD order via the brand's active carrier.
 
     Admin-token-auth: the seller dashboard calls this from a Next.js API
-    route that holds the BAP admin token server-side. Transitions the
-    order to FULFILLING and persists Biteship's AWB / tracking URL.
+    route that holds the BAP admin token server-side. Dispatches to Jubelio
+    or Biteship (per ``brand.jubelio_enabled`` / ``settings.default_carrier``),
+    transitions the order to FULFILLING, and persists the AWB / tracking URL.
     """
-    from services import shipping as shipping_service
+    from services import carriers as carrier_service
 
     order = await lock_order_for_update(db, order_id)
     if order is None:
@@ -347,44 +353,27 @@ async def book_shipment(
     brand = brand_q.scalar_one_or_none()
     if brand is None:
         raise HTTPException(500, "Brand not found for order")
-    if not brand.biteship_origin_address:
-        raise HTTPException(
-            500,
-            f"Brand '{brand.slug}' has no biteship_origin_address. Set it "
-            "in vibe-admin → Payouts & Fulfillment.",
-        )
 
     if not order.shipping_address:
         raise HTTPException(409, "Order has no shipping_address")
 
-    # Build Biteship items shape from the order line snapshot.
-    bs_items = [
-        {
-            "name": (i.get("name") or i.get("sku") or "item")[:255],
-            "description": (i.get("name") or "")[:255],
-            "value": int(i.get("unit_price_idr") or 0),
-            "weight": int(i.get("weight_grams") or 500),
-            "quantity": int(i.get("qty") or 1),
-        }
-        for i in (order.items or [])
-    ]
-
     try:
-        response = await shipping_service.create_shipment(
-            origin=brand.biteship_origin_address,
-            destination=order.shipping_address,
-            items=bs_items,
+        booking = await carrier_service.book(
+            brand=brand,
+            order=order,
             courier_code=body.courier_code,
             courier_service_code=body.courier_service_code,
-            reference_id=order.id,
         )
-    except shipping_service.ShippingError as e:
-        raise HTTPException(502, f"Biteship booking failed: {e}")
+    except carrier_service.ShippingError as e:
+        raise HTTPException(502, f"Shipment booking failed: {e}")
 
-    order.biteship_order_id = response.get("id")
-    courier = (response.get("courier") or {})
-    order.fulfillment_awb = courier.get("waybill_id")
-    order.fulfillment_tracking_url = courier.get("tracking_url")
+    order.carrier = booking.get("carrier")
+    if booking.get("carrier") == carrier_service.JUBELIO:
+        order.jubelio_shipment_id = booking.get("external_id")
+    else:
+        order.biteship_order_id = booking.get("external_id")
+    order.fulfillment_awb = booking.get("awb")
+    order.fulfillment_tracking_url = booking.get("tracking_url")
     order.shipped_at = datetime.now(timezone.utc)
 
     try:
@@ -392,9 +381,10 @@ async def book_shipment(
             db, order, OrderState.FULFILLING,
             actor="seller",
             payload={
+                "carrier": booking.get("carrier"),
                 "courier_code": body.courier_code,
                 "courier_service_code": body.courier_service_code,
-                "biteship_order_id": response.get("id"),
+                "external_id": booking.get("external_id"),
             },
         )
     except StateTransitionError as e:

@@ -8,11 +8,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from database import get_db
+from models.brand import Brand
+from services import carriers as carrier_service
 from services import catalog as catalog_service
-from services import shipping as shipping_service
 
 router = APIRouter(prefix="/api/v1/shipping", tags=["shipping"])
 
@@ -29,13 +33,20 @@ class RateRequest(BaseModel):
 
 
 @router.post("/rates")
-async def list_rates(body: RateRequest) -> dict[str, Any]:
+async def list_rates(
+    body: RateRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
     """Return courier options for the given destination + cart.
 
     Server-resolves each SKU against the brand catalog (including variants) so
-    weight & value are trusted, not client-supplied.
+    weight & value are trusted, not client-supplied. Dispatches to the brand's
+    active carrier (Jubelio or Biteship).
     """
     products = await catalog_service.list_products(body.brand_slug)
+    brand = (
+        await db.execute(select(Brand).where(Brand.slug == body.brand_slug))
+    ).scalar_one_or_none()
 
     # Build a SKU → (name, weight_grams, price_idr) index that covers parent
     # SKUs and variant SKUs.
@@ -53,20 +64,24 @@ async def list_rates(body: RateRequest) -> dict[str, Any]:
                 "value": int(v.get("price_idr") or p.get("price_idr") or 0),
             }
 
-    bs_items: list[shipping_service.ShippingItem] = []
+    line_items: list[dict[str, Any]] = []
+    total_value = 0
     for item in body.items:
         info = sku_index.get(item.sku)
         if not info:
             raise HTTPException(400, f"Unknown SKU '{item.sku}' for brand {body.brand_slug}")
-        bs_items.append(shipping_service.ShippingItem({
+        line_items.append({
             "name": info["name"],
             "value": info["value"],
             "weight": info["weight"],
             "quantity": item.qty,
-        }))
+        })
+        total_value += int(info["value"]) * int(item.qty)
 
-    rates = await shipping_service.get_rates(
+    rates = await carrier_service.get_rates(
+        brand=brand,
         destination_postal_code=body.destination_postal_code,
-        items=bs_items,
+        items=line_items,
+        total_value=total_value,
     )
     return {"data": rates}
