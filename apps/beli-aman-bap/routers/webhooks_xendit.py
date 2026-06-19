@@ -183,3 +183,56 @@ async def disbursement_callback(
         entry.status = EscrowEntryStatus.FAILED
 
     return {"ok": True, "order_id": entry.order_id, "status": entry.status.value}
+
+
+@router.post("/refund")
+async def refund_callback(
+    request: Request,
+    x_callback_token: str | None = Header(default=None, alias="x-callback-token"),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Flip the REFUND ledger entry's status to COMPLETED or FAILED.
+
+    Until now there was no receiver for Xendit refund callbacks, so a REFUND
+    ledger row created by ``escrow.refund()`` stayed PENDING forever even after
+    the money landed back with the buyer. ``escrow.refund()`` stores the Xendit
+    refund id as the row's ``external_ref`` while it sits PENDING — we match on
+    that here.
+
+    Payload shape: Xendit's Refunds API posts ``refund.succeeded`` /
+    ``refund.failed`` with the refund object nested under ``data`` (newer API),
+    while older direct callbacks put the fields at the top level. We unwrap
+    both and also tolerate the verb arriving in ``event``.
+    """
+    _verify_callback_token(x_callback_token)
+    body = await request.json()
+    data = body.get("data") if isinstance(body.get("data"), dict) else body
+    refund_id = data.get("id")
+    status_raw = (data.get("status") or "").upper()
+    event = (body.get("event") or "").lower()
+
+    if not refund_id:
+        raise HTTPException(400, "Missing refund id in callback")
+
+    _LOG.info(
+        "Xendit refund callback: id=%s status=%s event=%s",
+        refund_id, status_raw, event,
+    )
+
+    result = await db.execute(
+        select(EscrowLedger).where(
+            EscrowLedger.external_ref == refund_id,
+            EscrowLedger.entry_type == EscrowEntryType.REFUND,
+        )
+    )
+    entry = result.scalars().first()
+    if entry is None:
+        _LOG.error("No REFUND ledger entry for refund %s", refund_id)
+        return {"ok": True, "matched": False}
+
+    if status_raw in ("SUCCEEDED", "COMPLETED") or event == "refund.succeeded":
+        entry.status = EscrowEntryStatus.COMPLETED
+    elif status_raw in ("FAILED", "CANCELLED") or event == "refund.failed":
+        entry.status = EscrowEntryStatus.FAILED
+
+    return {"ok": True, "order_id": entry.order_id, "status": entry.status.value}

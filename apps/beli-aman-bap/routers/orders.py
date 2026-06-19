@@ -15,6 +15,7 @@ from database import get_db
 from deps import get_current_profile, require_admin_token
 from models.address import Address
 from models.brand import Brand
+from models.dispute import Dispute
 from models.escrow_ledger import EscrowEntryType, EscrowLedger
 from models.order import Order, OrderState
 from models.order_event import OrderEvent
@@ -212,8 +213,30 @@ async def get_order(
         for e in ledger_result.scalars().all()
     ]
 
+    # Latest dispute (if any) so the buyer can track its status + resolution
+    # without a separate round-trip. The order page already renders the
+    # DISPUTED state; this surfaces the reason / status / resolution detail.
+    dispute_result = await db.execute(
+        select(Dispute)
+        .where(Dispute.order_id == order.id)
+        .order_by(Dispute.created_at.desc())
+    )
+    dispute = dispute_result.scalars().first()
+
     out = _serialize_order(order)
     out["escrow_ledger"] = ledger_rows
+    out["dispute"] = (
+        {
+            "id": dispute.id,
+            "reason": dispute.reason.value,
+            "status": dispute.status.value,
+            "resolution": dispute.resolution,
+            "note": dispute.note,
+            "created_at": dispute.created_at.isoformat(),
+        }
+        if dispute is not None
+        else None
+    )
     return out
 
 
