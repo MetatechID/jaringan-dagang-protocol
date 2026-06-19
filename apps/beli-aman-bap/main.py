@@ -141,8 +141,9 @@ app = FastAPI(
 
 _origins = [o.strip() for o in settings.allowed_origins.split(",") if o.strip()]
 # Plus a regex so every tenant subdomain on beliaman.com (safiya, gendes,
-# antarestar, etc.) and on metatech.id is allowed without us re-listing each.
-_origin_regex = r"https://([a-z0-9-]+\.)?(beliaman\.com|metatech\.id)"
+# antarestar, etc.), metatech.id, and the consolidated jaringandagang.com is
+# allowed without us re-listing each.
+_origin_regex = r"https://([a-z0-9-]+\.)?(beliaman\.com|metatech\.id|jaringandagang\.com)"
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins or ["*"],
