@@ -70,6 +70,15 @@ DDL_STATEMENTS: list[str] = [
     );""",
     "CREATE INDEX IF NOT EXISTS ix_buyer_coupons_profile_id ON buyer_coupons (profile_id);",
     "CREATE INDEX IF NOT EXISTS ix_buyer_coupons_coupon_id ON buyer_coupons (coupon_id);",
+    # Tables created by the postgres superuser are owned by postgres; the BAP
+    # connects as jd_app and needs explicit DML grants or every query 500s with
+    # "permission denied for table ...". (Same gotcha as the OTP/escrow tables.)
+    """DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='jd_app') THEN
+            GRANT SELECT, INSERT, UPDATE, DELETE ON
+                wishlist_items, loyalty_transactions, coupons, buyer_coupons TO jd_app;
+        END IF;
+    END $$;""",
 ]
 
 
