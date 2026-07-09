@@ -146,6 +146,50 @@ Each package versions independently via Changesets. PRs include a
 Their tags + Docker images follow the latest stable
 `@jaringan-dagang/beckn-protocol` version.
 
+## Payment gateways
+
+The BAP supports multiple payment gateway providers. Each brand configures
+its preferred provider via the `Brand.payment_provider` column (`oy` or
+`xendit`).
+
+### OY! Indonesia
+
+OY! is an Indonesian payment aggregator supporting QRIS, VA, and e-wallet
+rails. Integration points:
+
+- **Client:** `services/oy_client.py` — HTTP wrapper with `_request()` for
+  header injection, OYError mapping, and default QRIS payment method.
+- **Invoice service:** `services/oy_invoices.py` — `create_invoice_for_cart()`
+  and `create_invoice_for_order()` with mock-mode fallback when no API key
+  is configured.
+- **Webhook receiver:** `routers/webhooks_oy.py` — HMAC SHA-256 signature
+  verification, status dispatch (PAID/SUCCESS/000/COMPLETED → handle_paid,
+  EXPIRED → handle_expired, FAILED/CANCELLED/EXPIRED_30/300/DECLINED →
+  handle_failed), and brand resolution via cart or order snapshot.
+- **Configuration:** `OY_API_KEY`, `OY_DEFAULT_USERNAME`,
+  `OY_CALLBACK_BASE_URL` env vars; per-brand overrides via
+  `Brand.oy_api_key`, `Brand.oy_username`, `Brand.oy_callback_secret`.
+- **Mock mode:** When no API key is configured (env or per-brand), the BAP
+  returns `/api/mock-checkout/{invoice_id}` URLs for local development
+  without an OY sandbox account.
+- **Webhook signature:** HMAC SHA-256 of raw body keyed by
+  `Brand.oy_callback_secret`, sent via `x-oy-signature` header. The router
+  resolves the brand from the body's invoice id before verifying.
+- **Vendor-neutral columns:** `Cart.invoice_id` (renamed from
+  `xendit_invoice_id`), `Cart.invoice_provider` (`oy` or `xendit`),
+  `Cart.qr_image_url` (renamed from `xendit_invoice_url`).
+
+**Test coverage:** 72 unit tests across three files:
+- `tests/test_oy_client.py` (16 tests) — HTTP client, headers, OYError,
+  payload shape, NotImplementedError on unimplemented methods.
+- `tests/test_oy_invoices.py` (17 tests) — invoice service, mock-mode
+  dispatch, cart/order paths, response fallback chains.
+- `tests/test_webhooks_oy.py` (39 tests) — signature verification, body
+  parsing helpers, status dispatch, brand resolution, cart/order path
+  edges, error paths (400/401/403/404).
+
+See `apps/beli-aman-bap/services/oy_client.py` for the wire protocol.
+
 ## Contributing
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md). Short version: small PRs,
