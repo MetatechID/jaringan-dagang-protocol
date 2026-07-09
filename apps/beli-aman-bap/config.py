@@ -92,6 +92,22 @@ class Settings(BaseSettings):
     # How long a Xendit Invoice stays valid before EXPIRED webhook fires.
     xendit_invoice_duration_seconds: int = 86400  # 24h
 
+    # --- OY Indonesia ---
+    # Master API key (per-Brand override lives in Brand.oy_api_key). Send
+    # in the ``x-api-key`` header. See https://api-docs.oyindonesia.com/.
+    oy_api_key: str = ""
+    # Default username; per-Brand override in Brand.oy_username. Send in
+    # the ``x-oy-username`` header.
+    oy_default_username: str = ""
+    # Public BAP base URL OY posts callbacks to. Constructs invoice
+    # success/failure redirect URLs the same way xendit_callback_base_url
+    # does for Xendit.
+    oy_callback_base_url: str = "https://api.beli-aman.metatech.id"
+    # Optional override for the mock-checkout URL OY carts hit while real
+    # keys aren't configured. Defaults to settings.mock_checkout_public_base
+    # in oy_invoices.py (single mock-checkout page serves both providers).
+    oy_invoice_duration_seconds: int = 86400  # 24h
+
     # --- Biteship (live courier API) ---
     biteship_api_base: str = "https://api.biteship.com"
     biteship_api_key: str = ""

@@ -96,8 +96,9 @@ async def _handle_paid(db: AsyncSession, invoice_id: str, external_id: str) -> d
             raise HTTPException(404, f"No cart for external_id={external_id}")
         if cart.payment_state != "paid":
             cart.payment_state = "paid"
-        if cart.xendit_invoice_id is None:
-            cart.xendit_invoice_id = invoice_id
+        if cart.invoice_id is None:
+            cart.invoice_id = invoice_id
+        cart.invoice_provider = "xendit"
         if cart.status != CartStatus.CONFIRMED:
             cart.status = CartStatus.CONFIRMED
         # Bot flow's Order (if materialized) lives only on the seller's BPP;

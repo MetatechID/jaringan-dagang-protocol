@@ -105,7 +105,7 @@ async def mark_order_paid(
         await transition(
             db, order, OrderState.ESCROW_HELD,
             actor=actor,
-            payload={"xendit_invoice_id": invoice_id},
+            payload={"invoice_id": invoice_id},
         )
     except StateTransitionError as e:
         _LOG.warning("State transition failed for order %s: %s", order.id, e)

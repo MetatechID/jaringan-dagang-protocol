@@ -402,13 +402,19 @@ async def create_invoice(
     profile: BeliAmanProfile = Depends(get_current_profile),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Create (or return existing) Xendit hosted invoice for the order.
+    """Create (or return existing) hosted invoice for the order.
 
     Replaces the legacy ``/confirm-payment`` mock. The SDK polls
     ``GET /orders/{id}`` after this and waits for the webhook to flip
     state to ESCROW_HELD.
+
+    The PSP is per-Brand: ``Brand.payment_provider`` selects Xendit
+    (default) or OY Indonesia. The snapshot stores keys under
+    vendor-neutral names (``invoice_id``, ``invoice_url``,
+    ``payment_provider``).
     """
-    from services import xendit_invoices
+    from models.brand import Brand
+    from services import oy_invoices, xendit_invoices
 
     order = await lock_order_for_update(db, order_id)
     if not order or order.profile_id != profile.id:
@@ -416,21 +422,36 @@ async def create_invoice(
     if order.state != OrderState.CART_REVIEWED:
         # Idempotent return if invoice already minted for this order
         snap = order.payment_method_snapshot or {}
-        if snap.get("xendit_invoice_url"):
+        if snap.get("invoice_url"):
             return {
                 "order_id": order.id,
                 "state": order.state.value,
-                "invoice_id": snap.get("xendit_invoice_id"),
-                "invoice_url": snap.get("xendit_invoice_url"),
+                "provider": snap.get("payment_provider"),
+                "invoice_id": snap.get("invoice_id"),
+                "invoice_url": snap.get("invoice_url"),
             }
         raise HTTPException(409, f"Cannot create invoice in state {order.state.value}")
 
-    response = await xendit_invoices.create_invoice_for_order(db, order)
+    # Resolve the brand once to pick the provider — avoids a 500 inside
+    # oy_invoices/xendit_invoices when the brand row was deleted.
+    brand_q = await db.execute(select(Brand).where(Brand.id == order.brand_id))
+    brand = brand_q.scalar_one_or_none()
+    provider = (brand.payment_provider if brand is not None else "xendit") or "xendit"
+
+    if provider == "oy":
+        response = await oy_invoices.create_invoice_for_order(db, order)
+    else:
+        response = await xendit_invoices.create_invoice_for_order(db, order)
     return {
         "order_id": order.id,
         "state": order.state.value,
-        "invoice_id": response.get("id"),
-        "invoice_url": response.get("invoice_url"),
+        "provider": provider,
+        "invoice_id": response.get("id") or response.get("trx_id"),
+        "invoice_url": (
+            response.get("invoice_url")
+            or response.get("checkout_url")
+            or response.get("payment_url")
+        ),
         "expires_at": response.get("expiry_date"),
     }
 

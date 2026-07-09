@@ -172,15 +172,29 @@ class Cart(Base):
     # In v2 this points to the Xendit hosted-invoice URL (works as both a
     # QR-bearing checkout page and a direct-pay URL — Xendit's hosted page
     # renders QRIS + VA + e-wallet + retail on one screen).
+    # Surfaced to the bot post-confirm — points to the PSP-hosted payment
+    # page (Xendit's hosted invoice or OY's checkout URL, depending on
+    # ``Brand.payment_provider``). Works as both a QR-bearing checkout page
+    # and a direct-pay URL. Vendor-neutral name; the PSP that minted it is
+    # recorded separately in ``invoice_provider`` so webhook receivers can
+    # route without parsing the URL.
     qr_image_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
     payment_state: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending"
     )
-    # Xendit invoice id (PSP-side primary key on the hosted-invoice resource).
-    # Set when the BAP creates the invoice; looked up by the
-    # ``invoice.paid`` / ``invoice.expired`` webhook to find the cart.
-    xendit_invoice_id: Mapped[Optional[str]] = mapped_column(
+    # PSP-side primary key on the hosted-invoice resource. Set when the BAP
+    # creates the invoice; looked up by the ``invoice.paid`` /
+    # ``invoice.expired`` webhook to find the cart. Vendor-neutral — the
+    # rack is filled by either Xendit's invoice id or OY's transaction id.
+    invoice_id: Mapped[Optional[str]] = mapped_column(
         String(64), nullable=True, index=True
+    )
+    # Vendor tag ("xendit" | "oy") written alongside invoice_id. Lets the
+    # webhook router pick the right brand-resolver without string-sniffing
+    # external_id prefixes. Index lives on (invoice_provider, invoice_id)
+    # in the migration (composite).
+    invoice_provider: Mapped[Optional[str]] = mapped_column(
+        String(16), nullable=True, index=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

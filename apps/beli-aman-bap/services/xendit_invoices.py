@@ -69,9 +69,9 @@ def _items_for_xendit(cart: Cart) -> list[dict[str, Any]] | None:
 async def create_invoice_for_cart(db: AsyncSession, cart: Cart) -> dict:
     """Create a Xendit invoice for a cart that has reached /confirm.
 
-    Persists ``cart.xendit_invoice_id`` and ``cart.qr_image_url`` (the
-    Xendit hosted-page URL) on the passed-in Cart instance (caller commits).
-    Returns the raw Xendit response.
+    Persists ``cart.invoice_id`` (``invoice_provider="xendit"``) and
+    ``cart.qr_image_url`` (the Xendit hosted-page URL) on the passed-in
+    Cart instance (caller commits). Returns the raw Xendit response.
     """
     brand = await _resolve_brand_for_cart(db, cart)
 
@@ -98,7 +98,8 @@ async def create_invoice_for_cart(db: AsyncSession, cart: Cart) -> dict:
             or "https://jaringan-dagang-seller-api.metatech.id"
         ).rstrip("/")
         mock_invoice_id = f"dev-{cart.order_id or cart.id}"
-        cart.xendit_invoice_id = mock_invoice_id
+        cart.invoice_id = mock_invoice_id
+        cart.invoice_provider = "xendit"
         cart.qr_image_url = f"{mock_base}/api/mock-checkout/{mock_invoice_id}"
         _LOG.warning(
             "create_invoice_for_cart: mock fallback for cart=%s bpp_id=%s "
@@ -130,7 +131,8 @@ async def create_invoice_for_cart(db: AsyncSession, cart: Cart) -> dict:
         items=items,
     )
 
-    cart.xendit_invoice_id = response.get("id")
+    cart.invoice_id = response.get("id")
+    cart.invoice_provider = "xendit"
     cart.qr_image_url = response.get("invoice_url")
     return response
 
@@ -186,8 +188,9 @@ async def create_invoice_for_order(db: AsyncSession, order: Order) -> dict:
     snap = dict(order.payment_method_snapshot or {})
     snap.update({
         "type": "xendit_invoice",
-        "xendit_invoice_id": response.get("id"),
-        "xendit_invoice_url": response.get("invoice_url"),
+        "payment_provider": "xendit",
+        "invoice_id": response.get("id"),
+        "invoice_url": response.get("invoice_url"),
     })
     order.payment_method_snapshot = snap
     return response

@@ -27,6 +27,7 @@ from auth.bot_auth import require_bot
 from config import settings
 from database import get_db
 from models.bot_rest import Cart, CartStatus
+from models.brand import Brand
 from services import order_flow
 from services import xendit_invoices
 
@@ -132,19 +133,30 @@ async def confirm_cart(
     cart.order_id = pseudo_order_id
     cart.payment_state = "pending"
 
-    # Mint a real Xendit hosted invoice routed to the brand's XenPlatform
-    # sub-account (via the ``for-user-id`` header). The invoice URL is the
-    # canonical payment surface — works as both a QR-bearing checkout page
-    # and a direct-pay link. Funds land in the brand's Xendit balance, not
-    # ours. The matching ``invoice.paid`` webhook flips the cart and order
-    # to paid/ESCROW_HELD.
+    # Mint a hosted invoice routed via the brand's payment_provider
+    # (Xendit hosted page or OY Indonesia's checkout URL). The invoice URL
+    # is the canonical payment surface — works as both a QR-bearing
+    # checkout page and a direct-pay link. Funds land in the brand's PSP
+    # balance, not ours. The matching PSP webhook flips the cart and
+    # order to paid/ESCROW_HELD.
+    brand_q = await db.execute(
+        select(Brand).where(Brand.bpp_id == cart.bpp_id)
+    )
+    brand = brand_q.scalars().first()
+    provider = (brand.payment_provider if brand is not None else "xendit") or "xendit"
     try:
-        await xendit_invoices.create_invoice_for_cart(db, cart)
+        if provider == "oy":
+            from services import oy_invoices as _invoice_mod
+        else:
+            _invoice_mod = xendit_invoices
+        await _invoice_mod.create_invoice_for_cart(db, cart)
     except HTTPException:
         raise
     except Exception:
-        logger.exception("xendit invoice creation failed for cart %s", cart.id)
-        raise HTTPException(502, "Could not create Xendit invoice — see logs")
+        logger.exception("%s invoice creation failed for cart %s", provider, cart.id)
+        raise HTTPException(
+            502, f"Could not create {provider} invoice — see logs"
+        )
 
     return ConfirmOut(
         cart_id=cart.id,
