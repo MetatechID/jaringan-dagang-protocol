@@ -155,10 +155,10 @@ async def refund(
         _LOG.error("refund() called with unknown order_id=%s", order_id)
         return entry
 
-    invoice_id = (order.payment_method_snapshot or {}).get("xendit_invoice_id")
+    invoice_id = (order.payment_method_snapshot or {}).get("invoice_id")
     if not invoice_id:
         _LOG.warning(
-            "Refund skipped for order %s — no xendit_invoice_id on snapshot "
+            "Refund skipped for order %s — no invoice_id on snapshot "
             "(ops manual)", order_id,
         )
         return entry
