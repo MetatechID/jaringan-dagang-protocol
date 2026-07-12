@@ -34,6 +34,18 @@ async def _resolve_brand_for_cart(db: AsyncSession, cart: Cart) -> Brand | None:
     return result.scalars().first()
 
 
+def _is_mock_mode(brand: Brand | None) -> bool:
+    """True when local dev can't reach real Xendit. Both create_invoice_for_cart
+    and create_invoice_for_order must short-circuit here — otherwise the SDK
+    flow returns 500 ("no xendit_sub_account_id") while the cart flow happily
+    returns a mock-checkout URL."""
+    return (
+        brand is None
+        or not brand.xendit_sub_account_id
+        or not getattr(settings, "xendit_secret_key", "")
+    )
+
+
 def _cart_amount_idr(cart: Cart) -> int:
     quote = cart.quote_json or {}
     return int(quote.get("total_idr") or 0)
@@ -83,11 +95,7 @@ async def create_invoice_for_cart(db: AsyncSession, cart: Cart) -> dict:
     # seller's /api/mock-checkout/{id} page so the bot still surfaces a
     # clickable checkout URL and the demo flow works end-to-end. Drop this
     # branch once Xendit verifies and XENDIT_SECRET_KEY is populated.
-    mock_mode = (
-        brand is None
-        or not brand.xendit_sub_account_id
-        or not getattr(settings, "xendit_secret_key", "")
-    )
+    mock_mode = _is_mock_mode(brand)
 
     if not mock_mode and amount_idr <= 0:
         raise HTTPException(409, "Cart total is 0 — cannot create invoice")
@@ -149,13 +157,36 @@ async def create_invoice_for_order(db: AsyncSession, order: Order) -> dict:
     """
     brand_q = await db.execute(select(Brand).where(Brand.id == order.brand_id))
     brand = brand_q.scalar_one_or_none()
-    if brand is None:
-        raise HTTPException(500, f"Order's brand not found: {order.brand_id}")
-    if not brand.xendit_sub_account_id:
-        raise HTTPException(
-            500,
-            f"Brand '{brand.slug}' has no xendit_sub_account_id configured.",
+
+    # ponytail: same mock-mode short-circuit as create_invoice_for_cart.
+    # Without this, SDK orders for Xendit brands without a configured
+    # sub_account_id 500 here. Mirror the cart path exactly: vend a
+    # stable id, point invoice_url at the local seller-bpp mock-checkout
+    # page, log the fallback for ops. Delete when Xendit onboarding
+    # completes and XENDIT_SECRET_KEY is populated.
+    if _is_mock_mode(brand):
+        mock_base = (
+            getattr(settings, "mock_checkout_public_base", None)
+            or "https://jaringan-dagang-seller-api.metatech.id"
+        ).rstrip("/")
+        mock_invoice_id = f"dev-{order.id}"
+        snap = dict(order.payment_method_snapshot or {})
+        snap.update({
+            "type": "xendit_invoice",
+            "payment_provider": "xendit",
+            "invoice_id": mock_invoice_id,
+            "invoice_url": f"{mock_base}/api/mock-checkout/{mock_invoice_id}",
+        })
+        order.payment_method_snapshot = snap
+        _LOG.warning(
+            "create_invoice_for_order: mock fallback for order=%s brand=%s",
+            order.id, getattr(brand, "slug", None),
         )
+        return {
+            "id": mock_invoice_id,
+            "invoice_url": snap["invoice_url"],
+            "mock": True,
+        }
 
     base = settings.xendit_callback_base_url.rstrip("/")
     success_url = f"{base}/checkout/done?order_id={order.id}"

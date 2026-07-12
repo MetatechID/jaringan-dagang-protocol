@@ -45,7 +45,7 @@ class Settings(BaseSettings):
 
     # --- Database ---
     database_url: str = (
-        "postgresql+asyncpg://jaringan:jaringan_dev@localhost:5433/beli_aman"
+        "postgresql+asyncpg://postgres:secret@localhost:5432/beli_aman"
     )
 
     # --- Firebase Admin ---
@@ -107,6 +107,10 @@ class Settings(BaseSettings):
     # keys aren't configured. Defaults to settings.mock_checkout_public_base
     # in oy_invoices.py (single mock-checkout page serves both providers).
     oy_invoice_duration_seconds: int = 86400  # 24h
+    # Base URL for the mock-checkout page served by seller-bpp during local
+    # dev (when no real OY API key is set). Must point at the seller-bpp
+    # host, not prod. Read by oy_invoices._mock_mode() fallback.
+    mock_checkout_public_base: str = ""
 
     # --- Biteship (live courier API) ---
     biteship_api_base: str = "https://api.biteship.com"
