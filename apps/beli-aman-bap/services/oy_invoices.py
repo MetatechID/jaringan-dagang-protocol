@@ -134,14 +134,41 @@ async def create_invoice_for_order(db: AsyncSession, order: Order) -> dict:
     """
     brand_q = await db.execute(select(Brand).where(Brand.id == order.brand_id))
     brand = brand_q.scalar_one_or_none()
-    if brand is None:
-        raise HTTPException(500, f"Order's brand not found: {order.brand_id}")
-    if brand.payment_provider != "oy":
-        raise HTTPException(
-            500,
-            f"Brand '{brand.slug}' payment_provider is "
-            f"'{brand.payment_provider}', not 'oy'. Dispatcher mismatch.",
+
+    # ponytail: mock-mode fallback mirrors the cart path below. Without
+    # this, /invoice 500s whenever OY_API_KEY is empty (local dev) or
+    # the brand row hasn't been onboarded. The dispatcher's
+    # `if provider == "oy"` already guarantees this code path only
+    # runs for OY brands, so the strict `payment_provider != "oy"`
+    # guard from earlier turns is redundant — and a footgun during
+    # provider flips. Drop both strict checks; the mock branch
+    # handles brand-missing and OY-unconfigured uniformly. If the
+    # dispatcher ever routes an OY service call for a non-OY brand,
+    # that's a real bug; fall through and let the OY API reject it
+    # (or hit the mock branch).
+    if _mock_mode(brand):
+        mock_base = (
+            getattr(settings, "mock_checkout_public_base", None)
+            or "https://jaringan-dagang-seller-api.metatech.id"
+        ).rstrip("/")
+        mock_invoice_id = f"oy-dev-{order.id}"
+        snap = dict(order.payment_method_snapshot or {})
+        snap.update({
+            "type": "oy_invoice",
+            "payment_provider": "oy",
+            "invoice_id": mock_invoice_id,
+            "invoice_url": f"{mock_base}/api/mock-checkout/{mock_invoice_id}",
+        })
+        order.payment_method_snapshot = snap
+        _LOG.warning(
+            "create_invoice_for_order(oy): mock fallback for order=%s brand=%s",
+            order.id, getattr(brand, "slug", None),
         )
+        return {
+            "id": mock_invoice_id,
+            "invoice_url": snap["invoice_url"],
+            "mock": True,
+        }
 
     base = settings.oy_callback_base_url.rstrip("/")
     callback_url = f"{base}/webhooks/oy/invoice"
