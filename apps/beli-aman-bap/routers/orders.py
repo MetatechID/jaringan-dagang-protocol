@@ -414,7 +414,7 @@ async def create_invoice(
     ``payment_provider``).
     """
     from models.brand import Brand
-    from services import oy_invoices, xendit_invoices
+    from services import oy_invoices, sento_invoices, xendit_invoices
 
     order = await lock_order_for_update(db, order_id)
     if not order or order.profile_id != profile.id:
@@ -440,6 +440,8 @@ async def create_invoice(
 
     if provider == "oy":
         response = await oy_invoices.create_invoice_for_order(db, order)
+    elif provider == "sento":
+        response = await sento_invoices.create_invoice_for_order(db, order)
     else:
         response = await xendit_invoices.create_invoice_for_order(db, order)
     return {

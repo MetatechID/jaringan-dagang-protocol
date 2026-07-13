@@ -147,6 +147,8 @@ async def confirm_cart(
     try:
         if provider == "oy":
             from services import oy_invoices as _invoice_mod
+        elif provider == "sento":
+            from services import sento_invoices as _invoice_mod
         else:
             _invoice_mod = xendit_invoices
         await _invoice_mod.create_invoice_for_cart(db, cart)
