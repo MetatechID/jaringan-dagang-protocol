@@ -200,6 +200,26 @@ async def _handle_paid(db: AsyncSession, partner_tx_id: str, body: dict) -> dict
                 ))
         return {"ok": True, "cart_id": cart.id, "payment_state": cart.payment_state}
 
+    # ponytail: mock-mode invoice ids look like ``sento-dev-{order_id}`` —
+    # no prefix to dispatch on. Recover the order via the snapshot and
+    # mark it paid. This keeps the resolver uniform across real + mock.
+    from models.order import Order as _Order
+    recovered = (
+        await db.execute(
+            select(_Order).where(
+                _Order.payment_method_snapshot["invoice_id"].astext == partner_tx_id
+            )
+        )
+    ).scalars().first()
+    if recovered is not None:
+        order = await order_paid.mark_order_paid(
+            db,
+            order_id=recovered.id,
+            invoice_id=invoice_id,
+            actor=actor,
+        )
+        return {"ok": True, "order_id": order.id, "state": order.state.value}
+
     raise HTTPException(400, f"Unrecognized partner_tx_id prefix: {partner_tx_id!r}")
 
 

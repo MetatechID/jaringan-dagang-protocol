@@ -171,6 +171,39 @@ class TestInvoiceCallback:
         assert ledger.status == EscrowEntryStatus.COMPLETED
         assert ledger.order_id == "order-abc"
 
+    def test_handle_paid_recovers_mock_invoice_via_snapshot(self, monkeypatch, client):
+        """Mock-mode invoice id (``sento-dev-{id}``) has no ``order-`` /
+        ``cart-`` prefix. The handler must look up the order via
+        ``payment_method_snapshot["invoice_id"]`` and mark it paid anyway."""
+        client_, app = client
+        brand = StubBrand()
+        # Two DB hits: resolver's Order lookup, then _handle_paid's recovery.
+        order = StubOrder(id="order-recovered")
+        session = _patch_db(app, monkeypatch, order, order)
+        _stub_brand_lookup(monkeypatch, brand)
+        _stub_status_check(monkeypatch, returns={"status": "complete"})
+
+        captured: dict = {}
+
+        async def fake_mark_paid(db, *, order_id, invoice_id, actor, **_):
+            captured.update(order_id=order_id, invoice_id=invoice_id, actor=actor)
+            return SimpleNamespace(id=order_id, state=SimpleNamespace(value="ESCROW_HELD"))
+        monkeypatch.setattr("routers.webhooks_sento.order_paid.mark_order_paid", fake_mark_paid)
+
+        body = json.dumps({
+            "partner_tx_id": "sento-dev-abc-123",
+            "status": "complete",
+        }).encode()
+        resp = client_.post(
+            "/webhooks/sento/invoice",
+            content=body,
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert captured["order_id"] == "order-recovered"
+        assert captured["actor"] == "system:sento_webhook"
+        assert resp.json()["state"] == "ESCROW_HELD"
+
     def test_handle_expired_updates_cart_state(self, monkeypatch, client):
         """expired → cart.payment_state='expired', cart.status=CartStatus.EXPIRED."""
         client_, app = client
