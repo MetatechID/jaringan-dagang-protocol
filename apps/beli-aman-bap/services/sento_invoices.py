@@ -6,15 +6,18 @@ this module fires only when that column is ``"sento"``.
 
 See ``services/sento_client.py`` for the raw HTTP wrapper.
 
-Sento API contract used here:
-- ``partner_tx_id`` → maps to our ``external_id`` (e.g. ``cart-{cart_id}``
-  or ``order-{order_id}``); passed verbatim and used as the lookup key
-  in ``get_status``.
-- Response carries ``payment_link_id`` (the Sento-side id we stash as
-  ``invoice_id``) and ``url`` (the buyer-facing payment URL we stash
-  as ``qr_image_url``). Falls back to ``partner_tx_id`` when Sento
-  doesn't return a payment_link_id (it does in practice, but cheap
-  defensive read).
+Sento Payment Link API contract used here:
+- ``partner_tx_id`` → maps to our external_id (``cart-{id}`` /
+  ``order-{id}``); echoed back as ``partner_trx_id`` in callbacks.
+- Response carries ``payment_link_id`` (Sento-side id we stash as
+  ``invoice_id``), ``url`` (the hosted checkout page surfaced to the
+  buyer as ``invoice_url``), ``expiration``, and optionally ``qr_url``
+  in future Sento releases. ``trx_id`` + ``payment_info.qris_url`` belong
+  to Payment Routing and are NOT used here.
+- We normalize at the boundary so downstream consumers still see
+  ``id`` + ``invoice_url`` (matching Xendit / OY counterparts).
+
+Docs: https://api-docs.sento.id/docs-page/payment-link
 """
 
 from __future__ import annotations
@@ -33,6 +36,22 @@ from models.order import Order
 from services import sento_client
 
 _LOG = logging.getLogger("beli_aman_bap.sento_invoices")
+
+
+def _normalize_response(response: dict, partner_tx_id: str) -> dict:
+    """Flatten Payment Link's response into the vendor-neutral shape the
+    rest of the BAP expects: ``id`` + ``invoice_url`` + optional
+    ``qris_image_url`` + optional ``expires_at``.
+    """
+    return {
+        "id": response.get("payment_link_id") or partner_tx_id,
+        "invoice_url": response.get("url"),
+        # Payment Link doesn't expose qris_url directly in create-v2
+        # response (the hosted page renders the QR). Surface top-level
+        # qr_url if a future Sento release adds it.
+        "qris_image_url": response.get("qr_url"),
+        "expires_at": response.get("expiration"),
+    }
 
 
 async def _resolve_brand_for_cart(db: AsyncSession, cart: Cart) -> Brand | None:
@@ -66,11 +85,11 @@ def _mock_mode(brand: Brand | None) -> bool:
 
 
 async def create_invoice_for_cart(db: AsyncSession, cart: Cart) -> dict:
-    """Mint a Sento payment link for a cart in /confirm state.
+    """Mint a Sento Payment Link transaction for a cart in /confirm state.
 
     Persists ``cart.invoice_id``, ``cart.invoice_provider``,
-    ``cart.qr_image_url`` (vendor-neutral columns). Returns the raw Sento
-    response.
+    ``cart.qr_image_url``, and the new ``cart.qris_image_url`` (vendor-neutral
+    columns). Returns the normalized response.
     """
     brand = await _resolve_brand_for_cart(db, cart)
     amount_idr = _cart_amount_idr(cart)
@@ -112,19 +131,19 @@ async def create_invoice_for_cart(db: AsyncSession, cart: Cart) -> dict:
         description=f"{brand.name} order — {amount_idr:,} IDR",
     )
 
-    sento_link_id = response.get("payment_link_id") or partner_tx_id
-    sento_url = response.get("url")
-    cart.invoice_id = sento_link_id
+    norm = _normalize_response(response, partner_tx_id)
+    cart.invoice_id = partner_tx_id  # Sento echoes this back in the callback
     cart.invoice_provider = "sento"
-    cart.qr_image_url = sento_url
-    return response
+    cart.qr_image_url = norm["invoice_url"]
+    cart.qris_image_url = norm.get("qris_image_url")
+    return norm
 
 
 async def create_invoice_for_order(db: AsyncSession, order: Order) -> dict:
-    """Mint a Sento payment link for a CART_REVIEWED Order (SDK flow).
+    """Mint a Sento Payment Link transaction for a CART_REVIEWED Order (SDK flow).
 
-    Same shape as Xendit / OY counterparts: stash the link id + URL on the
-    order's ``payment_method_snapshot`` so the Sento webhook can find it.
+    Stashes the result on the order's ``payment_method_snapshot`` so the Sento
+    webhook can recover it. Returns the normalized response.
     """
     brand_q = await db.execute(select(Brand).where(Brand.id == order.brand_id))
     brand = brand_q.scalar_one_or_none()
@@ -166,30 +185,45 @@ async def create_invoice_for_order(db: AsyncSession, order: Order) -> dict:
         }
         for i in (order.items or [])
     ]
-    # ponytail: Sento's create-v2 doesn't take an ``items`` array. Fold
-    # line items into the description so the buyer still sees the receipt
-    # on Sento's hosted page. Re-model when Sento supports line-item.
+    # ponytail: Payment Link doesn't take an ``items`` array. Fold line
+    # items into the description so the buyer still sees them on the
+    # hosted page. Re-model when Sento adds line-item support.
+    description = (
+        f"{brand.name} order {order.id} — {order.total_idr:,} IDR"
+        + (" — " + ", ".join(f"{i['name']} x{i['quantity']}" for i in items)
+            if items else "")
+    )
+    email = (order.shipping_address or {}).get("email")
+    sender_name = (order.shipping_address or {}).get("recipient_name") or "Buyer"
 
     response = await sento_client.create_invoice(
         api_key=brand.sento_api_key,
         username=brand.sento_username,
         partner_tx_id=partner_tx_id,
         amount_idr=order.total_idr,
-        sender_name=(order.shipping_address or {}).get("recipient_name") or "Buyer",
-        email=(order.shipping_address or {}).get("email"),
-        description=(
-            f"{brand.name} order {order.id} — {order.total_idr:,} IDR"
-            + (" — " + ", ".join(f"{i['name']} x{i['quantity']}" for i in items)
-                if items else "")
-        ),
+        sender_name=sender_name,
+        email=email,
+        description=description,
     )
 
+    norm = _normalize_response(response, partner_tx_id)
     snap = dict(order.payment_method_snapshot or {})
     snap.update({
         "type": "sento_invoice",
         "payment_provider": "sento",
-        "invoice_id": response.get("payment_link_id") or partner_tx_id,
-        "invoice_url": response.get("url"),
+        # partner_tx_id is the lookup key Sento echoes back in the
+        # callback body — it MUST be stored verbatim on the snapshot
+        # so the receiver can resolve the brand. The Sento-side
+        # payment_link_id (norm["id"]) is stored separately as
+        # ``sento_payment_link_id`` so we don't lose it.
+        "partner_tx_id": partner_tx_id,
+        "sento_payment_link_id": norm["id"],
+        "invoice_id": norm["id"],
+        "invoice_url": norm["invoice_url"],
     })
+    if norm.get("qris_image_url"):
+        snap["qris_image_url"] = norm["qris_image_url"]
+    if norm.get("expires_at"):
+        snap["expires_at"] = norm["expires_at"]
     order.payment_method_snapshot = snap
-    return response
+    return norm

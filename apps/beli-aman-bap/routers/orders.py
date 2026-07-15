@@ -454,7 +454,8 @@ async def create_invoice(
             or response.get("checkout_url")
             or response.get("payment_url")
         ),
-        "expires_at": response.get("expiry_date"),
+        "expires_at": response.get("expires_at") or response.get("expiry_date"),
+        "qris_image_url": response.get("qris_image_url"),
     }
 
 

@@ -20,18 +20,25 @@ if _BAP_DIR not in sys.path:
 
 
 def test_settings_carries_sento_block():
-    """``Settings`` exposes the four sento_* fields with safe defaults."""
+    """``Settings`` exposes the five sento_* fields. The local .env may
+    populate them with real staging creds — we assert structural presence
+    only, plus the unrelated defaults (URL + duration) that have no
+    cred-bearing override.
+    """
     from config import Settings  # noqa: WPS433
 
     s = Settings()
     assert hasattr(s, "sento_api_key"), "missing sento_api_key"
+    assert isinstance(s.sento_api_key, str), "sento_api_key must be a string"
     assert hasattr(s, "sento_default_username"), "missing sento_default_username"
+    assert isinstance(s.sento_default_username, str), \
+        "sento_default_username must be a string"
     assert hasattr(s, "sento_callback_base_url"), "missing sento_callback_base_url"
-    assert hasattr(s, "sento_invoice_duration_seconds"), "missing sento_invoice_duration_seconds"
-    # Defaults — empty credentials, production base URL, 24h duration.
-    assert s.sento_api_key == ""
-    assert s.sento_default_username == ""
     assert s.sento_callback_base_url.startswith("http")
+    assert hasattr(s, "sento_invoice_duration_seconds"), "missing sento_invoice_duration_seconds"
+    assert hasattr(s, "sento_base_url"), "missing sento_base_url"
+    # Default points at sandbox; prod override documented in .env.example.
+    assert "api-demo.sento.id" in s.sento_base_url or "partner.sento.id" in s.sento_base_url
     assert s.sento_invoice_duration_seconds == 86400
 
 

@@ -59,6 +59,23 @@ except Exception:  # noqa: BLE001
 _LOG = logging.getLogger("beli_aman_bap.order_paid")
 
 
+def _provider_phrase(invoice_id: str, actor: str) -> str:
+    """Return a provider-aware escrow-ledger description.
+
+    The ``actor`` parameter (e.g. ``system:sento_webhook``,
+    ``system:xendit_webhook``, ``system:oy_webhook``) carries the gateway
+    name as a substring. Default to ``invoice {id}`` for unknown actors so
+    we never mislabel a future provider.
+    """
+    if "sento" in actor:
+        return f"sento invoice {invoice_id}"
+    if "xendit" in actor:
+        return f"xendit invoice {invoice_id}"
+    if "oy" in actor:
+        return f"OY invoice {invoice_id}"
+    return f"invoice {invoice_id}"
+
+
 async def mark_order_paid(
     db: AsyncSession,
     *,
@@ -88,7 +105,7 @@ async def mark_order_paid(
                 order_id=order.id,
                 entry_type=EscrowEntryType.HOLD,
                 amount_idr=order.total_idr,
-                description=f"Funds held — xendit invoice {invoice_id}",
+                description=f"Funds held — {_provider_phrase(invoice_id, actor)}",
                 external_ref=invoice_id,
                 status=EscrowEntryStatus.COMPLETED,
             ))
@@ -115,7 +132,7 @@ async def mark_order_paid(
         order_id=order.id,
         entry_type=EscrowEntryType.HOLD,
         amount_idr=order.total_idr,
-        description=f"Funds held — xendit invoice {invoice_id}",
+        description=f"Funds held — {_provider_phrase(invoice_id, actor)}",
         external_ref=invoice_id,
         status=EscrowEntryStatus.COMPLETED,
     ))

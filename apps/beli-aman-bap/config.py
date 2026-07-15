@@ -113,6 +113,11 @@ class Settings(BaseSettings):
     mock_checkout_public_base: str = ""
 
     # --- Sento (https://api-docs.sento.id/) ---
+    # Base URL for Sento's HTTP API. Default is the sandbox
+    # (https://api-demo.sento.id); production overrides via
+    # SENTO_BASE_URL=https://partner.sento.id in .env. Read by
+    # services.sento_client._base_url().
+    sento_base_url: str = "https://api-demo.sento.id"
     # Master API key (per-Brand override lives in Brand.sento_api_key). Send
     # in the ``x-api-key`` header. Empty value → mock-mode (synthetic URL,
     # same pattern as OY).

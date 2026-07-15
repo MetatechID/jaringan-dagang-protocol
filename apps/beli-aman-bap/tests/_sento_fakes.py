@@ -69,6 +69,7 @@ def StubCart(*, payment_state: str = "pending", status=None, **overrides):
         invoice_id=None,
         invoice_provider=None,
         qr_image_url=None,
+        qris_image_url=None,
         quote_json={"total_idr": 100_000},
     )
     base.update(overrides)

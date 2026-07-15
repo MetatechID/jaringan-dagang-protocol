@@ -291,5 +291,8 @@ async def debug_config() -> dict:
         "xendit_webhook_configured": bool(settings.xendit_webhook_token),
         "biteship_configured": bool(settings.biteship_api_key),
         "biteship_webhook_configured": bool(settings.biteship_webhook_token),
+        "sento_configured": bool(settings.sento_api_key),
+        "sento_base_url": settings.sento_base_url,
+        "sento_callback_configured": bool(settings.sento_callback_base_url),
         "environment": settings.environment,
     }

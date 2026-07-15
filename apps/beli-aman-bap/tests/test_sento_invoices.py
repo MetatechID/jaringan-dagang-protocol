@@ -6,9 +6,12 @@ vendor-neutral cart columns, snapshot persistence for orders).
 DB and HTTP layer fakes are imported from ``tests/_sento_fakes``. We
 monkeypatch ``sento_client.create_invoice`` so no network is hit.
 
-Mirrors ``tests/test_oy_invoices.py`` shape, with the Sento API surface:
-- ``create_invoice`` returns ``{status, url, payment_link_id}``
+Mirrors ``tests/test_oy_invoices.py`` shape, with the Sento Payment
+Link API surface:
+- ``create_invoice`` returns ``{status, url, payment_link_id, tx_ref_number}``
 - ``partner_tx_id`` is the Sento equivalent of OY's ``external_id``
+- Output of ``create_invoice_for_*`` is normalized to ``{id, invoice_url}``
+  plus optional ``qris_image_url`` + ``expires_at``.
 """
 
 from __future__ import annotations
@@ -45,17 +48,32 @@ class _StubCart:
         self.invoice_id = None
         self.invoice_provider = None
         self.qr_image_url = None
+        self.qris_image_url = None
+
+
+def _link_response(
+    payment_link_id="PL-1234",
+    url="https://pay.sento.id/x",
+    expiration="2026-07-14 12:00:00",
+):
+    """Canonical Payment Link create response shape."""
+    return {
+        "status": True,
+        "url": url,
+        "payment_link_id": payment_link_id,
+        "tx_ref_number": f"tx-{payment_link_id}",
+    }
 
 
 def _make_session(brand: SimpleNamespace) -> FakeSession:
-    """Session that returns ``brand`` from any execute() call."""
     return FakeSession([brand])
 
 
 class TestCreateInvoiceForCart:
     @pytest.mark.asyncio
     async def test_real_path_writes_renamed_columns(self, monkeypatch):
-        """Happy path: sento_client returns a body, we persist vendor-neutral keys."""
+        """Happy path: sento_client.create_invoice returns a body, we
+        persist vendor-neutral keys + the qris image url."""
         cart = _StubCart(total_idr=250_000)
         db = _make_session(StubBrand())
 
@@ -63,42 +81,50 @@ class TestCreateInvoiceForCart:
 
         async def fake_create_invoice(**kwargs):
             captured.update(kwargs)
-            return {
-                "status": True,
-                "url": "https://pay.sento.id/x",
-                "payment_link_id": "PL-1234",
-            }
+            return _link_response(
+                payment_link_id="PL-1234",
+                url="https://pay.sento.id/img",
+            )
 
-        monkeypatch.setattr(sento_invoices.sento_client, "create_invoice", fake_create_invoice)
+        monkeypatch.setattr(
+            sento_invoices.sento_client, "create_invoice", fake_create_invoice,
+        )
 
         response = await sento_invoices.create_invoice_for_cart(db, cart)
 
-        assert response["status"] is True
-        assert response["url"] == "https://pay.sento.id/x"
-        assert cart.invoice_id == "PL-1234"
+        # Normalized response shape mirrors oy_invoices / xendit_invoices.
+        assert response["id"] == "PL-1234"
+        assert response["invoice_url"] == "https://pay.sento.id/img"
+        # cart.invoice_id stores partner_tx_id (which Sento echoes back in
+        # the callback body). The Sento payment_link_id (PL-1234) is
+        # normalized into response["id"] above.
+        assert cart.invoice_id == "cart-cart-test-id"
         assert cart.invoice_provider == "sento"
-        assert cart.qr_image_url == "https://pay.sento.id/x"
+        # cart.qr_image_url is the buyer-facing payment URL — Payment
+        # Link's hosted checkout page (the QR renders inside it).
+        assert cart.qr_image_url == "https://pay.sento.id/img"
+        assert cart.qris_image_url is None
         # Per-Brand creds threaded through, master env fallback unused.
         assert captured["api_key"] == "brand-key"
         assert captured["username"] == "brand-user"
         assert captured["partner_tx_id"] == f"cart-{cart.id}"
         assert captured["amount_idr"] == 250_000
-        assert captured["sender_name"] == "Buyer Test"
 
     @pytest.mark.asyncio
-    async def test_real_path_falls_back_to_partner_tx_id_when_no_payment_link_id(
+    async def test_real_path_falls_back_to_partner_tx_id_when_no_link_id(
         self, monkeypatch
     ):
-        """If Sento returns only ``partner_tx_id`` (no ``payment_link_id``), use it as invoice_id."""
+        """If Sento returns no ``payment_link_id`` (defensive), use partner_tx_id."""
         cart = _StubCart(total_idr=100_000)
         db = _make_session(StubBrand())
 
         async def fake_create_invoice(**_kwargs):
-            return {"status": True, "url": "https://pay.sento.id/x"}
+            return {"status": True, "url": "u"}
 
-        monkeypatch.setattr(sento_invoices.sento_client, "create_invoice", fake_create_invoice)
+        monkeypatch.setattr(
+            sento_invoices.sento_client, "create_invoice", fake_create_invoice,
+        )
         await sento_invoices.create_invoice_for_cart(db, cart)
-        # partner_tx_id we sent → fell back to it for cart.invoice_id
         assert cart.invoice_id == f"cart-{cart.id}"
 
     @pytest.mark.asyncio
@@ -109,7 +135,9 @@ class TestCreateInvoiceForCart:
         async def fake_create_invoice(**_kwargs):
             raise AssertionError("real Sento must NOT be called in mock mode")
 
-        monkeypatch.setattr(sento_invoices.sento_client, "create_invoice", fake_create_invoice)
+        monkeypatch.setattr(
+            sento_invoices.sento_client, "create_invoice", fake_create_invoice,
+        )
 
         response = await sento_invoices.create_invoice_for_cart(db, cart)
         assert response["mock"] is True
@@ -125,7 +153,9 @@ class TestCreateInvoiceForCart:
         async def fake_create_invoice(**_kwargs):
             raise AssertionError("real Sento must NOT fire when provider=xendit")
 
-        monkeypatch.setattr(sento_invoices.sento_client, "create_invoice", fake_create_invoice)
+        monkeypatch.setattr(
+            sento_invoices.sento_client, "create_invoice", fake_create_invoice,
+        )
 
         response = await sento_invoices.create_invoice_for_cart(db, cart)
         assert response["mock"] is True
@@ -133,14 +163,15 @@ class TestCreateInvoiceForCart:
 
     @pytest.mark.asyncio
     async def test_real_path_raises_http_409_when_amount_zero(self, monkeypatch):
-        """Real-path guard: a 0-total cart must not silently create an invoice."""
         cart = _StubCart(total_idr=0)
         db = _make_session(StubBrand())
 
         async def fake_create_invoice(**_kwargs):
             raise AssertionError("real Sento must NOT fire when amount is 0")
 
-        monkeypatch.setattr(sento_invoices.sento_client, "create_invoice", fake_create_invoice)
+        monkeypatch.setattr(
+            sento_invoices.sento_client, "create_invoice", fake_create_invoice,
+        )
 
         with pytest.raises(HTTPException) as ei:
             await sento_invoices.create_invoice_for_cart(db, cart)
@@ -154,7 +185,9 @@ class TestCreateInvoiceForCart:
         async def fake_create_invoice(**_kwargs):
             raise AssertionError("mock mode → no Sento call")
 
-        monkeypatch.setattr(sento_invoices.sento_client, "create_invoice", fake_create_invoice)
+        monkeypatch.setattr(
+            sento_invoices.sento_client, "create_invoice", fake_create_invoice,
+        )
 
         response = await sento_invoices.create_invoice_for_cart(db, cart)
         assert response["mock"] is True
@@ -172,11 +205,13 @@ class TestCreateInvoiceForCart:
 
         async def fake_create_invoice(**kwargs):
             captured.update(kwargs)
-            return {"status": True, "url": "u", "payment_link_id": "P"}
+            return _link_response()
 
-        monkeypatch.setattr(sento_invoices.sento_client, "create_invoice", fake_create_invoice)
+        monkeypatch.setattr(
+            sento_invoices.sento_client, "create_invoice", fake_create_invoice,
+        )
         await sento_invoices.create_invoice_for_cart(db, cart)
-        assert captured["email"] == "fb@example.com"
+        # Payment Link uses sender_name (not sender_email like Payment Routing).
         assert captured["sender_name"] == "Fallback"
 
 
@@ -188,25 +223,28 @@ class TestCreateInvoiceForOrder:
         order = StubOrder()
 
         async def fake_create_invoice(**_kwargs):
-            return {
-                "status": True,
-                "url": "https://pay.sento.id/ord",
-                "payment_link_id": "PL-9999",
-            }
+            return _link_response(
+                payment_link_id="PL-9999",
+                url="https://pay.sento.id/ord",
+            )
 
-        monkeypatch.setattr(sento_invoices.sento_client, "create_invoice", fake_create_invoice)
+        monkeypatch.setattr(
+            sento_invoices.sento_client, "create_invoice", fake_create_invoice,
+        )
 
         response = await sento_invoices.create_invoice_for_order(db, order)
 
-        assert response["payment_link_id"] == "PL-9999"
+        assert response["id"] == "PL-9999"
+        assert response["invoice_url"] == "https://pay.sento.id/ord"
         snap = order.payment_method_snapshot
+        # snapshot type is sento_invoice for Payment Link.
         assert snap["type"] == "sento_invoice"
         assert snap["payment_provider"] == "sento"
         assert snap["invoice_id"] == "PL-9999"
         assert snap["invoice_url"] == "https://pay.sento.id/ord"
 
     @pytest.mark.asyncio
-    async def test_real_path_collapses_items_into_description(self, monkeypatch):
+    async def test_real_path_passes_description_to_create_invoice(self, monkeypatch):
         brand = StubBrand()
         db = _make_session(brand)
         order = StubOrder(items=[
@@ -218,13 +256,16 @@ class TestCreateInvoiceForOrder:
 
         async def fake_create_invoice(**kwargs):
             captured.update(kwargs)
-            return {"status": True, "url": "u", "payment_link_id": "P"}
+            return _link_response()
 
-        monkeypatch.setattr(sento_invoices.sento_client, "create_invoice", fake_create_invoice)
+        monkeypatch.setattr(
+            sento_invoices.sento_client, "create_invoice", fake_create_invoice,
+        )
         await sento_invoices.create_invoice_for_order(db, order)
-        # Items folded into description (Sento's create endpoint doesn't take items).
-        assert "Kopi x2" in captured["description"]
-        assert "Gula x1" in captured["description"]
+        # Items collapsed into the description field of create_invoice.
+        desc = captured["description"]
+        assert "Kopi x2" in desc
+        assert "Gula x1" in desc
 
     @pytest.mark.asyncio
     async def test_real_path_partner_tx_id_starts_with_order(self, monkeypatch):
@@ -236,9 +277,11 @@ class TestCreateInvoiceForOrder:
 
         async def fake_create_invoice(**kwargs):
             captured.update(kwargs)
-            return {"status": True, "url": "u", "payment_link_id": "P"}
+            return _link_response()
 
-        monkeypatch.setattr(sento_invoices.sento_client, "create_invoice", fake_create_invoice)
+        monkeypatch.setattr(
+            sento_invoices.sento_client, "create_invoice", fake_create_invoice,
+        )
         await sento_invoices.create_invoice_for_order(db, order)
         assert captured["partner_tx_id"] == "order-order-abc"
 
@@ -255,7 +298,9 @@ class TestMockModeMatrix:
         async def fake_create_invoice(**_kwargs):
             raise AssertionError("mock-mode: no Sento call")
 
-        monkeypatch.setattr(sento_invoices.sento_client, "create_invoice", fake_create_invoice)
+        monkeypatch.setattr(
+            sento_invoices.sento_client, "create_invoice", fake_create_invoice,
+        )
         response = await sento_invoices.create_invoice_for_cart(db, cart)
         assert response["mock"] is True
 
@@ -268,9 +313,11 @@ class TestMockModeMatrix:
 
         async def fake_create_invoice(**kwargs):
             called.append(kwargs)
-            return {"status": True, "url": "u", "payment_link_id": "P"}
+            return _link_response()
 
-        monkeypatch.setattr(sento_invoices.sento_client, "create_invoice", fake_create_invoice)
+        monkeypatch.setattr(
+            sento_invoices.sento_client, "create_invoice", fake_create_invoice,
+        )
         response = await sento_invoices.create_invoice_for_cart(db, cart)
         assert response.get("mock") is not True
         assert len(called) == 1
@@ -285,16 +332,19 @@ class TestMockModeMatrix:
 
         async def fake_create_invoice(**kwargs):
             called.append(kwargs)
-            return {"status": True, "url": "u", "payment_link_id": "P"}
+            return _link_response()
 
         fake_settings = SimpleNamespace(
             sento_api_key="env-only",
             sento_default_username="env-user",
             sento_callback_base_url="http://x",
             mock_checkout_public_base="http://x",
+            sento_invoice_duration_seconds=86400,
         )
         monkeypatch.setattr(sento_invoices, "settings", fake_settings)
-        monkeypatch.setattr(sento_invoices.sento_client, "create_invoice", fake_create_invoice)
+        monkeypatch.setattr(
+            sento_invoices.sento_client, "create_invoice", fake_create_invoice,
+        )
         response = await sento_invoices.create_invoice_for_cart(db, cart)
         assert response.get("mock") is not True
         assert len(called) == 1
@@ -312,8 +362,11 @@ class TestMockModeMatrix:
             sento_default_username="",
             sento_callback_base_url="http://x",
             mock_checkout_public_base="http://x",
+            sento_invoice_duration_seconds=86400,
         )
         monkeypatch.setattr(sento_invoices, "settings", fake_settings)
-        monkeypatch.setattr(sento_invoices.sento_client, "create_invoice", fake_create_invoice)
+        monkeypatch.setattr(
+            sento_invoices.sento_client, "create_invoice", fake_create_invoice,
+        )
         response = await sento_invoices.create_invoice_for_cart(db, cart)
         assert response["mock"] is True

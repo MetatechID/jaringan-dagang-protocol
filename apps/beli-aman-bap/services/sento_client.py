@@ -3,17 +3,22 @@
 Sento's Payment Link REST API uses ``x-api-key`` + ``x-username`` headers
 (master creds sourced from settings; per-Brand override sourced from
 ``Brand.sento_api_key`` / ``Brand.sento_username`` by the caller passing
-them in). IP whitelisting is required at the Sento dashboard — register
-the VM's outbound IP before flipping a brand's ``payment_provider`` to
-``"sento"``.
+them in). IP whitelisting is required at the Sento dashboard (sandbox or
+prod, matching ``settings.sento_base_url``) — register the VM's outbound
+IP before flipping a brand's ``payment_provider`` to ``"sento"``.
 
 See https://api-docs.sento.id/docs-page/payment-link.
 
 The Payment Link API has a flat resource shape: a single ``create_invoice``
-returns ``url`` + ``payment_link_id`` (the buyer-facing link); a single
-``get_status`` returns the current lifecycle state plus the Sento-internal
-``tx_ref_number``. There's no HMAC — we verify payment state via the status
-API (see ``routers/webhooks_sento.py``).
+returns ``url`` + ``payment_link_id`` + ``tx_ref_number`` (the buyer-facing
+link and Sento-internal id, respectively); a single ``get_status`` returns
+the current lifecycle state plus the Sento-internal ``tx_ref_number``. There's
+no HMAC — we verify payment state via the status API (see
+``routers/webhooks_sento.py``).
+
+Callback URL is server-side dashboard config, not per-payload. Best-effort
+forwarded in create but ultimately configured in the Sento dashboard.
+QRIS-only scope for now.
 """
 
 from __future__ import annotations
@@ -46,7 +51,11 @@ def _headers(*, api_key: str | None, username: str | None) -> dict[str, str]:
     return h
 
 
-_BASE_URL = "https://partner.sento.id"
+def _base_url() -> str:
+    # ponytail: env-driven so prod/sandbox switch is a .env flip, no code
+    # edit. Default sandbox (https://api-demo.sento.id); prod overrides
+    # SENTO_BASE_URL=https://partner.sento.id.
+    return settings.sento_base_url.rstrip("/")
 
 
 async def _request(
@@ -64,7 +73,7 @@ async def _request(
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.request(
             method,
-            f"{_BASE_URL}{path}",
+            f"{_base_url()}{path}",
             headers=_headers(
                 api_key=api_key or settings.sento_api_key,
                 username=username or settings.sento_default_username,
@@ -94,7 +103,11 @@ async def create_invoice(
     is_open: bool = False,
     include_admin_fee: bool = False,
     list_disabled_payment_methods: str | None = None,
-    list_enabled_banks: str | None = None,
+    # ponytail: Sento's create-v2 requires this. Default "002" (BI code for
+    # BCA) is the only code in the docs sample; also constrains the
+    # transaction to QRIS in staging. Add a Brand.sento_enabled_banks column
+    # when multi-bank is needed.
+    list_enabled_banks: str | None = "002",
     expiration: str | None = None,  # "yyyy-MM-dd HH:mm:ss"
     va_display_name: str | None = None,
     callback_url: str | None = None,
@@ -104,7 +117,8 @@ async def create_invoice(
     """Mint a single Sento payment link.
 
     Returns the raw Sento response (``status`` + ``url`` + ``payment_link_id``
-    + ``message`` shaped). Funds settle into the brand's Sento balance.
+    + ``tx_ref_number`` shaped). Funds settle into the brand's Sento
+    balance.
     """
     payload: dict[str, Any] = {
         "partner_tx_id": partner_tx_id,
@@ -123,15 +137,15 @@ async def create_invoice(
         payload["phone_number"] = phone_number
     if list_disabled_payment_methods:
         payload["list_disabled_payment_methods"] = list_disabled_payment_methods
-    if list_enabled_banks:
+    if list_enabled_banks is not None:
         payload["list_enabled_banks"] = list_enabled_banks
     if expiration:
         payload["expiration"] = expiration
     if va_display_name:
         payload["va_display_name"] = va_display_name
     if callback_url:
-        # Sento sends the callback to this URL; payload key is ``callback_url``
-        # (per docs). Reserved for future use — v1 webhooks use status polling.
+        # Best-effort forward; Sento's docs do not document callback_url in
+        # create-v2 (it's dashboard-config) but forwarding is harmless.
         payload["callback_url"] = callback_url
 
     return await _request(
