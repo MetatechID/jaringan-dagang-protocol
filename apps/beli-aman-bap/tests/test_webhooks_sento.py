@@ -291,6 +291,68 @@ class TestInvoiceCallbackComplete:
         assert captured["actor"] == "system:sento_webhook"
         assert resp.json()["state"] == "ESCROW_HELD"
 
+    def test_callback_status_success_triggers_paid(self, monkeypatch, client):
+        """Payment Link callback sends ``status: "success"`` (not ``"complete"``).
+        _parse_status must normalize it to "complete" so _handle_paid fires."""
+        client_, app = client
+        brand = StubBrand()
+        _patch_db(app, monkeypatch)
+        _stub_brand_lookup(monkeypatch, brand)
+        _stub_status_check(
+            monkeypatch,
+            returns={"status": "complete"},
+        )
+
+        captured: dict = {}
+
+        async def fake_mark_paid(db, *, order_id, invoice_id, actor, **_):
+            captured.update(order_id=order_id, invoice_id=invoice_id, actor=actor)
+            return SimpleNamespace(id=order_id, state=SimpleNamespace(value="ESCROW_HELD"))
+        monkeypatch.setattr("routers.webhooks_sento.order_paid.mark_order_paid", fake_mark_paid)
+
+        body = json.dumps({
+            "partner_tx_id": "order-ord-99",
+            "tx_ref_number": "STX-99",
+            "status": "success",
+            "amount": 55000,
+            "paid_amount": 55000,
+        }).encode()
+        resp = client_.post(
+            "/webhooks/sento/invoice",
+            content=body,
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert captured["order_id"] == "ord-99"
+        assert captured["actor"] == "system:sento_webhook"
+        assert resp.json()["state"] == "ESCROW_HELD"
+
+    def test_callback_status_processing_treated_as_pending(self, monkeypatch, client):
+        """Payment Link callback sends ``status: "processing"`` for in-flight
+        transactions. Must be treated as pending (ignored, no mutation)."""
+        client_, app = client
+        brand = StubBrand()
+        _patch_db(app, monkeypatch)
+        _stub_brand_lookup(monkeypatch, brand)
+        _stub_status_check(
+            monkeypatch,
+            returns={"status": "processing"},
+        )
+
+        body = json.dumps({
+            "partner_tx_id": "cart-pending-2",
+            "status": "processing",
+        }).encode()
+        resp = client_.post(
+            "/webhooks/sento/invoice",
+            content=body,
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200, resp.text
+        out = resp.json()
+        assert out["ok"] is True
+        assert out["ignored_status"] == "pending"
+
 
 # ---- Error paths -----------------------------------------------------------
 

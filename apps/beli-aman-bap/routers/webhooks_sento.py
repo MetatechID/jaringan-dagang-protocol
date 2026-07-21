@@ -8,11 +8,13 @@ Mirror of ``routers/webhooks_oy.py`` — same /invoice flow, but:
   doing anything. The webhook is treated as an advisory notification.
 
 - Body: **Payment Link** shape (flat body, no ``payment_info`` wrapper).
-  ``status`` is lowercase: ``created | waiting_payment | expired |
-  charge_in_progress | failed | complete | closed``. The invoice id is
-  read from ``partner_tx_id``; Sento's internal id echoes back as
-  ``tx_ref_number`` and is used as the ledger ``external_ref`` when
-  available.
+  ``status`` is lowercase but uses **different vocabulary** than the
+  Status API: the callback sends ``success | failed | processing``
+  while the Status API returns ``created | waiting_payment | expired |
+  charge_in_progress | failed | complete | closed``. We normalize both
+  in ``_parse_status``. The invoice id is read from ``partner_tx_id``;
+  Sento's internal id echoes back as ``tx_ref_number`` and is used as
+  the ledger ``external_ref`` when available.
 
 Brand isn't on the path. We resolve it from the body's ``partner_tx_id``
 via the same cart/order snapshot lookup used by OY. If Sento says the
@@ -47,14 +49,23 @@ router = APIRouter(prefix="/webhooks/sento", tags=["webhooks"])
 def _parse_status(body: dict) -> str | None:
     """Payment Link callback uses lowercase ``status``. Returns one of
     ``complete | expired | failed | closed | pending | None``.
+
+    Status vocabulary differs between Sento surfaces:
+    - Status API (GET): created / waiting_payment / expired /
+      charge_in_progress / failed / complete / closed
+    - Callback (POST): success / failed / processing
+    We normalize both into a single vocabulary.
     """
     raw = str(body.get("status") or "").lower().strip()
     if not raw:
         return None
-    if raw in {"created", "waiting_payment", "charge_in_progress"}:
+    if raw in {"created", "waiting_payment", "charge_in_progress", "processing"}:
         return "pending"
     if raw in {"complete", "expired", "failed", "closed"}:
         return raw
+    # Payment Link callback uses "success" instead of "complete".
+    if raw == "success":
+        return "complete"
     return None
 
 

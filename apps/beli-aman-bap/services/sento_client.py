@@ -165,8 +165,12 @@ async def get_status(
 ) -> dict:
     """Fetch current payment-link state from Sento.
 
-    Status values per docs: created / waiting_payment / expired /
+    Status API values: created / waiting_payment / expired /
     charge_in_progress / failed / complete / closed.
+
+    Note: the Payment Link *callback* (POST) uses a different vocabulary:
+    success / failed / processing. See ``routers/webhooks_sento._parse_status``
+    for the normalization logic.
     """
     return await _request(
         "GET",

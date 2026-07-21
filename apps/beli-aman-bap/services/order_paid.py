@@ -137,8 +137,10 @@ async def mark_order_paid(
         status=EscrowEntryStatus.COMPLETED,
     ))
 
-    # Best-effort seller dispatch — non-fatal.
-    await _dispatch_to_seller(order)
+    # Best-effort seller dispatch — non-fatal. Scheduled as a background
+    # task so the DB transaction can commit (releasing the row lock)
+    # before the slow HTTP calls to Beckn / seller bridge.
+    asyncio.create_task(_dispatch_to_seller(order))
 
     # Best-effort Meta Conversions API Purchase event. Scheduled as a
     # background task so a Meta outage or slow response can't delay the
