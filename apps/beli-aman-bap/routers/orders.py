@@ -177,35 +177,42 @@ async def get_order(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Fetch an order. Side-effect: lazy auto-release if the D+3 window passed."""
-    order = await lock_order_for_update(db, order_id)
+    # Plain SELECT — no row lock. The read path must not block on concurrent
+    # webhook writes; the lazy auto-release below acquires a lock only when
+    # it actually needs to mutate.
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(404, "Order not found")
     if profile and order.profile_id != profile.id:
         raise HTTPException(403, "Not your order")
 
     # Lazy auto-release: if RECEIVED and auto_release_at is in the past, release now.
-    # Note: escrow_service.release() also fires the Xendit disbursement.
+    # Acquire the lock only here — a write is actually needed. Re-check state
+    # after locking because a concurrent request may have already released.
     if (
         order.state == OrderState.RECEIVED
         and order.auto_release_at is not None
         and order.auto_release_at <= datetime.now(timezone.utc)
     ):
-        try:
-            await transition(
-                db, order, OrderState.ESCROW_RELEASED,
-                actor="system:auto_release",
-                payload={"reason": "D+3 elapsed (lazy release on read)"},
-            )
-            await escrow_service.release(
-                db, order_id=order.id, amount_idr=order.total_idr,
-                description="Auto-release after D+3 (lazy)",
-            )
-            order.released_at = datetime.now(timezone.utc)
-            # Loyalty: earn points on auto-release too (idempotent per order).
-            from models.loyalty import accrue_for_order
-            await accrue_for_order(db, profile_id=order.profile_id, order_id=order.id, total_idr=order.total_idr)
-        except StateTransitionError:
-            pass
+        order = await lock_order_for_update(db, order_id)
+        if order and order.state == OrderState.RECEIVED:
+            try:
+                await transition(
+                    db, order, OrderState.ESCROW_RELEASED,
+                    actor="system:auto_release",
+                    payload={"reason": "D+3 elapsed (lazy release on read)"},
+                )
+                await escrow_service.release(
+                    db, order_id=order.id, amount_idr=order.total_idr,
+                    description="Auto-release after D+3 (lazy)",
+                )
+                order.released_at = datetime.now(timezone.utc)
+                # Loyalty: earn points on auto-release too (idempotent per order).
+                from models.loyalty import accrue_for_order
+                await accrue_for_order(db, profile_id=order.profile_id, order_id=order.id, total_idr=order.total_idr)
+            except StateTransitionError:
+                pass
 
     # Also include the ledger
     ledger_result = await db.execute(
@@ -414,7 +421,7 @@ async def create_invoice(
     ``payment_provider``).
     """
     from models.brand import Brand
-    from services import oy_invoices, xendit_invoices
+    from services import oy_invoices, sento_invoices, xendit_invoices
 
     order = await lock_order_for_update(db, order_id)
     if not order or order.profile_id != profile.id:
@@ -440,6 +447,8 @@ async def create_invoice(
 
     if provider == "oy":
         response = await oy_invoices.create_invoice_for_order(db, order)
+    elif provider == "sento":
+        response = await sento_invoices.create_invoice_for_order(db, order)
     else:
         response = await xendit_invoices.create_invoice_for_order(db, order)
     return {
@@ -452,7 +461,8 @@ async def create_invoice(
             or response.get("checkout_url")
             or response.get("payment_url")
         ),
-        "expires_at": response.get("expiry_date"),
+        "expires_at": response.get("expires_at") or response.get("expiry_date"),
+        "qris_image_url": response.get("qris_image_url"),
     }
 
 

@@ -56,6 +56,14 @@ class Brand(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     oy_callback_secret: Mapped[str | None] = mapped_column(String(128), nullable=True)
     oy_store_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
+    # Sento credentials. Per-Brand — same pattern as the OY block above.
+    # Sento's API uses ``x-api-key`` + ``x-username`` headers (no HMAC);
+    # ``sento_callback_secret`` is reserved for a future shared-secret
+    # scheme (Sento's docs don't currently document one). Plaintext v1.
+    sento_api_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    sento_username: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    sento_callback_secret: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
     # Biteship pickup origin used as the ``origin`` payload when creating
     # shipment orders. Shape: {contact_name, contact_phone, contact_email,
     # address, postal_code, latitude, longitude}.

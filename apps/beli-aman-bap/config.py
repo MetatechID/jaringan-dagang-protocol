@@ -112,6 +112,26 @@ class Settings(BaseSettings):
     # host, not prod. Read by oy_invoices._mock_mode() fallback.
     mock_checkout_public_base: str = ""
 
+    # --- Sento (https://api-docs.sento.id/) ---
+    # Base URL for Sento's HTTP API. Default is the sandbox
+    # (https://api-demo.sento.id); production overrides via
+    # SENTO_BASE_URL=https://partner.sento.id in .env. Read by
+    # services.sento_client._base_url().
+    sento_base_url: str = "https://api-demo.sento.id"
+    # Master API key (per-Brand override lives in Brand.sento_api_key). Send
+    # in the ``x-api-key`` header. Empty value → mock-mode (synthetic URL,
+    # same pattern as OY).
+    sento_api_key: str = ""
+    # Default username; per-Brand override in Brand.sento_username. Send in
+    # the ``x-username`` header.
+    sento_default_username: str = ""
+    # Public BAP base URL Sento posts callbacks to. Constructs the invoice
+    # success/failure redirect URLs the same way oy_callback_base_url does.
+    sento_callback_base_url: str = "https://api.beli-aman.metatech.id"
+    # How long a Sento payment link stays valid before Sento marks it
+    # EXPIRED. 24h matches OY's default.
+    sento_invoice_duration_seconds: int = 86400  # 24h
+
     # --- Biteship (live courier API) ---
     biteship_api_base: str = "https://api.biteship.com"
     biteship_api_key: str = ""

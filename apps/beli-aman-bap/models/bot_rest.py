@@ -189,7 +189,7 @@ class Cart(Base):
     invoice_id: Mapped[Optional[str]] = mapped_column(
         String(64), nullable=True, index=True
     )
-    # Vendor tag ("xendit" | "oy") written alongside invoice_id. Lets the
+    # Vendor tag ("xendit" | "oy" | "sento") written alongside invoice_id. Lets the
     # webhook router pick the right brand-resolver without string-sniffing
     # external_id prefixes. Index lives on (invoice_provider, invoice_id)
     # in the migration (composite).
