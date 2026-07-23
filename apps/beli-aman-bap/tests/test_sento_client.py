@@ -175,6 +175,9 @@ class TestCreateInvoicePayload:
         assert body["sender_name"] == "Safiya"
         assert body["is_open"] is False
         assert body["include_admin_fee"] is False
+        # Default enabled banks for the BANK_TRANSFER rail: BRI, Mandiri,
+        # BNI, BCA (002, 008, 009, 014). Caller omits the arg → default applies.
+        assert body["list_enabled_banks"] == "002,008,009,014"
 
         req = captured[0]
         assert req.method == "POST"

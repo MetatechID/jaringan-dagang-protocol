@@ -139,11 +139,20 @@ async def create_invoice_for_cart(db: AsyncSession, cart: Cart) -> dict:
     return norm
 
 
-async def create_invoice_for_order(db: AsyncSession, order: Order) -> dict:
+async def create_invoice_for_order(
+    db: AsyncSession, order: Order, *, buyer_email: str | None = None,
+) -> dict:
     """Mint a Sento Payment Link transaction for a CART_REVIEWED Order (SDK flow).
 
     Stashes the result on the order's ``payment_method_snapshot`` so the Sento
     webhook can recover it. Returns the normalized response.
+
+    ``buyer_email`` is the authenticated profile's email (from
+    ``get_current_profile`` in the router). It takes precedence over any
+    ``email`` stashed on ``order.shipping_address`` — the address snapshot
+    built by ``advance_to_authed`` doesn't carry an email key, so without
+    this the Sento link would get no buyer email at all. Falls back to
+    ``None`` gracefully for phone-only / custom-token profiles.
     """
     brand_q = await db.execute(select(Brand).where(Brand.id == order.brand_id))
     brand = brand_q.scalar_one_or_none()
@@ -193,7 +202,7 @@ async def create_invoice_for_order(db: AsyncSession, order: Order) -> dict:
         + (" — " + ", ".join(f"{i['name']} x{i['quantity']}" for i in items)
             if items else "")
     )
-    email = (order.shipping_address or {}).get("email")
+    email = buyer_email or (order.shipping_address or {}).get("email")
     sender_name = (order.shipping_address or {}).get("recipient_name") or "Buyer"
 
     response = await sento_client.create_invoice(

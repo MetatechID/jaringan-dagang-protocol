@@ -103,11 +103,11 @@ async def create_invoice(
     is_open: bool = False,
     include_admin_fee: bool = False,
     list_disabled_payment_methods: str | None = None,
-    # ponytail: Sento's create-v2 requires this. Default "002" (BI code for
-    # BCA) is the only code in the docs sample; also constrains the
-    # transaction to QRIS in staging. Add a Brand.sento_enabled_banks column
-    # when multi-bank is needed.
-    list_enabled_banks: str | None = "002",
+    # ponytail: Sento's create-v2 requires this. Comma-separated bank-code
+    # string. 002=BRI, 008=Bank Mandiri, 009=BNI, 014=BCA (per sento-docs
+    # Disbursement Bank Codes table). Add a Brand.sento_enabled_banks column
+    # when per-brand multi-bank config is needed.
+    list_enabled_banks: str | None = "002,008,009,014",
     expiration: str | None = None,  # "yyyy-MM-dd HH:mm:ss"
     va_display_name: str | None = None,
     callback_url: str | None = None,

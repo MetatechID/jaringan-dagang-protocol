@@ -285,6 +285,49 @@ class TestCreateInvoiceForOrder:
         await sento_invoices.create_invoice_for_order(db, order)
         assert captured["partner_tx_id"] == "order-order-abc"
 
+    @pytest.mark.asyncio
+    async def test_buyer_email_takes_precedence_over_shipping_address(self, monkeypatch):
+        """The router passes profile.email as buyer_email; it must win over
+        any email stashed on order.shipping_address (which advance_to_authed
+        doesn't populate anyway, but the precedence protects callers that do)."""
+        brand = StubBrand()
+        db = _make_session(brand)
+        order = StubOrder()  # shipping_address carries "buyer@example.com"
+
+        captured: dict = {}
+
+        async def fake_create_invoice(**kwargs):
+            captured.update(kwargs)
+            return _link_response()
+
+        monkeypatch.setattr(
+            sento_invoices.sento_client, "create_invoice", fake_create_invoice,
+        )
+        await sento_invoices.create_invoice_for_order(
+            db, order, buyer_email="auth-user@example.com",
+        )
+        assert captured["email"] == "auth-user@example.com"
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_shipping_address_email_when_no_buyer_email(self, monkeypatch):
+        """When buyer_email is None (phone-only profile, or old callers), fall
+        back to order.shipping_address["email"] as before — non-breaking."""
+        brand = StubBrand()
+        db = _make_session(brand)
+        order = StubOrder()  # shipping_address carries "buyer@example.com"
+
+        captured: dict = {}
+
+        async def fake_create_invoice(**kwargs):
+            captured.update(kwargs)
+            return _link_response()
+
+        monkeypatch.setattr(
+            sento_invoices.sento_client, "create_invoice", fake_create_invoice,
+        )
+        await sento_invoices.create_invoice_for_order(db, order)
+        assert captured["email"] == "buyer@example.com"
+
 
 class TestMockModeMatrix:
     """`_mock_mode` truth table: True when brand is None, OR provider != 'sento',

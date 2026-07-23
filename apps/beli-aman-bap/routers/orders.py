@@ -448,7 +448,14 @@ async def create_invoice(
     if provider == "oy":
         response = await oy_invoices.create_invoice_for_order(db, order)
     elif provider == "sento":
-        response = await sento_invoices.create_invoice_for_order(db, order)
+        # ponytail: thread the authenticated buyer's email so the Sento
+        # payment link is sent to them — the order's shipping_address
+        # snapshot (built by advance_to_authed) doesn't carry an email key,
+        # so without this the link gets no buyer email. OY/Xendit have the
+        # same latent gap but are out of scope here.
+        response = await sento_invoices.create_invoice_for_order(
+            db, order, buyer_email=profile.email,
+        )
     else:
         response = await xendit_invoices.create_invoice_for_order(db, order)
     return {
