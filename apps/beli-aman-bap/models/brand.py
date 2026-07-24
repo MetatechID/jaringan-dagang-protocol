@@ -64,6 +64,19 @@ class Brand(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     sento_username: Mapped[str | None] = mapped_column(String(128), nullable=True)
     sento_callback_secret: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
+    # Sento disbursement ("remit") target — the brand/seller's bank account the
+    # BAP pays out to on escrow release when payment_provider == "sento". Unlike
+    # Xendit there's no per-brand sub-account; buyer funds sit in the partner's
+    # single Sento balance and we disburse from it to the bank below.
+    # ``sento_disbursement_bank_code`` is Sento's NUMERIC bank code (e.g. "014"
+    # = BCA, "008" = Mandiri) — different from Xendit's string codes ("BCA").
+    # ``sento_disbursement_bank_account`` is digits only. ``holder_name`` is
+    # record/UI parity only — Sento's create-disbursement does NOT accept a
+    # recipient name (it's returned in the callback, not sent at create).
+    sento_disbursement_bank_code: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    sento_disbursement_bank_account: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    sento_disbursement_holder_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     # Biteship pickup origin used as the ``origin`` payload when creating
     # shipment orders. Shape: {contact_name, contact_phone, contact_email,
     # address, postal_code, latitude, longitude}.

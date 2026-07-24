@@ -25,6 +25,7 @@ from models.escrow_ledger import (
 )
 from models.order import Order
 from services import xendit_client, xendit_disbursements
+from services.sento_client import SentoError
 from services.xendit_client import XenditError
 from services.xendit_disbursements import DisbursementSkipped
 
@@ -95,25 +96,42 @@ async def release(
         _LOG.error("release() called with unknown order_id=%s", order_id)
         return entry
 
+    # Disbursement provider is per-Brand — mirror the invoice leg's dispatch
+    # (routers/orders.py create_invoice). Sento brands disburse via the remit
+    # API; everything else (default "xendit") via Xendit. Both services return
+    # {"id": <psp-id>} and raise the shared DisbursementSkipped when the brand
+    # isn't payout-configured, so this branch stays uniform.
+    from models.brand import Brand
+    from services import sento_disbursements
+
+    brand_q = await db.execute(select(Brand).where(Brand.id == order.brand_id))
+    brand = brand_q.scalar_one_or_none()
+    provider = (brand.payment_provider if brand is not None else "xendit") or "xendit"
+
     try:
-        response = await xendit_disbursements.disburse_to_seller(
-            db, order=order, description=description,
-        )
+        if provider == "sento":
+            response = await sento_disbursements.disburse_to_seller(
+                db, order=order, description=description,
+            )
+        else:
+            response = await xendit_disbursements.disburse_to_seller(
+                db, order=order, description=description,
+            )
         entry.external_ref = response.get("id")
         _LOG.info(
-            "Xendit disbursement %s kicked off for order %s",
-            entry.external_ref, order_id,
+            "%s disbursement %s kicked off for order %s",
+            provider, entry.external_ref, order_id,
         )
     except DisbursementSkipped as e:
         _LOG.warning(
             "Disbursement skipped for order %s (ops manual): %s",
             order_id, e,
         )
-    except XenditError as e:
+    except (XenditError, SentoError) as e:
         entry.status = EscrowEntryStatus.FAILED
         _LOG.exception(
-            "Xendit disbursement FAILED for order %s: %s — ledger row marked FAILED",
-            order_id, e,
+            "%s disbursement FAILED for order %s: %s — ledger row marked FAILED",
+            provider, order_id, e,
         )
     except Exception:  # noqa: BLE001
         entry.status = EscrowEntryStatus.FAILED

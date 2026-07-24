@@ -288,3 +288,148 @@ async def _handle_failed(db: AsyncSession, partner_tx_id: str) -> dict:
         cart.payment_state = "failed"
         return {"ok": True, "cart_id": cart.id, "payment_state": cart.payment_state}
     return {"ok": True, "partner_tx_id": partner_tx_id, "failed": True}
+
+
+# ---------------------------------------------------------------------------
+# Disbursement ("remit") callback. Sento fires this when a disbursement
+# finishes — terminal codes 000 (success) / 300 (failed) / 301 (pending).
+# The callback URL is dashboard-configured (Settings → Developer Option →
+# Callback Configuration → "API Disbursement"), NOT per-request, and Sento
+# does not document HMAC signing — so, like the /invoice route, we treat the
+# callback as advisory and re-verify via the status API before mutating.
+# ---------------------------------------------------------------------------
+
+# Sento disbursement status codes (see sento-docs Fund Disbursement). Final:
+_REMIT_SUCCESS = "000"
+_REMIT_FAILED = {"300", "206", "225"}  # failed / balance-not-enough / over-limit
+_REMIT_PENDING = "301"                  # unclear answer from bank network — stay PENDING
+
+
+@router.post("/remit")
+async def remit_callback(
+    request: Request,
+    # Accepted for a future Sento-side signing scheme; v1 verifies via the
+    # status API instead. Remove when Sento documents signing.
+    x_sento_signature: str | None = Header(default=None, alias="x-sento-signature"),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Receive Sento disbursement ("remit") status callbacks and flip the
+    matching PENDING RELEASE escrow-ledger row to COMPLETED / FAILED."""
+    body_bytes = await request.body()
+    if not body_bytes:
+        raise HTTPException(400, "Empty callback body")
+    try:
+        body: dict[str, Any] = await request.json()
+    except Exception:  # noqa: BLE001
+        raise HTTPException(400, "Invalid JSON body")
+
+    partner_tx_id = body.get("partner_tx_id")
+    if not partner_tx_id or not isinstance(partner_tx_id, str):
+        raise HTTPException(400, "Missing partner_tx_id in callback")
+    # Only order-release disbursements use this receiver. Carts have no
+    # disbursement leg. ``partner_tx_id`` shape: "order-{id}-release".
+    if not partner_tx_id.startswith("order-"):
+        raise HTTPException(400, f"Unrecognized partner_tx_id prefix: {partner_tx_id!r}")
+
+    order_id = partner_tx_id[len("order-"):]
+    if order_id.endswith("-release"):
+        order_id = order_id[: -len("-release")]
+
+    from models.order import Order as _Order
+
+    order = (
+        await db.execute(select(_Order).where(_Order.id == order_id))
+    ).scalar_one_or_none()
+    if order is None:
+        _LOG.warning(
+            "Sento remit callback: no Order for partner_tx_id=%s — refusing",
+            partner_tx_id,
+        )
+        raise HTTPException(404, "Unknown Sento disbursement")
+
+    # Resolve the brand to source Sento creds for the status-API re-check.
+    brand_q = await db.execute(select(Brand).where(Brand.id == order.brand_id))
+    brand = brand_q.scalars().first()
+    if brand is None:
+        _LOG.warning(
+            "Sento remit callback: no Brand for order %s — refusing", order_id,
+        )
+        raise HTTPException(404, "Unknown brand for disbursement")
+
+    # Advisory callback → re-verify the live status. If Sento says the
+    # disbursement doesn't exist (204), bounce — defense against forged POSTs.
+    # For other Sento errors (5xx, network) proceed with the body's status.
+    try:
+        status_resp = await sento_client.get_disbursement_status(
+            partner_tx_id=partner_tx_id,
+            api_key=brand.sento_api_key,
+            username=brand.sento_username,
+        )
+    except SentoError as e:
+        if e.status_code == 404:
+            _LOG.warning(
+                "Sento remit status API 404 for partner_tx_id=%s — refusing",
+                partner_tx_id,
+            )
+            raise HTTPException(404, "Sento reports disbursement not found")
+        _LOG.warning(
+            "Sento remit status API error %s for partner_tx_id=%s — "
+            "proceeding with body status (advisory)",
+            e.status_code, partner_tx_id,
+        )
+        status_resp = body
+
+    code = str((status_resp.get("status") or {}).get("code") or "")
+    trx_id = status_resp.get("trx_id") or body.get("trx_id") or None
+    _LOG.info(
+        "Sento remit callback: order=%s partner_tx_id=%s code=%s",
+        order_id, partner_tx_id, code,
+    )
+
+    # Find the PENDING RELEASE ledger row for this order. (escrow.release
+    # writes exactly one RELEASE row per release; match on order + type +
+    # PENDING so we only flip an unsettled row.)
+    ledger_q = await db.execute(
+        select(EscrowLedger).where(
+            EscrowLedger.order_id == order_id,
+            EscrowLedger.entry_type == EscrowEntryType.RELEASE,
+            EscrowLedger.status == EscrowEntryStatus.PENDING,
+        )
+    )
+    row = ledger_q.scalars().first()
+    if row is None:
+        _LOG.warning(
+            "Sento remit callback: no PENDING RELEASE row for order %s "
+            "(already settled or never released?) — no-op", order_id,
+        )
+        return {"ok": True, "order_id": order_id, "code": code, "noop": True}
+
+    if code == _REMIT_SUCCESS:
+        row.status = EscrowEntryStatus.COMPLETED
+        if trx_id:
+            row.external_ref = trx_id
+        desc = row.description or ""
+        receipt = status_resp.get("receipt_url") or body.get("receipt_url")
+        if receipt and receipt not in desc:
+            row.description = f"{desc} — receipt: {receipt}".strip(" —")
+    elif code in _REMIT_FAILED:
+        row.status = EscrowEntryStatus.FAILED
+        reason = (status_resp.get("tx_status_description")
+                  or body.get("tx_status_description")
+                  or (status_resp.get("status") or {}).get("message"))
+        if reason:
+            row.description = f"{row.description or ''} — failed: {reason}".strip(" —")
+    elif code == _REMIT_PENDING:
+        # Non-final: leave the row PENDING — a later callback or a status poll
+        # resolves it. Still refresh external_ref if we now have a trx_id.
+        if trx_id and not row.external_ref:
+            row.external_ref = trx_id
+        return {"ok": True, "order_id": order_id, "code": code, "status": "pending"}
+    else:
+        _LOG.warning(
+            "Sento remit callback: unhandled code=%s for order %s — no-op",
+            code, order_id,
+        )
+        return {"ok": True, "order_id": order_id, "code": code, "noop": True}
+
+    return {"ok": True, "order_id": order_id, "code": code, "status": row.status.value}

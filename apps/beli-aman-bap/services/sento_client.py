@@ -195,3 +195,112 @@ async def create_refund(*, partner_tx_id: str, amount_idr: int) -> dict:
     # the docs we sampled. Wire when BPP side requires Sento-native
     # refunds — until then, escalate via Sento dashboard like Xendit.
     raise NotImplementedError("Sento refunds — wire when needed")
+
+
+# ---------------------------------------------------------------------------
+# Disbursement ("remit") — money-out. See sento-docs "Fund Disbursement".
+# Buyer payments settle into the partner's single Sento balance; on escrow
+# release we disburse from that balance to the brand/seller's bank account.
+# Auth is the same x-api-key + x-username as the Payment Link endpoints.
+# ---------------------------------------------------------------------------
+
+
+async def create_disbursement(
+    *,
+    recipient_bank: str,
+    recipient_account: str,
+    amount_idr: int,
+    partner_trx_id: str,
+    note: str | None = None,
+    email: str | None = None,
+    additional_data: dict | None = None,
+    api_key: str | None = None,
+    username: str | None = None,
+) -> dict:
+    """Create a Sento disbursement (``POST /api/remit``).
+
+    ``recipient_bank`` is Sento's NUMERIC bank code (e.g. "014" BCA, "008"
+    Mandiri). ``recipient_account`` is digits only. ``partner_trx_id`` is our
+    idempotency / correlation key — Sento echoes it back in every callback /
+    status response and rejects duplicates (code 203). Minimum amount is
+    Rp10.000. ``sender_info`` is intentionally omitted: Sento disburses from
+    the partner's registered bank account (Settings > Bank Accounts), which is
+    the platform's source account — not the recipient's.
+
+    Note: Sento returns **HTTP 200 with a business ``status.code``** even for
+    rejections (e.g. 203 duplicate, 300 failed), so this does NOT raise
+    ``SentoError`` for those — the caller interprets ``status.code`` /
+    ``trx_id``. Only a non-2xx HTTP response raises ``SentoError``. A successful
+    create is code ``101`` ("Request is Processed", non-final) with a non-empty
+    ``trx_id``; rejections return ``trx_id == ""``.
+
+    Returns the raw Sento response (``status{code,message}``, ``amount``,
+    ``recipient_bank``, ``recipient_account``, ``trx_id``, ``partner_trx_id``,
+    ``timestamp``).
+    """
+    payload: dict[str, Any] = {
+        "recipient_bank": recipient_bank,
+        "recipient_account": recipient_account,
+        "amount": int(amount_idr),
+        "partner_trx_id": partner_trx_id,
+    }
+    if note:
+        payload["note"] = note
+    if email:
+        payload["email"] = email
+    if additional_data:
+        payload["additional_data"] = additional_data
+
+    return await _request(
+        "POST",
+        "/api/remit",
+        api_key=api_key,
+        username=username,
+        json=payload,
+    )
+
+
+async def get_disbursement_status(
+    *,
+    partner_trx_id: str,
+    send_callback: bool = False,
+    api_key: str | None = None,
+    username: str | None = None,
+) -> dict:
+    """Poll a disbursement's status by ``partner_trx_id``
+    (``POST /api/remit-status``).
+
+    Terminal codes: ``000`` success, ``300`` failed (also ``206`` balance-
+    not-enough, ``225`` exceeds max). Non-final: ``101``/``102`` in progress,
+    ``301`` pending, ``504``/``999`` unknown. ``204`` = the partner_tx_id was
+    never created. Set ``send_callback=True`` to ask Sento to re-fire the
+    disbursement callback (useful when the dashboard-configured callback URL
+    didn't receive one). Sento suggests polling ~60s after create, and again
+    after a create timeout, until a final status.
+    """
+    payload: dict[str, Any] = {"partner_trx_id": partner_trx_id}
+    if send_callback:
+        payload["send_callback"] = True
+    return await _request(
+        "POST",
+        "/api/remit-status",
+        api_key=api_key,
+        username=username,
+        json=payload,
+    )
+
+
+async def get_balance(*, api_key: str | None = None, username: str | None = None) -> dict:
+    """Fetch the partner's Sento balance (``GET /api/balance``).
+
+    Returns ``status``, ``balance``, ``availableBalance`` (the figure usable for
+    disbursement = balance + available overdraft - pending), ``pendingBalance``,
+    ``overdraftBalance``, ``overbookingBalance``, ``timestamp``. Optional
+    pre-check before disbursing; not required for the happy path.
+    """
+    return await _request(
+        "GET",
+        "/api/balance",
+        api_key=api_key,
+        username=username,
+    )

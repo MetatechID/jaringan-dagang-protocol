@@ -73,6 +73,9 @@ class PayoutsIn(BaseModel):
     xendit_disbursement_bank_code: str | None = None
     xendit_disbursement_bank_account: str | None = None
     xendit_disbursement_holder_name: str | None = None
+    sento_disbursement_bank_code: str | None = None
+    sento_disbursement_bank_account: str | None = None
+    sento_disbursement_holder_name: str | None = None
     biteship_origin_address: dict | None = None
     biteship_default_courier: str | None = None
 
@@ -90,6 +93,16 @@ def _payouts_view(brand: Brand) -> dict:
             else brand.xendit_disbursement_bank_account
         ),
         "xendit_disbursement_holder_name": brand.xendit_disbursement_holder_name,
+        # Sento disbursement ("remit") target — used when payment_provider ==
+        # "sento". Bank code is Sento's NUMERIC code (e.g. "014" BCA).
+        "sento_disbursement_bank_code": brand.sento_disbursement_bank_code,
+        "sento_disbursement_bank_account_masked": (
+            "•••• " + brand.sento_disbursement_bank_account[-4:]
+            if brand.sento_disbursement_bank_account
+            and len(brand.sento_disbursement_bank_account) > 4
+            else brand.sento_disbursement_bank_account
+        ),
+        "sento_disbursement_holder_name": brand.sento_disbursement_holder_name,
         "biteship_origin_address": brand.biteship_origin_address,
         "biteship_default_courier": brand.biteship_default_courier,
     }
@@ -149,6 +162,12 @@ async def put_payouts(
         brand.xendit_disbursement_bank_account = _normalize(body.xendit_disbursement_bank_account)
     if body.xendit_disbursement_holder_name is not None:
         brand.xendit_disbursement_holder_name = _normalize(body.xendit_disbursement_holder_name)
+    if body.sento_disbursement_bank_code is not None:
+        brand.sento_disbursement_bank_code = _normalize(body.sento_disbursement_bank_code)
+    if body.sento_disbursement_bank_account is not None:
+        brand.sento_disbursement_bank_account = _normalize(body.sento_disbursement_bank_account)
+    if body.sento_disbursement_holder_name is not None:
+        brand.sento_disbursement_holder_name = _normalize(body.sento_disbursement_holder_name)
     if body.biteship_origin_address is not None:
         brand.biteship_origin_address = body.biteship_origin_address or None
     if body.biteship_default_courier is not None:
