@@ -68,6 +68,9 @@ async def get_product(slug: str, product_slug: str) -> dict:
 # ----- Payouts & Fulfillment (vibe-admin) -----
 
 
+ALLOWED_PAYMENT_PROVIDERS = {"xendit", "sento"}
+
+
 class PayoutsIn(BaseModel):
     xendit_sub_account_id: str | None = None
     xendit_disbursement_bank_code: str | None = None
@@ -78,6 +81,9 @@ class PayoutsIn(BaseModel):
     sento_disbursement_holder_name: str | None = None
     biteship_origin_address: dict | None = None
     biteship_default_courier: str | None = None
+    payment_provider: str | None = None
+    courier_provider: str | None = None
+    jubelio_origin_address: dict | None = None
 
 
 def _payouts_view(brand: Brand) -> dict:
@@ -105,7 +111,42 @@ def _payouts_view(brand: Brand) -> dict:
         "sento_disbursement_holder_name": brand.sento_disbursement_holder_name,
         "biteship_origin_address": brand.biteship_origin_address,
         "biteship_default_courier": brand.biteship_default_courier,
+        "payment_provider": (brand.payment_provider or "xendit")
+        if (brand.payment_provider or "xendit") in ALLOWED_PAYMENT_PROVIDERS
+        else "xendit",
+        "courier_provider": "jubelio" if brand.jubelio_enabled else "biteship",
+        "jubelio_origin_address": brand.jubelio_origin_address,
     }
+
+
+_JUBELIO_ORIGIN_KEYS = {
+    "name", "phone", "email", "address", "area_id", "zipcode", "coordinate",
+}
+
+
+def _validate_jubelio_origin(value: dict | None) -> dict | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise HTTPException(422, "jubelio_origin_address must be an object")
+    extra = set(value.keys()) - _JUBELIO_ORIGIN_KEYS
+    if extra:
+        raise HTTPException(422, f"jubelio_origin_address has unknown keys: {sorted(extra)}")
+    coord = value.get("coordinate")
+    if coord is not None:
+        if not isinstance(coord, list) or len(coord) != 2:
+            raise HTTPException(422, "jubelio_origin_address.coordinate must be a 2-element list")
+        try:
+            lat = float(coord[0])
+            lng = float(coord[1])
+        except (TypeError, ValueError):
+            raise HTTPException(422, "jubelio_origin_address.coordinate must be numeric")
+        # math.isfinite catches "NaN" and "Infinity" / "-Infinity" strings,
+        # which float() otherwise accepts silently.
+        import math
+        if not (math.isfinite(lat) and math.isfinite(lng)):
+            raise HTTPException(422, "jubelio_origin_address.coordinate must be finite")
+    return value
 
 
 async def _resolve_brand_for_edit(
@@ -172,6 +213,24 @@ async def put_payouts(
         brand.biteship_origin_address = body.biteship_origin_address or None
     if body.biteship_default_courier is not None:
         brand.biteship_default_courier = _normalize(body.biteship_default_courier)
+    if body.payment_provider is not None:
+        normalized_pp = _normalize(body.payment_provider)
+        brand.payment_provider = (
+            normalized_pp if normalized_pp in ALLOWED_PAYMENT_PROVIDERS else "xendit"
+        )
+    if body.courier_provider is not None:
+        brand.jubelio_enabled = _normalize(body.courier_provider) == "jubelio"
+    # jubelio_origin_address — separate from the "is not None = skip" pattern
+    # used above because JSON ``null`` here means "explicit clear" (matches
+    # the field's read shape, which returns ``None`` when the column is
+    # unset). Pydantic can't distinguish "missing" from "null" in an
+    # ``Optional`` field, so we always process the body field. Empty dict
+    # also clears (handy for callers that want to clear without knowing
+    # the full key list).
+    brand.jubelio_origin_address = _validate_jubelio_origin(
+        body.jubelio_origin_address if body.jubelio_origin_address
+        else None
+    )
 
     await db.flush()
     return _payouts_view(brand)
