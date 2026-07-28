@@ -25,7 +25,15 @@ ALLOWED: dict[OrderState, set[OrderState]] = {
         OrderState.DISPUTED,
         OrderState.REFUNDED,
     },
-    OrderState.FULFILLING: {OrderState.RECEIVED, OrderState.DISPUTED},
+    OrderState.FULFILLING: {
+        OrderState.RECEIVED,
+        OrderState.DISPUTED,
+        # Seller-cancelled AWB before pickup — the order reverts to
+        # ESCROW_HELD so the same escrowed funds back the re-booking.
+        # Stays allowed alongside DISPUTED (courier-side problem) and
+        # RECEIVED (delivered) — they are independent branches.
+        OrderState.ESCROW_HELD,
+    },
     OrderState.RECEIVED: {OrderState.ESCROW_RELEASED, OrderState.DISPUTED},
     OrderState.DISPUTED: {OrderState.ESCROW_RELEASED, OrderState.REFUNDED},
     OrderState.ESCROW_RELEASED: set(),

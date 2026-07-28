@@ -336,6 +336,92 @@ class BookShipmentIn(BaseModel):
     courier_service_code: str
 
 
+class CancelShipmentIn(BaseModel):
+    reason: str = "Barang belum siap"
+
+
+@router.post("/{order_id}/ship/cancel", dependencies=[Depends(require_admin_token)])
+async def cancel_shipment(
+    order_id: str,
+    body: CancelShipmentIn,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Cancel a booked shipment for a FULFILLING order.
+
+    Admin-token-auth (same as ``POST /{order_id}/ship``). Dispatches to
+    the brand's active carrier via ``services.carriers.cancel``; the
+    state-machine then moves the order FULFILLING → ESCROW_HELD so the
+    seller can re-book (e.g. with a different courier or service).
+
+    Distinguishable error responses:
+      404 — order not found
+      409 — not in FULFILLING state, or carrier-rejected the cancellation
+            (sub-codes surface in the body: ``courier_refused`` / ``pickup_window_closed``)
+      501 — active carrier has no cancel implementation (Biteship today)
+      502 — generic carrier-level failure
+    """
+    from services import carriers as carrier_service
+
+    order = await lock_order_for_update(db, order_id)
+    if order is None:
+        raise HTTPException(404, "Order not found")
+    if order.state != OrderState.FULFILLING:
+        raise HTTPException(
+            409,
+            f"Cannot cancel shipment in state {order.state.value}; "
+            "order must be FULFILLING",
+        )
+    if not order.fulfillment_awb:
+        raise HTTPException(
+            409, "Order has no AWB; nothing to cancel"
+        )
+
+    brand_q = await db.execute(select(Brand).where(Brand.id == order.brand_id))
+    brand = brand_q.scalar_one_or_none()
+
+    try:
+        result = await carrier_service.cancel(
+            brand=brand, order=order, reason=body.reason
+        )
+    except carrier_service.CourierRejection as e:
+        raise HTTPException(
+            409, f"courier_refused: {e}"
+        )
+    except carrier_service.PickupWindowClosed as e:
+        raise HTTPException(
+            409, f"pickup_window_closed: {e}"
+        )
+    except carrier_service.CancelNotSupported as e:
+        raise HTTPException(501, str(e))
+    except carrier_service.ShippingError as e:
+        raise HTTPException(502, f"Cancel failed: {e}")
+
+    # Clear AWB / carrier-specific id / shipped_at so re-book finds a
+    # clean order. State transition lands us in ESCROW_HELD; the
+    # existing state-machine ALLOWED table now permits that edge.
+    order.fulfillment_awb = None
+    order.fulfillment_tracking_url = None
+    order.jubelio_shipment_id = None
+    order.biteship_order_id = None
+    order.shipped_at = None
+
+    try:
+        await transition(
+            db, order, OrderState.ESCROW_HELD,
+            actor="seller",
+            payload={
+                "carrier": order.carrier,
+                "awb": result.get("awb"),
+                "cancel_status": result.get("status"),
+                "reason": body.reason,
+            },
+        )
+    except StateTransitionError as e:
+        raise HTTPException(409, str(e))
+
+    return _serialize_order(order)
+
+
 @router.post("/{order_id}/ship", dependencies=[Depends(require_admin_token)])
 async def book_shipment(
     order_id: str,
