@@ -313,3 +313,28 @@ async def cancel_shipment(*, awb_code: str, reason: str = "Barang belum siap") -
     if resp.status_code >= 400:
         raise ShippingError(f"Jubelio cancel {resp.status_code}: {resp.text!r}")
     return resp.json()
+
+
+async def get_shipment_by_awb(awb: str) -> dict[str, Any]:
+    """Fetch full shipment detail (``GET /shipments/awb/{awb}``).
+
+    Contract v1.8 §3.3. Returns the full document including the
+    ``tracking[]`` event list, ``latest_status``, ETA, origin/destination,
+    pricing. Used as the polling fallback when a webhook is missed
+    (``POST /orders/{id}/tracking/refresh``).
+
+    Raises ``ShippingError`` on non-2xx (404 when the AWB is unknown,
+    401 when the token is wrong, 5xx on Jubelio-side trouble).
+    """
+    _require_creds()
+    headers = await _auth_headers()
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.get(
+            f"{_api_base()}/shipments/awb/{awb}",
+            headers=headers,
+        )
+    if resp.status_code >= 400:
+        raise ShippingError(
+            f"Jubelio detail {resp.status_code}: {resp.text!r}"
+        )
+    return resp.json()

@@ -137,14 +137,14 @@ class TestSignature:
             "routers.webhooks_jubelio.lock_order_for_update",
             _stub_lock(order),
         )
-        from services.state_machine import OrderState
 
         async def _fake_transition(db, o, new_state, **_):
             o.state = new_state
             return None
 
+        # After the refactor, transition lives in services.shipment_events.
         monkeypatch.setattr(
-            "routers.webhooks_jubelio.transition", _fake_transition
+            "services.shipment_events.transition", _fake_transition
         )
 
         resp = client.post(
@@ -299,7 +299,7 @@ class TestStatusDispatch:
             return None
 
         monkeypatch.setattr(
-            "routers.webhooks_jubelio.transition", _fake_transition
+            "services.shipment_events.transition", _fake_transition
         )
         status, body = self._post(client, app, "DELIVERED")
         assert status == 200, body
@@ -318,7 +318,7 @@ class TestStatusDispatch:
             return None
 
         monkeypatch.setattr(
-            "routers.webhooks_jubelio.transition", _fake_transition
+            "services.shipment_events.transition", _fake_transition
         )
         status, body = self._post(client, app, "CANCELED")
         assert status == 200, body
@@ -333,7 +333,7 @@ class TestStatusDispatch:
             return None
 
         monkeypatch.setattr(
-            "routers.webhooks_jubelio.transition", _fake_transition
+            "services.shipment_events.transition", _fake_transition
         )
         status, body = self._post(client, app, "ON_DELIVERY")
         assert status == 200, body

@@ -422,6 +422,59 @@ async def cancel_shipment(
     return _serialize_order(order)
 
 
+@router.post("/{order_id}/tracking/refresh", dependencies=[Depends(require_admin_token)])
+async def refresh_tracking(
+    order_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Forcibly pull the latest tracking state from the carrier.
+
+    Poll-fallback for when a webhook delivery was missed. Same auth as
+    ``/ship`` and ``/ship/cancel`` (admin token). The dispatch rule is
+    owned by ``services.shipment_events.apply_shipment_event`` — exactly
+    the rule the webhook uses — so this endpoint is interchangeable
+    with a delayed webhook delivery.
+
+    Errors:
+      404 — order not found
+      409 — not in FULFILLING, or no AWB to poll
+      502 — carrier returned non-2xx (e.g. AWB gone from their side)
+    """
+    from services import jubelio as jubelio_service
+    from services.shipment_events import apply_shipment_event
+
+    order = await lock_order_for_update(db, order_id)
+    if order is None:
+        raise HTTPException(404, "Order not found")
+    if order.state != OrderState.FULFILLING:
+        raise HTTPException(
+            409,
+            f"Cannot refresh tracking in state {order.state.value}; "
+            "order must be FULFILLING",
+        )
+    if not order.fulfillment_awb:
+        raise HTTPException(
+            409, "Order has no AWB; nothing to track yet"
+        )
+    if order.carrier != "jubelio":
+        raise HTTPException(
+            409,
+            f"Tracking refresh is wired for Jubelio only "
+            f"(active carrier: {order.carrier})"
+        )
+
+    try:
+        body = await jubelio_service.get_shipment_by_awb(order.fulfillment_awb)
+    except jubelio_service.ShippingError as e:
+        raise HTTPException(502, f"Tracking refresh failed: {e}")
+
+    await apply_shipment_event(
+        db=db, order=order, body=body, source="refresh",
+    )
+
+    return _serialize_order(order)
+
+
 @router.post("/{order_id}/ship", dependencies=[Depends(require_admin_token)])
 async def book_shipment(
     order_id: str,

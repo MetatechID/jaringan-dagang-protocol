@@ -26,14 +26,10 @@ Payload (contract v1.8 §7):
       "tracking": {"date": "...", "status": "...", "status_detail": "..."}
     }
 
-``latest_status`` ∈ WAITING | CONFIRMED_BY_COURIER | ON_THE_WAY_PICK_UP |
-PICKED_UP | ON_DELIVERY | ON_HOLD | DELIVERED | RETURNED | CANCELED |
-SHIPMENT_ISSUE.
-
-Status mapping (mirrors webhooks_biteship):
-  - DELIVERED → order.delivered_at, FULFILLING → RECEIVED, schedule D+3 release
-  - RETURNED / CANCELED / SHIPMENT_ISSUE → DISPUTED, open IGM ticket
-  - everything else → fulfillment_status update only, no state change
+The status-mapping logic (DELIVERED → RECEIVED, RETURNED/CANCELED/SHIPMENT_ISSUE
+→ DISPUTED, in-transit → persist only) lives in
+``services.shipment_events.apply_shipment_event`` so the seller-driven
+tracking-refresh endpoint can replay the same rule.
 """
 
 from __future__ import annotations
@@ -41,7 +37,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy import select
@@ -49,13 +44,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from database import get_db
-from models.order import Order, OrderState
-from services.release_clock import compute_auto_release_at
-from services.state_machine import (
-    StateTransitionError,
-    lock_order_for_update,
-    transition,
-)
+from models.order import Order
+from services.shipment_events import apply_shipment_event
+from services.state_machine import lock_order_for_update
 
 _LOG = logging.getLogger("beli_aman_bap.webhooks_jubelio")
 
@@ -83,10 +74,6 @@ def _verify_signature(body_bytes: bytes, signature: str | None, secret: str) -> 
         raise HTTPException(401, "Invalid Jubelio webhook signature")
 
 
-_DELIVERED = {"DELIVERED"}
-_PROBLEM = {"RETURNED", "CANCELED", "CANCELLED", "SHIPMENT_ISSUE"}
-
-
 @router.post("")
 async def tracking_callback(
     request: Request,
@@ -102,16 +89,13 @@ async def tracking_callback(
 
     shipment_id = body.get("shipment_id")
     ref_no = body.get("ref_no")
-    status_raw = (body.get("latest_status") or "").upper()
-    tracking = body.get("tracking") or {}
-    event_time_raw = tracking.get("date") if isinstance(tracking, dict) else None
 
     if not shipment_id and not ref_no:
         raise HTTPException(400, "Missing shipment_id and ref_no")
 
     _LOG.info(
-        "Jubelio tracking: shipment_id=%s ref_no=%s status=%s",
-        shipment_id, ref_no, status_raw,
+        "Jubelio webhook: shipment_id=%s ref_no=%s status=%s",
+        shipment_id, ref_no, body.get("latest_status"),
     )
 
     # Lookup. Prefer our jubelio_shipment_id; fall back to ref_no (= order.id).
@@ -131,59 +115,20 @@ async def tracking_callback(
         )
         return {"ok": True, "matched": False}
 
-    event_time = _parse_iso(event_time_raw) or datetime.now(timezone.utc)
-    order.fulfillment_status = status_raw.lower() or order.fulfillment_status
-    order.fulfillment_last_event_at = event_time
-    if body.get("awb") and not order.fulfillment_awb:
-        order.fulfillment_awb = body.get("awb")
-    if body.get("tracking_url") and not order.fulfillment_tracking_url:
-        order.fulfillment_tracking_url = body.get("tracking_url")
+    outcome = await apply_shipment_event(
+        db=db, order=order, body=body, source="webhook",
+    )
 
-    if status_raw in _DELIVERED:
-        order.delivered_at = event_time
-        order.auto_release_at = compute_auto_release_at(
-            event_time, settings.auto_release_days,
+    state_value = (
+        order.state.value if hasattr(order.state, "value") else order.state
+    )
+    resp: dict = {"ok": True, "order_id": order.id, "state": state_value}
+    if outcome.get("transitioned_to") is not None:
+        resp["transitioned_to"] = outcome["transitioned_to"]
+    if "fulfillment_status" in outcome:
+        resp["fulfillment_status"] = outcome["fulfillment_status"]
+    if outcome.get("delivered_at") is not None:
+        resp["auto_release_at"] = (
+            order.auto_release_at.isoformat() if order.auto_release_at else None
         )
-        if order.state == OrderState.FULFILLING:
-            try:
-                await transition(
-                    db, order, OrderState.RECEIVED,
-                    actor="system:jubelio_webhook",
-                    payload={"event": "delivered", "shipment_id": shipment_id},
-                )
-            except StateTransitionError as e:
-                _LOG.warning("FULFILLING→RECEIVED rejected for order %s: %s", order.id, e)
-        return {
-            "ok": True,
-            "order_id": order.id,
-            "state": order.state.value,
-            "auto_release_at": order.auto_release_at.isoformat() if order.auto_release_at else None,
-        }
-
-    if status_raw in _PROBLEM:
-        try:
-            await transition(
-                db, order, OrderState.DISPUTED,
-                actor="system:jubelio_webhook",
-                payload={"event": status_raw, "shipment_id": shipment_id},
-            )
-        except StateTransitionError as e:
-            _LOG.warning("→DISPUTED rejected for order %s: %s", order.id, e)
-        return {"ok": True, "order_id": order.id, "state": order.state.value}
-
-    # In-transit events — just persist the status; no state change.
-    return {
-        "ok": True,
-        "order_id": order.id,
-        "state": order.state.value,
-        "fulfillment_status": order.fulfillment_status,
-    }
-
-
-def _parse_iso(s: str | None) -> datetime | None:
-    if not s:
-        return None
-    try:
-        return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
-    except Exception:  # noqa: BLE001
-        return None
+    return resp
