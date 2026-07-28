@@ -1,9 +1,18 @@
 """Jubelio Shipment tracking webhook receiver.
 
 Jubelio POSTs shipment status updates here (configure in Jubelio dashboard →
-Setting → Developer → Webhook). It signs requests with a shared secret in the
-``x-jubelio-signature`` header, which we compare against
-``settings.jubelio_webhook_token``.
+Setting → Developer → Webhook). It signs requests with the HMAC-SHA256 of
+``(raw_body + secret)`` keyed by the shared secret from
+``settings.jubelio_webhook_token``; the resulting hex digest lands in the
+``x-jubelio-signature`` header.
+
+Per contract v1.8 §7 (reference Node.js):
+    signature = crypto.createHmac("sha256", secret)
+                  .update(payload + secret).digest("hex")
+
+We verify the **raw bytes** received (before JSON parsing) so the digests
+match byte-for-byte, and compare with ``hmac.compare_digest`` to avoid
+timing leaks.
 
 Payload (contract v1.8 §7):
     {
@@ -29,6 +38,8 @@ Status mapping (mirrors webhooks_biteship):
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 from datetime import datetime, timezone
 
@@ -51,25 +62,25 @@ _LOG = logging.getLogger("beli_aman_bap.webhooks_jubelio")
 router = APIRouter(prefix="/webhooks/jubelio", tags=["webhooks"])
 
 
-def _verify(signature: str | None, token_query: str | None) -> None:
-    """Compare the Jubelio signature header (or ?token= fallback) to our secret.
+def _verify_signature(body_bytes: bytes, signature: str | None, secret: str) -> None:
+    """Verify the Jubelio webhook signature against ``secret``.
 
-    The contract documents ``x-jubelio-signature`` as a shared secret rather
-    than a documented HMAC scheme, so we do a constant-ish equality check —
-    same defensive pattern as the Biteship receiver. If Jubelio later switches
-    to HMAC-over-body we'd verify the digest here instead.
+    Contract v1.8 §7: HMAC-SHA256(secret, body + secret).hexdigest().
+    Comparison uses ``hmac.compare_digest`` (timing-safe). Raises
+    ``HTTPException(401)`` on mismatch / missing header; ``HTTPException(503)``
+    when the BAP has no secret configured (refuse rather than silently accept
+    unsigned callbacks).
     """
-    expected = settings.jubelio_webhook_token
-    if not expected:
+    if not secret:
         raise HTTPException(503, "JUBELIO_WEBHOOK_TOKEN not configured")
-    candidates = {
-        signature,
-        signature.removeprefix("Bearer ") if signature else None,
-        token_query,
-    }
-    if expected in candidates:
-        return
-    raise HTTPException(401, "Invalid Jubelio webhook signature")
+    if not signature:
+        raise HTTPException(401, "Missing Jubelio signature header")
+    secret_bytes = secret.encode("utf-8")
+    expected = hmac.new(
+        secret_bytes, body_bytes + secret_bytes, hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(expected, signature):
+        raise HTTPException(401, "Invalid Jubelio webhook signature")
 
 
 _DELIVERED = {"DELIVERED"}
@@ -83,7 +94,10 @@ async def tracking_callback(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Receive Jubelio shipment status updates."""
-    _verify(x_jubelio_signature, request.query_params.get("token"))
+    # Read the raw body BEFORE JSON parsing — HMAC is over the exact bytes
+    # Jubelio signed, and FastAPI's json() consumes the stream.
+    body_bytes = await request.body()
+    _verify_signature(body_bytes, x_jubelio_signature, settings.jubelio_webhook_token)
     body = await request.json()
 
     shipment_id = body.get("shipment_id")
