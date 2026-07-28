@@ -70,10 +70,14 @@ async def get_rates(
     destination_postal_code: str,
     items: list[dict[str, Any]],
     total_value: int | None = None,
+    service_category_id: int | None = None,
 ) -> list[dict[str, Any]]:
     """Buyer-facing rate quotes from the brand's active carrier.
 
     ``items`` are the resolved cart lines: {name, value, weight, quantity}.
+
+    ``service_category_id`` is forwarded to Jubelio (calls POST /rates
+    instead of /rates/all when set). Biteship ignores it.
     """
     carrier = active_carrier(brand)
     if carrier == JUBELIO:
@@ -91,6 +95,7 @@ async def get_rates(
             origin_area_id=origin.get("area_id"),
             origin_coordinate=origin.get("coordinate"),
             total_value=total_value,
+            service_category_id=service_category_id,
         )
         return rates
 
