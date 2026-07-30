@@ -204,11 +204,32 @@ async def _dispatch_to_seller(order: Order) -> None:
         else "off"
     )
 
+    # Resolve the buyer's profile so the seller bridge payload carries
+    # `email` (required by the BPP EscrowOrderBuyer schema). The caller's
+    # session is already committed by the time this background task runs,
+    # so we open our own.
+    buyer: dict[str, Any] = {"id": order.profile_id}
+    try:
+        async with async_session() as session:
+            profile = (
+                await session.execute(
+                    select(BeliAmanProfile).where(BeliAmanProfile.id == order.profile_id)
+                )
+            ).scalar_one_or_none()
+        if profile is not None:
+            buyer["email"] = profile.email or ""
+            if profile.display_name:
+                buyer["display_name"] = profile.display_name
+            if profile.photo_url:
+                buyer["photo_url"] = profile.photo_url
+    except Exception:  # noqa: BLE001
+        _LOG.exception("Could not load profile for order %s — buyer.email will be empty", order.id)
+
     order_payload: dict[str, Any] = {
         "order_id": order.id,
         "bap_id": order.bap_id,
         "bpp_id": order.bpp_id,
-        "buyer": {"id": order.profile_id},
+        "buyer": buyer,
         "items": order.items,
         "subtotal_idr": order.subtotal_idr,
         "shipping_idr": order.shipping_idr,
@@ -230,6 +251,6 @@ async def _dispatch_to_seller(order: Order) -> None:
 
     if flow_mode in ("off", "shadow") and _SELLER_BRIDGE_AVAILABLE:
         try:
-            await seller_bridge.post_order(order_dict=order_payload)
+            await seller_bridge.post_order(order_dict=order_payload, order_id=order.id)
         except Exception:  # noqa: BLE001
             _LOG.exception("seller_bridge.post_order failed (non-fatal)")

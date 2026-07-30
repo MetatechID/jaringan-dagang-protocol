@@ -16,7 +16,7 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 
-async def post_order(*, order_dict: dict[str, Any]) -> bool:
+async def post_order(*, order_dict: dict[str, Any], order_id: str = "") -> bool:
     """POST the order snapshot to the seller's internal escrow-orders endpoint."""
     if not settings.seller_bridge_enabled:
         logger.debug("Seller bridge disabled — skipping POST")
@@ -32,13 +32,19 @@ async def post_order(*, order_dict: dict[str, Any]) -> bool:
         async with httpx.AsyncClient(timeout=8) as client:
             resp = await client.post(url, json=order_dict, headers=headers)
         if 200 <= resp.status_code < 300:
-            logger.info("seller-bridge POST ok %s -> %s", url, resp.status_code)
+            logger.info(
+                "seller-bridge POST ok %s -> %s (order_id=%s)",
+                url, resp.status_code, order_id,
+            )
             return True
         logger.warning(
-            "seller-bridge POST non-2xx %s -> %s %s",
-            url, resp.status_code, resp.text[:200],
+            "seller-bridge POST non-2xx %s -> %s %s (order_id=%s)",
+            url, resp.status_code, resp.text[:200], order_id,
         )
         return False
     except Exception as e:
-        logger.warning("seller-bridge POST exception %s: %s", url, e)
+        logger.warning(
+            "seller-bridge POST exception %s (order_id=%s): %s",
+            url, order_id, e,
+        )
         return False
