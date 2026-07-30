@@ -37,6 +37,24 @@ class ShippingError(Exception):
     """Carrier-agnostic booking failure (wraps the underlying carrier error)."""
 
 
+class CancelNotSupported(ShippingError):
+    """Raised when the brand's active carrier has no cancel implementation.
+
+    Today only Biteship falls in this bucket; the seam refuses rather than
+    silently hanging so the router can return 501 / a clear caller message.
+    """
+
+
+class CourierRejection(ShippingError):
+    """The courier itself refused cancellation (per contract v1.8 §3.2 500
+    attributes: 'the courier do not accept cancellation')."""
+
+
+class PickupWindowClosed(ShippingError):
+    """Too close to pickup schedule for cancellation (contract v1.8 §3.2:
+    'too close with pickup schedule')."""
+
+
 def active_carrier(brand: Brand | None) -> str:
     if brand is not None and getattr(brand, "jubelio_enabled", False):
         return JUBELIO
@@ -52,10 +70,14 @@ async def get_rates(
     destination_postal_code: str,
     items: list[dict[str, Any]],
     total_value: int | None = None,
+    service_category_id: int | None = None,
 ) -> list[dict[str, Any]]:
     """Buyer-facing rate quotes from the brand's active carrier.
 
     ``items`` are the resolved cart lines: {name, value, weight, quantity}.
+
+    ``service_category_id`` is forwarded to Jubelio (calls POST /rates
+    instead of /rates/all when set). Biteship ignores it.
     """
     carrier = active_carrier(brand)
     if carrier == JUBELIO:
@@ -73,6 +95,7 @@ async def get_rates(
             origin_area_id=origin.get("area_id"),
             origin_coordinate=origin.get("coordinate"),
             total_value=total_value,
+            service_category_id=service_category_id,
         )
         return rates
 
@@ -210,6 +233,67 @@ def _jubelio_items(order: Order) -> list[dict[str, Any]]:
         }
         for i in (order.items or [])
     ]
+
+
+# --- Cancel -----------------------------------------------------------------
+
+# Contract v1.8 §3.2 — the two known rejection messages. If the upstream
+# ``message`` contains either, the seam raises a dedicated subclass so the
+# router can return a distinguishable caller-facing 409 with an action label
+# (don't retry / try later) rather than a generic 5xx.
+_COURIER_REJECT_PHRASE = "the courier do not accept cancellation"
+_PICKUP_WINDOW_PHRASE = "too close with pickup schedule"
+
+
+async def cancel(
+    *,
+    brand: Brand | None,
+    order: Order,
+    reason: str = "Barang belum siap",
+) -> dict[str, Any]:
+    """Cancel the carrier booking on ``order``.
+
+    Returns a result envelope shaped like BookingResult (the router persists
+    whichever fields the upstream carrier returned). Raises:
+
+    - ``CancelNotSupported`` — brand's active carrier is Biteship (no cancel).
+    - ``ValueError`` — order has no AWB (never booked) or no carrier.
+    - ``CourierRejection`` — courier refused (§3.2 500 message).
+    - ``PickupWindowClosed`` — too close to pickup (§3.2 500 message).
+    - ``ShippingError`` — anything else.
+    """
+    carrier = active_carrier(brand)
+    awb = order.fulfillment_awb
+    if not awb:
+        raise ValueError(
+            f"Order {order.id} has no fulfillment_awb; nothing to cancel"
+        )
+
+    if carrier == JUBELIO:
+        try:
+            res = await jubelio_service.cancel_shipment(
+                awb_code=awb, reason=reason
+            )
+        except jubelio_service.ShippingError as e:
+            msg = str(e)
+            if _COURIER_REJECT_PHRASE in msg:
+                raise CourierRejection(msg) from e
+            if _PICKUP_WINDOW_PHRASE in msg:
+                raise PickupWindowClosed(msg) from e
+            raise ShippingError(msg) from e
+        return {
+            "carrier": JUBELIO,
+            "awb": awb,
+            "status": res.get("status"),
+            "courier_name": res.get("courier_name"),
+            "ref_no": res.get("ref_no"),
+        }
+
+    # carrier == BITESHIP
+    raise CancelNotSupported(
+        "Cancelling Biteship AWBs is not supported — "
+        "use Biteship's own dashboard"
+    )
 
 
 def _join_address(addr: dict[str, Any]) -> str:

@@ -136,6 +136,7 @@ async def get_rates(
     origin_coordinate: str | None = None,
     destination_coordinate: str | None = None,
     total_value: int | None = None,
+    service_category_id: int | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch courier rate quotes across all couriers (``POST /rates/all``).
 
@@ -186,9 +187,15 @@ async def get_rates(
 
     try:
         headers = await _auth_headers()
+        rates_path = (
+            "/rates" if service_category_id is not None else "/rates/all"
+        )
+        if service_category_id is not None:
+            payload["service_category_id"] = int(service_category_id)
+
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.post(
-                f"{_api_base()}/rates/all", headers=headers, json=payload
+                f"{_api_base()}{rates_path}", headers=headers, json=payload
             )
             resp.raise_for_status()
             data = resp.json()
@@ -312,4 +319,142 @@ async def cancel_shipment(*, awb_code: str, reason: str = "Barang belum siap") -
         )
     if resp.status_code >= 400:
         raise ShippingError(f"Jubelio cancel {resp.status_code}: {resp.text!r}")
+    return resp.json()
+
+
+async def get_shipment_by_awb(awb: str) -> dict[str, Any]:
+    """Fetch full shipment detail (``GET /shipments/awb/{awb}``).
+
+    Contract v1.8 §3.3. Returns the full document including the
+    ``tracking[]`` event list, ``latest_status``, ETA, origin/destination,
+    pricing. Used as the polling fallback when a webhook is missed
+    (``POST /orders/{id}/tracking/refresh``).
+
+    Raises ``ShippingError`` on non-2xx (404 when the AWB is unknown,
+    401 when the token is wrong, 5xx on Jubelio-side trouble).
+    """
+    _require_creds()
+    headers = await _auth_headers()
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.get(
+            f"{_api_base()}/shipments/awb/{awb}",
+            headers=headers,
+        )
+    if resp.status_code >= 400:
+        raise ShippingError(
+            f"Jubelio detail {resp.status_code}: {resp.text!r}"
+        )
+    return resp.json()
+
+
+# --- Reference data: service categories + region picker --------------------
+#
+# Contract v1.8 §4.1 (categories) and §5.1–§5.5 (provinces → areas).
+# Thin wrappers used by the buyer-side region picker and the (future)
+# seller-dashboard origin-address validator. No caching — each request
+# is a direct HTTPS call to Jubelio.
+
+
+async def get_service_categories() -> list[dict[str, Any]]:
+    """List courier service categories (§4.1).
+
+    Returned rows: ``{service_category_id, name}``. The six known values:
+    REGULER (1), EKONOMI (2), NEXTDAY (3), INSTANT (4), SAMEDAY (5),
+    CARGO (6).
+    """
+    _require_creds()
+    headers = await _auth_headers()
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.get(
+            f"{_api_base()}/services/categories", headers=headers,
+        )
+    if resp.status_code >= 400:
+        raise ShippingError(
+            f"Jubelio categories {resp.status_code}: {resp.text!r}"
+        )
+    return resp.json()
+
+
+async def get_regions(name: str | None = None) -> list[dict[str, Any]]:
+    """List regions (§5.1). Optional ``?name=…`` substring filter
+    (``province + city + district + area`` match on the row's ``name``).
+    """
+    _require_creds()
+    headers = await _auth_headers()
+    params: dict[str, str] | None = {"name": name} if name else None
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.get(
+            f"{_api_base()}/regions",
+            headers=headers,
+            params=params,
+        )
+    if resp.status_code >= 400:
+        raise ShippingError(
+            f"Jubelio regions {resp.status_code}: {resp.text!r}"
+        )
+    return resp.json()
+
+
+async def get_provinces() -> list[dict[str, Any]]:
+    """List provinces (§5.2)."""
+    _require_creds()
+    headers = await _auth_headers()
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.get(
+            f"{_api_base()}/region/provinces", headers=headers,
+        )
+    if resp.status_code >= 400:
+        raise ShippingError(
+            f"Jubelio provinces {resp.status_code}: {resp.text!r}"
+        )
+    return resp.json()
+
+
+async def get_cities(province_id: str) -> list[dict[str, Any]]:
+    """List cities inside ``province_id`` (§5.3)."""
+    _require_creds()
+    headers = await _auth_headers()
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.get(
+            f"{_api_base()}/region/cities/{province_id}", headers=headers,
+        )
+    if resp.status_code >= 400:
+        raise ShippingError(
+            f"Jubelio cities {resp.status_code}: {resp.text!r}"
+        )
+    return resp.json()
+
+
+async def get_districts(city_id: str) -> list[dict[str, Any]]:
+    """List districts inside ``city_id`` (§5.4)."""
+    _require_creds()
+    headers = await _auth_headers()
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.get(
+            f"{_api_base()}/region/districts/{city_id}", headers=headers,
+        )
+    if resp.status_code >= 400:
+        raise ShippingError(
+            f"Jubelio districts {resp.status_code}: {resp.text!r}"
+        )
+    return resp.json()
+
+
+async def get_areas(district_id: str) -> list[dict[str, Any]]:
+    """List sub-district areas inside ``district_id`` (§5.5).
+
+    The leaf-level rows: ``{area_id, district_id, name, zipcode}``. The
+    ``area_id`` is what we hand to ``POST /shipments/create`` as the
+    origin/destination ``area_id``.
+    """
+    _require_creds()
+    headers = await _auth_headers()
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.get(
+            f"{_api_base()}/region/areas/{district_id}", headers=headers,
+        )
+    if resp.status_code >= 400:
+        raise ShippingError(
+            f"Jubelio areas {resp.status_code}: {resp.text!r}"
+        )
     return resp.json()
