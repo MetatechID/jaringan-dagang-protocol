@@ -25,7 +25,10 @@ Endpoints used (base = settings.jubelio_api_base):
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import random
+import re
 import time
 from typing import Any, Iterable
 
@@ -35,13 +38,44 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
+# Status codes we will retry on /shipments/create. The contract documents
+# 500 as "Internal Server Error" and the 4xx class as validation failures.
+# 502/503/504 are also retryable since they represent a transient
+# upstream/downstream problem on Jubelio's side, not a malformed request.
+TRANSIENT_5XX_STATUSES = {500, 502, 503, 504}
+# Carrier-side timeout signatures. The actual failure we observed in
+# production was Jubelio's own downstream timing out at 5s and being
+# surfaced as a 500 with a body like
+#   {"code":"ECONNABORTED","message":"timeout of 5000ms exceeded"}
+# Matching either phrase (the literal ECONNABORTED code, or a "timeout of
+# Nms exceeded" message) is the narrowest discriminator that catches the
+# known failure mode without masking real outages.
+_RETRYABLE_BODY_RE = re.compile(r"ECONNABORTED|timeout of \d+ms exceeded")
+
 
 class ShippingItem(dict):
     """{name, weight, quantity, value} — same shape as the Biteship service."""
 
 
 class ShippingError(Exception):
-    """Raised when Jubelio returns a non-2xx response on a write call."""
+    """Raised when Jubelio returns a non-2xx response on a write call.
+
+    ``code`` is a stable, machine-readable string for the dashboard to branch on
+    (not an HTTP code): CARRIER_ERROR (default — generic failure),
+    CARRIER_TRANSIENT (retryable upstream timeout, the seller should retry).
+
+    ``retryable`` is a convenience for the dashboard's Retry button. Both
+    fields default to the generic / non-retryable case, so existing raises
+    across the file do not need to set them.
+
+    ``__str__`` is intentionally left as ``args[0]`` (the message) so the
+    two other consumers that do ``f"... {e}"`` — ``routers/orders.py:427``
+    (cancel) and ``:499`` (tracking refresh) — keep their current wire
+    shape unchanged.
+    """
+
+    code: str = "CARRIER_ERROR"
+    retryable: bool = False
 
 
 # --- Token cache (module-level, guarded by a lock) ---------------------------
@@ -228,6 +262,24 @@ def _eta_label(rate: dict[str, Any]) -> str:
 
 # --- Booking -----------------------------------------------------------------
 
+# --- Booking -----------------------------------------------------------------
+
+
+def _is_retryable_body(body: Any) -> bool:
+    """True iff the response body matches the carrier-upstream-timeout
+    signature (ECONNABORTED or 'timeout of Nms exceeded'). Used by the
+    create_shipment retry loop to discriminate transient failures from
+    real outages.
+    """
+    if isinstance(body, dict):
+        haystack = json.dumps(body, default=str)
+    elif isinstance(body, str):
+        haystack = body
+    else:
+        return False
+    return bool(_RETRYABLE_BODY_RE.search(haystack))
+
+
 async def create_shipment(
     *,
     origin: dict[str, Any],
@@ -268,18 +320,55 @@ async def create_shipment(
         payload["shipping_insurance"] = int(shipping_insurance)
 
     headers = await _auth_headers()
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(
-            f"{_api_base()}/shipments/create", headers=headers, json=payload
-        )
-
-    if resp.status_code >= 400:
+    # Bounded retry on transient carrier 5xx. Safety net: this entire block
+    # runs BEFORE any BAP-side persistence — the row lock and fulfillment_awb
+    # guard in book_shipment protect against double-booking from the caller's
+    # side. Each iteration opens a fresh client because reusing a half-read
+    # connection across the backoff is footgun territory.
+    last_status: int | None = None
+    last_body: Any = None
+    resp = None
+    for attempt in (1, 2):
+        if attempt == 2:
+            await asyncio.sleep(0.75 + random.uniform(0, 0.25))
+            logger.warning(
+                "Jubelio /shipments/create transient failure, attempt 1/2: status=%s body=%s",
+                last_status, last_body,
+            )
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{_api_base()}/shipments/create", headers=headers, json=payload
+            )
+        if resp.status_code < 400:
+            if attempt == 2:
+                logger.info("Jubelio /shipments/create recovered on attempt 2/2")
+            break
         try:
-            body = resp.json()
+            last_body = resp.json()
         except Exception:  # noqa: BLE001
-            body = resp.text
-        logger.warning("Jubelio POST /shipments/create -> %s: %s", resp.status_code, body)
-        raise ShippingError(f"Jubelio {resp.status_code}: {body!r}")
+            last_body = resp.text
+        last_status = resp.status_code
+        if not (resp.status_code in TRANSIENT_5XX_STATUSES and _is_retryable_body(last_body)):
+            break
+
+    if resp is not None and resp.status_code >= 400:
+        logger.warning("Jubelio POST /shipments/create -> %s: %s", last_status, last_body)
+        # Distinguish the retryable carrier-upstream-timeout case from a real
+        # carrier rejection (4xx, or 5xx without the timeout signature). The
+        # only failure mode we've seen in production — and the only one we
+        # auto-retry — is Jubelio returning 500 with ECONNABORTED /
+        # "timeout of Nms exceeded" in the body, which signals their own
+        # downstream timed out before the request was handled. A real
+        # outage (5xx with a different body) is not retryable and the
+        # seller should pick a different courier.
+        is_retryable = last_status in TRANSIENT_5XX_STATUSES and _is_retryable_body(last_body)
+        if is_retryable:
+            raise ShippingError(
+                "The courier service is temporarily busy. Please try again in a moment.",
+                code="CARRIER_TRANSIENT",
+                retryable=True,
+            ) from None
+        raise ShippingError(f"Jubelio {last_status}: {last_body!r}")
 
     data = resp.json()
     return {

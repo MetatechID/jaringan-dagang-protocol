@@ -556,7 +556,22 @@ async def book_shipment(
             courier_service_code=body.courier_service_code,
         )
     except carrier_service.ShippingError as e:
-        raise HTTPException(502, f"Shipment booking failed: {e}")
+        # Structured 502 body: stable code + retryable flag so the seller
+        # dashboard can render a real Retry button instead of leaking the
+        # carrier's wire format (e.g. {"code":"ECONNABORTED",...}). The
+        # original carrier body stays in the BAP log for operator triage.
+        if e.retryable:
+            message = "The courier service is temporarily busy. Please try again in a moment."
+        else:
+            message = "The courier could not accept this booking. Try a different service."
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": message,
+                "code": e.code,
+                "retryable": e.retryable,
+            },
+        )
 
     order.carrier = booking.get("carrier")
     if booking.get("carrier") == carrier_service.JUBELIO:
