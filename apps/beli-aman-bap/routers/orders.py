@@ -170,6 +170,26 @@ async def list_my_orders(
     return [_serialize_order(o) for o in result.scalars().all()]
 
 
+@router.get("/{order_id}/admin", dependencies=[Depends(require_admin_token)])
+async def get_order_admin(
+    order_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Read an order without buyer auth, for the seller dashboard.
+
+    ``GET /{order_id}`` requires the buyer's Firebase bearer, so a seller-side
+    tool cannot use it. The seller dashboard needs this to recover the courier
+    the buyer chose at checkout (``shipping_address.courier``) — the seller-bpp
+    escrow intake carries no courier field, so this is the only path to it.
+    Read-only: no lazy auto-release side-effect, unlike the buyer endpoint.
+    """
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(404, "Order not found")
+    return _serialize_order(order)
+
+
 @router.get("/{order_id}")
 async def get_order(
     order_id: str,
@@ -301,7 +321,18 @@ async def advance_to_authed(
     else:
         raise HTTPException(400, "Must provide address_id or address_inline")
 
-    order.shipping_address = addr_snapshot
+    # Merge, don't replace: order creation stashes the buyer's courier choice
+    # under shipping_address["courier"] (see create_order above), and this PATCH
+    # lands milliseconds later in the same checkout flow. A wholesale assignment
+    # here silently destroyed that choice, forcing the seller to pick a courier
+    # again — and letting them pick one the buyer never paid for. Address keys
+    # stay top-level: carriers.py, sento_invoices.py and oy_invoices.py all read
+    # recipient_name/email from that level.
+    existing_courier = (order.shipping_address or {}).get("courier")
+    order.shipping_address = {
+        **addr_snapshot,
+        **({"courier": existing_courier} if existing_courier else {}),
+    }
     order.payment_method_snapshot = {
         "type": "virtual_account",
         "display_label": "BCA Virtual Account — Demo",
