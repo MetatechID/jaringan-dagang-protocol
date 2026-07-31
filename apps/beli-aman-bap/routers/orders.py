@@ -528,6 +528,17 @@ async def book_shipment(
         raise HTTPException(
             409, f"Cannot book shipment in state {order.state.value}"
         )
+    # Double-booking guard. The row is FOR UPDATE-locked so two concurrent
+    # clicks serialise here; the second sees the AWB the first wrote and
+    # returns 409 before the carrier is called. The webhook
+    # (shipment_events.apply_shipment_event) also writes fulfillment_awb, so
+    # this also catches the case where a webhook arrived before this endpoint
+    # returned. A real production incident created three sandbox shipments
+    # for one order by missing this check.
+    if order.fulfillment_awb:
+        raise HTTPException(
+            409, f"Order already has AWB {order.fulfillment_awb}"
+        )
 
     brand_q = await db.execute(select(Brand).where(Brand.id == order.brand_id))
     brand = brand_q.scalar_one_or_none()

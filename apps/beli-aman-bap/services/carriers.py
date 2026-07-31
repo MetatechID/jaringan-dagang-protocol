@@ -122,6 +122,15 @@ class BookingResult(dict):
     """{carrier, external_id, awb, tracking_url, price}."""
 
 
+def _opt_str(v: Any) -> str | None:
+    """Coerce a carrier-returned id to str, preserving None. Jubelio returns
+    ``shipment_id`` as an integer; the ORM column is String(64), so the
+    un-coerced int bound to VARCHAR would roll back the whole transaction
+    and silently leave the order at ESCROW_HELD. Centralised here so a
+    future carrier returning a non-str can't repeat it."""
+    return None if v is None else str(v)
+
+
 async def book(
     *,
     brand: Brand,
@@ -172,7 +181,7 @@ async def book(
             raise ShippingError(str(e))
         return BookingResult(
             carrier=JUBELIO,
-            external_id=res.get("shipment_id"),
+            external_id=_opt_str(res.get("shipment_id")),
             awb=res.get("awb"),
             tracking_url=res.get("tracking_url"),
             price=res.get("price"),
@@ -198,8 +207,8 @@ async def book(
     courier = res.get("courier") or {}
     return BookingResult(
         carrier=BITESHIP,
-        external_id=res.get("id"),
-        awb=courier.get("waybill_id"),
+        external_id=_opt_str(res.get("id")),
+        awb=_opt_str(courier.get("waybill_id")),
         tracking_url=courier.get("tracking_url"),
         price=res.get("price"),
     )
