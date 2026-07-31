@@ -74,8 +74,16 @@ class ShippingError(Exception):
     shape unchanged.
     """
 
-    code: str = "CARRIER_ERROR"
-    retryable: bool = False
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "CARRIER_ERROR",
+        retryable: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.retryable = retryable
 
 
 # --- Token cache (module-level, guarded by a lock) ---------------------------
