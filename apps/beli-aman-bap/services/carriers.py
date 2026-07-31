@@ -178,7 +178,14 @@ async def book(
                 reference_id=order.id,
             )
         except jubelio_service.ShippingError as e:
-            raise ShippingError(str(e))
+            # Preserve code/retryable from the carrier layer; if we wrap
+            # with a bare string we lose both and the router can't tell
+            # a transient upstream-timeout from a real carrier rejection.
+            raise ShippingError(
+                str(e),
+                code=e.code,
+                retryable=e.retryable,
+            )
         return BookingResult(
             carrier=JUBELIO,
             external_id=_opt_str(res.get("shipment_id")),
