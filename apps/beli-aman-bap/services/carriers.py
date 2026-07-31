@@ -34,7 +34,24 @@ JUBELIO = "jubelio"
 
 
 class ShippingError(Exception):
-    """Carrier-agnostic booking failure (wraps the underlying carrier error)."""
+    """Carrier-agnostic booking failure (wraps the underlying carrier error).
+
+    ``code`` is a stable, machine-readable string for the dashboard to branch
+    on. ``retryable`` lets the dashboard render a real Retry button. Both
+    default to generic / non-retryable so existing raises across the file
+    do not need to set them.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "CARRIER_ERROR",
+        retryable: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.retryable = retryable
 
 
 class CancelNotSupported(ShippingError):
