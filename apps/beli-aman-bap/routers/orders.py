@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
@@ -23,6 +24,7 @@ from models.profile import BeliAmanProfile
 from services import catalog as catalog_service
 from services import escrow as escrow_service
 from services import pricing
+from services import seller_bridge
 from services.state_machine import (
     StateTransitionError,
     lock_order_for_update,
@@ -231,6 +233,13 @@ async def get_order(
                 # Loyalty: earn points on auto-release too (idempotent per order).
                 from models.loyalty import accrue_for_order
                 await accrue_for_order(db, profile_id=order.profile_id, order_id=order.id, total_idr=order.total_idr)
+                # Best-effort: tell seller-bpp the order moved to RELEASED so
+                # the seller's dashboard badge flips to green "Completed".
+                asyncio.create_task(
+                    seller_bridge.patch_escrow_status(
+                        order_id=order.id, escrow_status="released",
+                    )
+                )
             except StateTransitionError:
                 pass
 
