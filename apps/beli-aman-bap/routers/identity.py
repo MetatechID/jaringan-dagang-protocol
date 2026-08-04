@@ -80,7 +80,15 @@ async def my_stores(
     profile: BeliAmanProfile = Depends(get_current_profile),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Store ids + roles this person can manage. Super admins get a wildcard."""
+    """Store ids + roles this person can manage. Super admins get a wildcard.
+
+    Each ACL row now also carries ``subscriber_id`` (the seller-catalog's
+    ``subscriber_id`` / ``bpp_id``) and ``slug`` so the seller dashboard can
+    resolve the BAP-side ``store_id`` to the seller-bpp catalog row via
+    ``subscriber_id`` (or a slug-prefix fallback). Without these join keys the
+    dashboard silently rendered "No store" because the BAP and seller-bpp use
+    independent UUID spaces.
+    """
     try:
         if profile.is_super_admin:
             return {
@@ -88,21 +96,28 @@ async def my_stores(
                 "is_super_admin": True,
                 "note": "super admin — all stores",
             }
+        # Join memberships → mirror_stores to surface subscriber_id + slug.
+        from models.mirror import MirrorStore
         rows = (
             await db.execute(
-                select(StoreMembership).where(
-                    StoreMembership.profile_id == profile.id
+                select(StoreMembership, MirrorStore)
+                .outerjoin(
+                    MirrorStore,
+                    MirrorStore.id == StoreMembership.store_id,
                 )
+                .where(StoreMembership.profile_id == profile.id)
             )
-        ).scalars().all()
+        ).all()
         return {
             "data": [
                 {
                     "store_id": m.store_id,
+                    "subscriber_id": s.bpp_id if s is not None else None,
+                    "slug": (s.slug if s is not None else m.store_slug),
                     "role": m.role.value if isinstance(m.role, StoreRole) else m.role,
                     "membership_id": m.id,
                 }
-                for m in rows
+                for (m, s) in rows
             ],
             "is_super_admin": False,
         }

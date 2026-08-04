@@ -48,3 +48,51 @@ async def post_order(*, order_dict: dict[str, Any], order_id: str = "") -> bool:
             url, order_id, e,
         )
         return False
+
+
+async def patch_escrow_status(*, order_id: str, escrow_status: str) -> bool:
+    """PATCH the seller's escrow-status for one order (non-fatal).
+
+    Used to sync post-creation state transitions (currently ESCROW_RELEASED)
+    from the BAP into the seller-bpp's ``orders.escrow_status`` column. The
+    seller dashboard reads this column directly; without the PATCH the badge
+    stays stuck at ``held`` after the buyer releases.
+
+    The seller-bpp router is mounted at ``/internal`` (see
+    ``app/api/escrow_orders.py``), so the path is ``/internal/...``. Do NOT
+    prefix with ``/api`` like :func:`post_order` does — that would 404.
+    """
+    if not settings.seller_bridge_enabled:
+        logger.debug("Seller bridge disabled — skipping PATCH")
+        return False
+
+    url = f"{settings.seller_bridge_url.rstrip('/')}/internal/escrow-orders/{order_id}"
+    headers = {
+        "Content-Type": "application/json",
+        "X-Internal-Token": settings.seller_bridge_token,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            resp = await client.patch(
+                url,
+                json={"escrow_status": escrow_status},
+                headers=headers,
+            )
+        if 200 <= resp.status_code < 300:
+            logger.info(
+                "seller-bridge PATCH ok %s -> %s (order_id=%s, status=%s)",
+                url, resp.status_code, order_id, escrow_status,
+            )
+            return True
+        logger.warning(
+            "seller-bridge PATCH non-2xx %s -> %s %s (order_id=%s, status=%s)",
+            url, resp.status_code, resp.text[:200], order_id, escrow_status,
+        )
+        return False
+    except Exception as e:
+        logger.warning(
+            "seller-bridge PATCH exception %s (order_id=%s, status=%s): %s",
+            url, order_id, escrow_status, e,
+        )
+        return False

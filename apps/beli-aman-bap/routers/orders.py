@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
@@ -23,6 +24,7 @@ from models.profile import BeliAmanProfile
 from services import catalog as catalog_service
 from services import escrow as escrow_service
 from services import pricing
+from services import seller_bridge
 from services.state_machine import (
     StateTransitionError,
     lock_order_for_update,
@@ -231,6 +233,13 @@ async def get_order(
                 # Loyalty: earn points on auto-release too (idempotent per order).
                 from models.loyalty import accrue_for_order
                 await accrue_for_order(db, profile_id=order.profile_id, order_id=order.id, total_idr=order.total_idr)
+                # Best-effort: tell seller-bpp the order moved to RELEASED so
+                # the seller's dashboard badge flips to green "Completed".
+                asyncio.create_task(
+                    seller_bridge.patch_escrow_status(
+                        order_id=order.id, escrow_status="released",
+                    )
+                )
             except StateTransitionError:
                 pass
 
@@ -451,6 +460,127 @@ async def cancel_shipment(
         raise HTTPException(409, str(e))
 
     return _serialize_order(order)
+
+
+@router.get("/{order_id}/label-data", dependencies=[Depends(require_admin_token)])
+async def get_label_data(
+    order_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Return printer-friendly AWB label envelope for Jubelio-booked orders.
+
+    Uses the same admin-token guard as the other seller-facets. Builds the
+    envelope straight from ``Order`` + ``Brand.jubelio_origin_address`` so
+    this never round-trips through the Jubelio API itself; that's exactly
+    what lets the dashboard render a label without carrier credentials.
+
+    Errors:
+      404 — order not found
+      409 — unbooked, non-Jubelio carrier, or missing Jubelio origin
+    """
+    order = await lock_order_for_update(db, order_id)
+    if order is None:
+        raise HTTPException(404, "Order not found")
+    if not order.fulfillment_awb:
+        raise HTTPException(
+            409,
+            f"Order {order_id} has no AWB; book a shipment before printing",
+        )
+    if order.carrier != "jubelio":
+        raise HTTPException(
+            409,
+            f"Label printer only supports Jubelio shipments "
+            f"(active carrier: {order.carrier})",
+        )
+
+    brand_q = await db.execute(select(Brand).where(Brand.id == order.brand_id))
+    brand = brand_q.scalar_one_or_none()
+    origin = (getattr(brand, "jubelio_origin_address", None) or {}) if brand else {}
+    if not origin.get("zipcode") or not origin.get("address"):
+        raise HTTPException(
+            409,
+            "Brand has incomplete Jubelio origin address "
+            "(`jubelio_origin_address` missing zipcode or address). "
+            "Set it in vibe-admin → Payouts & Fulfillment.",
+        )
+
+    addr = order.shipping_address or {}
+    courier_snap = addr.get("courier") or {}
+
+    def _first(*values: object) -> str | None:
+        for v in values:
+            if isinstance(v, str):
+                stripped = v.strip()
+                if stripped:
+                    return stripped
+        return None
+
+    def _iso(dt: object) -> str | None:
+        if dt is None:
+            return None
+        iso = getattr(dt, "isoformat", None)
+        if callable(iso):
+            return iso()
+        return str(dt)
+
+    line_parts = [
+        _first(addr.get("line1")),
+        _first(addr.get("line2")),
+    ]
+    line_address = ", ".join(p for p in line_parts if p)
+
+    return {
+        "carrier": "jubelio",
+        "awb": order.fulfillment_awb,
+        "tracking_url": order.fulfillment_tracking_url,
+        "shipment_id": getattr(order, "jubelio_shipment_id", None),
+        "order_id": order.id,
+        "seller_order_ref": getattr(order, "seller_order_ref", None),
+        "created_at": _iso(getattr(order, "created_at", None)),
+        "shipped_at": _iso(getattr(order, "shipped_at", None)),
+        "sender": {
+            "store_name": getattr(brand, "name", None),
+            "name": origin.get("name"),
+            "phone": origin.get("phone"),
+            "email": origin.get("email"),
+            "address": origin.get("address"),
+            "zipcode": origin.get("zipcode"),
+        },
+        "recipient": {
+            "name": _first(addr.get("recipient_name"), addr.get("name")),
+            "phone": _first(addr.get("phone_e164"), addr.get("phone")),
+            "address": line_address,
+            "line1": addr.get("line1"),
+            "line2": addr.get("line2"),
+            "kelurahan": addr.get("kelurahan"),
+            "kecamatan": addr.get("kecamatan"),
+            "kota": addr.get("kota"),
+            "provinsi": addr.get("provinsi"),
+            "postal_code": _first(
+                addr.get("postal_code"),
+                addr.get("area_code"),
+            ),
+        },
+        "courier": {
+            "courier_code": courier_snap.get("courier_code"),
+            "courier_service_code": courier_snap.get("courier_service_code"),
+            "courier_service_name": courier_snap.get("courier_service_name"),
+        },
+        "items": [
+            {
+                "sku": i.get("sku") or "",
+                "name": i.get("name") or i.get("sku") or "Item",
+                "qty": int(i.get("qty") or 1),
+            }
+            for i in (order.items or [])
+        ],
+        "is_cod": False,
+        "cod_amount_idr": 0,
+        "subtotal_idr": int(getattr(order, "subtotal_idr", 0) or 0),
+        "shipping_idr": int(getattr(order, "shipping_idr", 0) or 0),
+        "total_idr": int(getattr(order, "total_idr", 0) or 0),
+        "note": None,
+    }
 
 
 @router.post("/{order_id}/tracking/refresh", dependencies=[Depends(require_admin_token)])

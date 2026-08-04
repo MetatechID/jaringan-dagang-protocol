@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,6 +15,7 @@ from models.escrow_ledger import EscrowLedger
 from models.order import OrderState
 from models.profile import BeliAmanProfile
 from services import escrow as escrow_service
+from services import seller_bridge
 from services.state_machine import StateTransitionError, lock_order_for_update, transition
 
 router = APIRouter(prefix="/api/v1/orders", tags=["escrow"])
@@ -87,4 +89,14 @@ async def buyer_confirm_receipt(
     # Loyalty: earn points now the transaction is complete (idempotent per order).
     from models.loyalty import accrue_for_order
     await accrue_for_order(db, profile_id=order.profile_id, order_id=order.id, total_idr=order.total_idr)
+
+    # Best-effort: tell seller-bpp the order moved to RELEASED so the
+    # seller's dashboard badge flips from amber "in escrow" to green
+    # "Completed". Fire-and-forget — failures are logged inside the bridge.
+    asyncio.create_task(
+        seller_bridge.patch_escrow_status(
+            order_id=order.id, escrow_status="released",
+        )
+    )
+
     return {"id": order.id, "state": order.state.value}
