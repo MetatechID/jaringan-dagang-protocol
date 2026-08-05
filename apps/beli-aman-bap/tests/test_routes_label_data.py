@@ -48,7 +48,13 @@ def _install_db(app, brand):
             self.commits = 0
             self.commited = False
 
-        async def execute(self, *_args, **_kwargs):
+        async def execute(self, stmt=None, *_args, **_kwargs):
+            # `get_label_data` looks up the brand AND (best-effort) the
+            # MirrorStore shop logo. The mirror stub returns nothing so the
+            # envelope's shop_logo_url comes back null in tests.
+            if stmt is not None and "MirrorStore" in repr(stmt):
+                return _scalar_none_exec()
+
             class _Exec:
                 def scalar_one_or_none(self_inner):
                     return self._brand
@@ -61,6 +67,13 @@ def _install_db(app, brand):
         async def commit(self_inner):
             self_inner.commited = True
             return None
+
+    def _scalar_none_exec():
+        class _NoneExec:
+            def scalar_one_or_none(self_inner):
+                return None
+
+        return _NoneExec()
 
     session = _FakeSession(brand)
 
@@ -231,12 +244,14 @@ class TestHappyPath:
                     "name": "Sambal Matah 100g",
                     "qty": 2,
                     "unit_price_idr": 25000,
+                    "weight_grams": 250,
                 },
                 {
                     "sku": "SKU-2",
                     "name": "Bumbu Bali 200g",
                     "qty": 1,
                     "unit_price_idr": 45000,
+                    "weight_grams": 500,
                 },
             ],
             shipping_address={
@@ -299,6 +314,8 @@ class TestHappyPath:
         assert body["courier"]["courier_code"] == "21"
         assert body["courier"]["courier_service_code"] == "22"
         assert body["courier"]["courier_service_name"] == "JNE REG"
+        # Courier code "21" is not in the logo map → null (monogram fallback)
+        assert body["courier"]["logo_url"] is None
 
         # Items reduced to {sku, name, qty}
         assert body["items"] == [
@@ -314,6 +331,11 @@ class TestHappyPath:
         assert body["subtotal_idr"] == 95000
         assert body["shipping_idr"] == 18000
         assert body["total_idr"] == 113000
+
+        # Label additions: insurance (always 0), weight (2×250 + 1×500), logo
+        assert body["insurance_fee_idr"] == 0
+        assert body["weight_grams"] == 1000
+        assert body["shop_logo_url"] is None
 
     def test_handles_missing_courier_service_name(self, monkeypatch, app, client):
         origin = {"name": "S", "phone": "1", "address": "x", "zipcode": "40115"}
@@ -348,6 +370,7 @@ class TestHappyPath:
         assert body["courier"]["courier_code"] == "21"
         assert body["courier"]["courier_service_code"] is None
         assert body["courier"]["courier_service_name"] is None
+        assert body["courier"]["logo_url"] is None
         assert body["shipment_id"] is None
         assert body["tracking_url"] is None
 
@@ -380,3 +403,72 @@ class TestHappyPath:
         resp = client.get("/api/v1/orders/order-1/label-data")
         assert resp.status_code == 200, resp.text
         assert resp.json()["recipient"]["phone"] == "+62812"
+
+    # ---- Label additions (insurance / weight / logos) -----------------------
+
+
+class TestLabelAdditions:
+    def _order(self, **overrides):
+        base = dict(
+            id="order-1",
+            brand_id="brand-id",
+            carrier="jubelio",
+            fulfillment_awb="JP1234567890",
+            fulfillment_tracking_url="https://track",
+            jubelio_shipment_id="1281",
+            shipped_at=None,
+            items=[],
+            shipping_address={"courier": {"courier_code": "11"}},
+            seller_order_ref="SO-42",
+            subtotal_idr=95000,
+            shipping_idr=18000,
+            fee_idr=0,
+            total_idr=113000,
+            created_at=None,
+        )
+        base.update(overrides)
+        return SimpleNamespace(**base)
+
+    def test_weight_uses_courier_billing_fallback(self, monkeypatch, app, client):
+        """Items without weight get the 500g-per-item default the courier bills."""
+        origin = {"name": "S", "phone": "1", "address": "x", "zipcode": "40115"}
+        _install_db(app, _brand(jubelio_origin=origin))
+        order = self._order(
+            items=[
+                {"sku": "A", "name": "Item A", "qty": 2},
+                {"sku": "B", "name": "Item B", "qty": 1},
+            ]
+        )
+        _stub_lock(monkeypatch, order)
+
+        resp = client.get("/api/v1/orders/order-1/label-data")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["weight_grams"] == 1500  # 2×500 + 1×500
+        assert body["insurance_fee_idr"] == 0
+
+    def test_weight_zero_when_no_items(self, monkeypatch, app, client):
+        origin = {"name": "S", "phone": "1", "address": "x", "zipcode": "40115"}
+        _install_db(app, _brand(jubelio_origin=origin))
+        _stub_lock(monkeypatch, self._order())
+
+        resp = client.get("/api/v1/orders/order-1/label-data")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["weight_grams"] == 0
+
+    def test_courier_logo_map_and_unknown_code(self, monkeypatch, app, client):
+        """Known numeric codes resolve to a logo URL; unknown codes are null."""
+        origin = {"name": "S", "phone": "1", "address": "x", "zipcode": "40115"}
+        _install_db(app, _brand(jubelio_origin=origin))
+        _stub_lock(
+            monkeypatch,
+            self._order(
+                shipping_address={"courier": {"courier_code": "11"}},
+            ),
+        )
+
+        resp = client.get("/api/v1/orders/order-1/label-data")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["courier"]["logo_url"] == (
+            "https://res.cloudinary.com/jubelio/logo/jne.png"
+        )
