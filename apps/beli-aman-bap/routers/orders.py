@@ -33,6 +33,16 @@ from services.state_machine import (
 
 router = APIRouter(prefix="/api/v1/orders", tags=["orders"])
 
+# Courier logo URLs for the AWB label, keyed by Jubelio's numeric courier_id
+# (the string codes from `services/jubelio._mock_rates`). Unknown codes map to
+# None and the dashboard falls back to a monogram. The host is a placeholder —
+# swap in the real assets before release.
+_COURIER_LOGO_BY_CODE: dict[str, str] = {
+    "11": "https://res.cloudinary.com/jubelio/logo/jne.png",      # JNE
+    "13": "https://res.cloudinary.com/jubelio/logo/sicepat.png",  # SiCepat
+    "24": "https://res.cloudinary.com/jubelio/logo/lionparcel.png",  # Lion Parcel
+}
+
 
 # ---------- Schemas ----------
 
@@ -504,8 +514,45 @@ async def get_label_data(
             "Set it in vibe-admin → Payouts & Fulfillment.",
         )
 
+    # Shop logo: Brand has no logo column — use the mirror's storefront logo
+    # (hint cache keyed by brand slug) if present. Absence is non-fatal; the
+    # dashboard renders a monogram instead.
+    shop_logo_url = None
+    if brand is not None:
+        try:
+            from models.mirror import MirrorStore
+
+            store_q = await db.execute(
+                select(MirrorStore).where(MirrorStore.slug == brand.slug)
+            )
+            shop_logo_url = getattr(store_q.scalar_one_or_none(), "logo_url", None)
+        except Exception:
+            shop_logo_url = None  # mirror table missing/unreachable → monogram
+
     addr = order.shipping_address or {}
     courier_snap = addr.get("courier") or {}
+
+    def _weight_grams(items: list[dict]) -> int:
+        """Sum of item weight × qty for the label.
+
+        Per-item 500g default mirrors the booking/billing services
+        (``services/jubelio.py`` ``it.get("weight", 500)`` and
+        ``services/carriers.py`` ``i.get("weight_grams") or 500``) — the order
+        snapshot doesn't persist weight today, so this reproduces exactly what
+        the courier bills.
+        """
+        total = 0
+        for it in items or []:
+            try:
+                w = int(it.get("weight_grams") or it.get("weight") or 500)
+            except (TypeError, ValueError):
+                w = 500
+            try:
+                qty = int(it.get("qty") or it.get("quantity") or 1)
+            except (TypeError, ValueError):
+                qty = 1
+            total += max(1, w) * max(1, qty)
+        return total
 
     def _first(*values: object) -> str | None:
         for v in values:
@@ -565,6 +612,9 @@ async def get_label_data(
             "courier_code": courier_snap.get("courier_code"),
             "courier_service_code": courier_snap.get("courier_service_code"),
             "courier_service_name": courier_snap.get("courier_service_name"),
+            "logo_url": _COURIER_LOGO_BY_CODE.get(
+                str(courier_snap.get("courier_code") or "")
+            ),
         },
         "items": [
             {
@@ -579,6 +629,9 @@ async def get_label_data(
         "subtotal_idr": int(getattr(order, "subtotal_idr", 0) or 0),
         "shipping_idr": int(getattr(order, "shipping_idr", 0) or 0),
         "total_idr": int(getattr(order, "total_idr", 0) or 0),
+        "insurance_fee_idr": 0,  # no insurance sold yet — always 0
+        "weight_grams": _weight_grams(order.items or []),
+        "shop_logo_url": shop_logo_url,
         "note": None,
     }
 
