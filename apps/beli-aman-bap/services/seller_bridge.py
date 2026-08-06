@@ -58,15 +58,17 @@ async def patch_escrow_status(*, order_id: str, escrow_status: str) -> bool:
     seller dashboard reads this column directly; without the PATCH the badge
     stays stuck at ``held`` after the buyer releases.
 
-    The seller-bpp router is mounted at ``/internal`` (see
-    ``app/api/escrow_orders.py``), so the path is ``/internal/...``. Do NOT
-    prefix with ``/api`` like :func:`post_order` does — that would 404.
+    The seller-bpp mounts the internal router under ``/api`` (see
+    ``app/main.py``: ``include_router(escrow_orders_router, prefix="/api")``),
+    so the full path is ``/api/internal/escrow-orders/{id}`` — same prefix as
+    :func:`post_order`. Omitting ``/api`` here 404s and the release sync is
+    silently lost (the failure is non-fatal by design).
     """
     if not settings.seller_bridge_enabled:
         logger.debug("Seller bridge disabled — skipping PATCH")
         return False
 
-    url = f"{settings.seller_bridge_url.rstrip('/')}/internal/escrow-orders/{order_id}"
+    url = f"{settings.seller_bridge_url.rstrip('/')}/api/internal/escrow-orders/{order_id}"
     headers = {
         "Content-Type": "application/json",
         "X-Internal-Token": settings.seller_bridge_token,

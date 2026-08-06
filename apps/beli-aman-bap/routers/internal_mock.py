@@ -6,6 +6,7 @@ real Xendit / real carrier events.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -17,6 +18,7 @@ from database import get_db
 from deps import require_admin_token
 from models.order import Order, OrderState
 from services import escrow as escrow_service
+from services import seller_bridge
 from services.release_clock import compute_auto_release_at
 from services.state_machine import StateTransitionError, lock_order_for_update, transition
 
@@ -98,6 +100,10 @@ async def mock_elapse_d3(order_id: str, db: AsyncSession = Depends(get_db)) -> d
         description="Auto-release after D+3 (admin elapse)",
     )
     order.released_at = datetime.now(timezone.utc)
+    # Best-effort: keep the seller-dashboard escrow mirror in sync.
+    asyncio.create_task(
+        seller_bridge.patch_escrow_status(order_id=order.id, escrow_status="released")
+    )
     return {"id": order.id, "state": order.state.value}
 
 
@@ -113,6 +119,10 @@ async def mock_release(order_id: str, db: AsyncSession = Depends(get_db)) -> dic
     await escrow_service.release(db, order_id=order.id, amount_idr=order.total_idr,
                                  description="Released by admin")
     order.released_at = datetime.now(timezone.utc)
+    # Best-effort: keep the seller-dashboard escrow mirror in sync.
+    asyncio.create_task(
+        seller_bridge.patch_escrow_status(order_id=order.id, escrow_status="released")
+    )
     return {"id": order.id, "state": order.state.value}
 
 
@@ -127,4 +137,8 @@ async def mock_refund(order_id: str, db: AsyncSession = Depends(get_db)) -> dict
         raise HTTPException(409, str(e))
     await escrow_service.refund(db, order_id=order.id, amount_idr=order.total_idr,
                                 description="Refunded by admin")
+    # Best-effort: keep the seller-dashboard escrow mirror in sync.
+    asyncio.create_task(
+        seller_bridge.patch_escrow_status(order_id=order.id, escrow_status="refunded")
+    )
     return {"id": order.id, "state": order.state.value}
