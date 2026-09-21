@@ -58,6 +58,11 @@ class EscrowLedger(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     external_ref: Mapped[str | None] = mapped_column(
         String(128), nullable=True, index=True
     )
+    # PSP correlation key we minted (SNAP ``partnerReferenceNo``, e.g.
+    # "r-{order id}" for Dipay releases). Lets webhook receivers resolve
+    # the ledger row by the ref echoed back in the callback body, even
+    # before a PSP-side id (external_ref) is known.
+    partner_ref: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     status: Mapped[EscrowEntryStatus] = mapped_column(
         Enum(EscrowEntryStatus, name="escrow_entry_status"),
         nullable=False,

@@ -25,6 +25,7 @@ from models.escrow_ledger import (
 )
 from models.order import Order
 from services import xendit_client, xendit_disbursements
+from services.dipay_client import DipayError
 from services.sento_client import SentoError
 from services.xendit_client import XenditError
 from services.xendit_disbursements import DisbursementSkipped
@@ -98,9 +99,10 @@ async def release(
 
     # Disbursement provider is per-Brand — mirror the invoice leg's dispatch
     # (routers/orders.py create_invoice). Sento brands disburse via the remit
-    # API; everything else (default "xendit") via Xendit. Both services return
-    # {"id": <psp-id>} and raise the shared DisbursementSkipped when the brand
-    # isn't payout-configured, so this branch stays uniform.
+    # API; Dipay brands via SNAP transfer-bank; everything else (default
+    # "xendit") via Xendit. All services return {"id": <psp-id>} and raise
+    # the shared DisbursementSkipped when the brand isn't payout-configured,
+    # so this branch stays uniform.
     from models.brand import Brand
     from services import sento_disbursements
 
@@ -108,10 +110,28 @@ async def release(
     brand = brand_q.scalar_one_or_none()
     provider = (brand.payment_provider if brand is not None else "xendit") or "xendit"
 
+    # Race-safe Dipay correlation: the remit webhook resolves the ledger row
+    # by ``partner_ref``, so stamp it BEFORE the provider call. snap_ref is
+    # deterministic (same order id → same ref), and disburse_to_seller
+    # computes the identical value, so both sides always agree even if the
+    # callback arrives mid-create.
+    if provider == "dipay":
+        from services.dipay_client import snap_ref
+
+        entry.partner_ref = snap_ref("r", str(order_id))
+
+    response = None
     try:
         if provider == "sento":
             response = await sento_disbursements.disburse_to_seller(
                 db, order=order, description=description,
+            )
+        elif provider == "dipay":
+            from services import dipay_disbursements
+
+            response = await dipay_disbursements.disburse_to_seller(
+                db, order=order, description=description,
+                amount_idr=amount_idr,
             )
         else:
             response = await xendit_disbursements.disburse_to_seller(
@@ -127,7 +147,7 @@ async def release(
             "Disbursement skipped for order %s (ops manual): %s",
             order_id, e,
         )
-    except (XenditError, SentoError) as e:
+    except (XenditError, SentoError, DipayError) as e:
         entry.status = EscrowEntryStatus.FAILED
         _LOG.exception(
             "%s disbursement FAILED for order %s: %s — ledger row marked FAILED",
@@ -139,6 +159,22 @@ async def release(
             "Unexpected error kicking off disbursement for order %s — "
             "ledger row marked FAILED", order_id,
         )
+
+    # Dipay fee math — append the gross → net split to the ledger row so ops
+    # can reconcile the platform cut without opening Dipay's dashboard. The
+    # provider response carries the breakdown computed off the same gross.
+    if provider == "dipay" and isinstance(response, dict) and "net_idr" in response:
+        entry.description = (
+            (entry.description or "")
+            + (
+                f" — gross Rp{response['gross_idr']:,} → platform fee "
+                f"Rp{response['platform_fee_idr']:,}, Dipay fee "
+                f"Rp{response['dipay_fee_idr']:,}, net Rp{response['net_idr']:,}"
+            )
+        )
+        # Belt-and-braces — same deterministic value stamped above.
+        if response.get("partner_ref"):
+            entry.partner_ref = response["partner_ref"]
 
     await db.flush()
     return entry

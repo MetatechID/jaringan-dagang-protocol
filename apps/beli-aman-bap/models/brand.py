@@ -3,7 +3,7 @@
 In v1 we seed three brands: antarestar, gendes, yourbrand.
 """
 
-from sqlalchemy import String
+from sqlalchemy import String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -76,6 +76,33 @@ class Brand(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     sento_disbursement_bank_code: Mapped[str | None] = mapped_column(String(16), nullable=True)
     sento_disbursement_bank_account: Mapped[str | None] = mapped_column(String(64), nullable=True)
     sento_disbursement_holder_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Dipay (SNAP v2.1) credentials. Per-Brand — same pattern as the OY and
+    # Sento blocks above. ``dipay_client_key`` is triple-duty: X-CLIENT-KEY
+    # on the access-token call, X-PARTNER-ID on signed API calls, and the
+    # ``customerNumber`` on e-money disbursements.
+    # ``dipay_client_secret`` keys the per-request HMAC-SHA512 signature;
+    # ``dipay_private_key_b64`` is the base64-encoded PEM RSA private key
+    # signing the access-token request (env master:
+    # DIPAY_PRIVATE_KEY_B64 / DIPAY_PRIVATE_KEY_PATH). Plaintext v1 —
+    # encrypt at rest when the KMS / Vault-of-record lands.
+    dipay_client_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    dipay_client_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    dipay_private_key_b64: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dipay_merchant_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # Dipay disbursement target — the brand/seller's bank account the BAP
+    # pays out to on escrow release when payment_provider == "dipay". Unlike
+    # Xendit there's no per-brand sub-account; buyer funds settle into the
+    # merchant's single Dipay balance and we transfer out of it via
+    # ``/emoney/transfer-bank``. ``dipay_disbursement_bank_code`` is Dipay's
+    # bank code (see api-docs.dipay.id disbursement bank-code table);
+    # ``dipay_disbursement_bank_account`` is digits only. ``holder_name`` is
+    # record/UI parity only — the transfer API takes the account number, not
+    # a recipient name.
+    dipay_disbursement_bank_code: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    dipay_disbursement_bank_account: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    dipay_disbursement_holder_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Biteship pickup origin used as the ``origin`` payload when creating
     # shipment orders. Shape: {contact_name, contact_phone, contact_email,

@@ -132,6 +132,44 @@ class Settings(BaseSettings):
     # EXPIRED. 24h matches OY's default.
     sento_invoice_duration_seconds: int = 86400  # 24h
 
+    # --- Dipay (https://api-docs.dipay.id/) — SNAP v2.1 ---
+    # Base URL for Dipay's SNAP v2.1 HTTP API. Default is the demo
+    # (https://api-b2x-demo.dipay.id/snap/v2.1); prod overrides via
+    # DIPAY_BASE_URL in .env. Read by services.dipay_client._base_url().
+    dipay_base_url: str = "https://api-b2x-demo.dipay.id/snap/v2.1"
+    # Client key (X-CLIENT-KEY on the access-token call, X-PARTNER-ID on
+    # signed API calls, customerNumber on e-money disbursements). Per-Brand
+    # override lives in Brand.dipay_client_key. Empty value → mock-mode
+    # (synthetic invoice, same pattern as OY/Sento).
+    dipay_client_key: str = ""
+    # Client secret — HMAC-SHA512 key for the per-request X-SIGNATURE
+    # stringToSign (see services/dipay_client.py).
+    dipay_client_secret: str = ""
+    # RSA private key (PEM) used to sign the access-token/b2b request
+    # (SHA256withRSA over "{client_key}|{x_timestamp}"). Supply either the
+    # base64-encoded PEM inline or a path on disk; b64 wins when both set.
+    dipay_private_key_b64: str = ""
+    dipay_private_key_path: str = ""
+    # Merchant id stamped into QRIS MPM generate payloads (per-Brand
+    # override lives in Brand.dipay_merchant_id).
+    dipay_merchant_id: str = ""
+    # Public BAP base URL baked into the QRIS PNG URLs we hand back to
+    # buyers: {qr_public_base}/api/v1/qris/{partner_ref}.png is served by
+    # routers/qris.py from the stored QRIS payload.
+    qr_public_base: str = "https://api.beli-aman.metatech.id"
+    # Platform release fee on escrow release, basis points (200bp = 2%).
+    # Deducted from the gross before the Dipay disbursement; the remainder
+    # is what the seller receives.
+    platform_release_fee_pct_bp: int = 200
+    # Dipay disbursement fee model: flat IDR + percentage (bp). Both 0 by
+    # default (assume Dipay's fee is off-platform); set once a real fee
+    # schedule is known.
+    dipay_disbursement_fee_flat_idr: int = 0
+    dipay_disbursement_fee_pct_bp: int = 0
+    # Floor for the NET payout — below this the disbursement is skipped
+    # (fees would eat the release). Matches Sento's Rp10.000 minimum.
+    dipay_disbursement_min_amount_idr: int = 10_000
+
     # --- Biteship (live courier API) ---
     biteship_api_base: str = "https://api.biteship.com"
     biteship_api_key: str = ""

@@ -68,7 +68,7 @@ async def get_product(slug: str, product_slug: str) -> dict:
 # ----- Payouts & Fulfillment (vibe-admin) -----
 
 
-ALLOWED_PAYMENT_PROVIDERS = {"xendit", "sento"}
+ALLOWED_PAYMENT_PROVIDERS = {"xendit", "sento", "dipay"}
 
 
 class PayoutsIn(BaseModel):
@@ -79,6 +79,16 @@ class PayoutsIn(BaseModel):
     sento_disbursement_bank_code: str | None = None
     sento_disbursement_bank_account: str | None = None
     sento_disbursement_holder_name: str | None = None
+    # Dipay (SNAP v2.1) — client key/secret + RSA private key (base64 PEM)
+    # for request signing, merchant id for QRIS, and the bank account the
+    # brand pays out to on escrow release (see services/dipay_*.py).
+    dipay_client_key: str | None = None
+    dipay_client_secret: str | None = None
+    dipay_private_key_b64: str | None = None
+    dipay_merchant_id: str | None = None
+    dipay_disbursement_bank_code: str | None = None
+    dipay_disbursement_bank_account: str | None = None
+    dipay_disbursement_holder_name: str | None = None
     biteship_origin_address: dict | None = None
     biteship_default_courier: str | None = None
     payment_provider: str | None = None
@@ -109,6 +119,25 @@ def _payouts_view(brand: Brand) -> dict:
             else brand.sento_disbursement_bank_account
         ),
         "sento_disbursement_holder_name": brand.sento_disbursement_holder_name,
+        # Dipay (SNAP) disbursement target — used when payment_provider ==
+        # "dipay". Like Sento above: masked account, plain code/holder.
+        "dipay_disbursement_bank_code": brand.dipay_disbursement_bank_code,
+        "dipay_disbursement_bank_account_masked": (
+            "•••• " + brand.dipay_disbursement_bank_account[-4:]
+            if brand.dipay_disbursement_bank_account
+            and len(brand.dipay_disbursement_bank_account) > 4
+            else brand.dipay_disbursement_bank_account
+        ),
+        "dipay_disbursement_holder_name": brand.dipay_disbursement_holder_name,
+        # Dipay identifiers — never echo the secret or the RSA private key.
+        # ``dipay_client_key`` is the public X-CLIENT-KEY; only the last 4
+        # chars come back so admins can tell which key is configured.
+        "dipay_merchant_id": brand.dipay_merchant_id,
+        "dipay_client_key_masked": (
+            "•••• " + brand.dipay_client_key[-4:]
+            if brand.dipay_client_key and len(brand.dipay_client_key) > 4
+            else brand.dipay_client_key
+        ),
         "biteship_origin_address": brand.biteship_origin_address,
         "biteship_default_courier": brand.biteship_default_courier,
         "payment_provider": (brand.payment_provider or "xendit")
@@ -209,6 +238,22 @@ async def put_payouts(
         brand.sento_disbursement_bank_account = _normalize(body.sento_disbursement_bank_account)
     if body.sento_disbursement_holder_name is not None:
         brand.sento_disbursement_holder_name = _normalize(body.sento_disbursement_holder_name)
+    # Dipay creds + disbursement target. The is-not-None gate means secrets
+    # are only overwritten when the caller actually sends them.
+    if body.dipay_client_key is not None:
+        brand.dipay_client_key = _normalize(body.dipay_client_key)
+    if body.dipay_client_secret is not None:
+        brand.dipay_client_secret = _normalize(body.dipay_client_secret)
+    if body.dipay_private_key_b64 is not None:
+        brand.dipay_private_key_b64 = _normalize(body.dipay_private_key_b64)
+    if body.dipay_merchant_id is not None:
+        brand.dipay_merchant_id = _normalize(body.dipay_merchant_id)
+    if body.dipay_disbursement_bank_code is not None:
+        brand.dipay_disbursement_bank_code = _normalize(body.dipay_disbursement_bank_code)
+    if body.dipay_disbursement_bank_account is not None:
+        brand.dipay_disbursement_bank_account = _normalize(body.dipay_disbursement_bank_account)
+    if body.dipay_disbursement_holder_name is not None:
+        brand.dipay_disbursement_holder_name = _normalize(body.dipay_disbursement_holder_name)
     if body.biteship_origin_address is not None:
         brand.biteship_origin_address = body.biteship_origin_address or None
     if body.biteship_default_courier is not None:

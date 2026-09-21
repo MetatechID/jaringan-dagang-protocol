@@ -800,7 +800,7 @@ async def create_invoice(
     ``payment_provider``).
     """
     from models.brand import Brand
-    from services import oy_invoices, sento_invoices, xendit_invoices
+    from services import dipay_invoices, oy_invoices, sento_invoices, xendit_invoices
 
     order = await lock_order_for_update(db, order_id)
     if not order or order.profile_id != profile.id:
@@ -815,6 +815,10 @@ async def create_invoice(
                 "provider": snap.get("payment_provider"),
                 "invoice_id": snap.get("invoice_id"),
                 "invoice_url": snap.get("invoice_url"),
+                # Dipay QRIS surfaces — the SDK re-renders the QR from the
+                # raw EMVCo payload when the PNG URL isn't reachable.
+                "qris_image_url": snap.get("qris_image_url"),
+                "qris_content": snap.get("qris_content"),
             }
         raise HTTPException(409, f"Cannot create invoice in state {order.state.value}")
 
@@ -835,6 +839,12 @@ async def create_invoice(
         response = await sento_invoices.create_invoice_for_order(
             db, order, buyer_email=profile.email,
         )
+    elif provider == "dipay":
+        # Same buyer-email threading as the Sento path — QRIS MPM generate
+        # itself takes no email, but the snapshot stores it for ops parity.
+        response = await dipay_invoices.create_invoice_for_order(
+            db, order, buyer_email=profile.email,
+        )
     else:
         response = await xendit_invoices.create_invoice_for_order(db, order)
     return {
@@ -849,6 +859,7 @@ async def create_invoice(
         ),
         "expires_at": response.get("expires_at") or response.get("expiry_date"),
         "qris_image_url": response.get("qris_image_url"),
+        "qris_content": response.get("qris_content"),
     }
 
 

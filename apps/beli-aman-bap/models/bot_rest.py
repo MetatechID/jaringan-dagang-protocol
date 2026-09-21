@@ -196,6 +196,14 @@ class Cart(Base):
     invoice_provider: Mapped[Optional[str]] = mapped_column(
         String(16), nullable=True, index=True
     )
+    # QRIS image URL surfaced to the bot/buyer. For Dipay invoices this
+    # points at our own renderer ({qr_public_base}/api/v1/qris/{ref}.png,
+    # routers/qris.py); a future PSP-hosted QR image can slot in here too.
+    qris_image_url: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    # Raw QRIS payload (the EMVCo string encoded in the QR). Persisted so
+    # the PNG renderer can regenerate the image on demand without a PSP
+    # round-trip.
+    qris_content: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
