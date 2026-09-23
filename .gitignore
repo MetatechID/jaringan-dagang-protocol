@@ -24,6 +24,8 @@ build/
 .env
 .env.local
 .env.*.local
+*.pem
+*.key
 
 # Editors
 .vscode/
