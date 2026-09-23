@@ -43,6 +43,9 @@ def test_settings_carries_dipay_block():
     assert s.qr_public_base.startswith("http")
     # Platform release cut: 200bp = 2% of gross on escrow release.
     assert s.platform_release_fee_pct_bp == 200
+    assert hasattr(s, "dipay_callback_public_key"), "missing dipay_callback_public_key"
+    assert hasattr(s, "dipay_qris_duration_seconds"), "missing dipay_qris_duration_seconds"
+    assert s.dipay_qris_duration_seconds == 1800
 
 
 def test_brand_model_has_dipay_columns():
@@ -65,7 +68,15 @@ def test_escrow_ledger_has_partner_ref_column():
     from models.escrow_ledger import EscrowLedger  # noqa: WPS433
 
     columns = {c.name for c in EscrowLedger.__table__.columns}
-    assert "partner_ref" in columns
+    assert {
+        "partner_ref",
+        "gross_amount_idr",
+        "platform_fee_idr",
+        "provider_fee_idr",
+        "net_amount_idr",
+    } <= columns
+    constraints = {c.name for c in EscrowLedger.__table__.constraints}
+    assert "uq_escrow_ledger_partner_ref" in constraints
 
 
 def test_cart_model_has_qris_columns():

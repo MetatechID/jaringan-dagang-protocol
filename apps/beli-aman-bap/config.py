@@ -5,6 +5,7 @@ local development. The Beli Aman BAP runs on port 8003 by default to
 avoid colliding with the JD BAP (8002).
 """
 
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -169,6 +170,41 @@ class Settings(BaseSettings):
     # Floor for the NET payout — below this the disbursement is skipped
     # (fees would eat the release). Matches Sento's Rp10.000 minimum.
     dipay_disbursement_min_amount_idr: int = 10_000
+    # Dipay callback public key used to verify incoming webhook signatures
+    # (SHA256withRSA). Supply either inline PEM or base64 PEM.
+    dipay_callback_public_key: str = ""
+    # How long a Dipay QRIS code remains valid before Dipay expires it.
+    # Default is 1800s (30 minutes).
+    dipay_qris_duration_seconds: int = 1800
+    @field_validator(
+        "platform_release_fee_pct_bp",
+        "dipay_disbursement_fee_pct_bp",
+    )
+    @classmethod
+    def _validate_dipay_basis_points(cls, value: int) -> int:
+        if not 0 <= value <= 10_000:
+            raise ValueError("Dipay fee basis points must be between 0 and 10000")
+        return value
+
+    @field_validator(
+        "dipay_disbursement_fee_flat_idr",
+        "dipay_disbursement_min_amount_idr",
+    )
+    @classmethod
+    def _validate_dipay_amounts(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("Dipay fee/minimum amounts must be non-negative")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_dipay_total_fee_bound(self) -> "Settings":
+        if (
+            self.platform_release_fee_pct_bp
+            + self.dipay_disbursement_fee_pct_bp
+            > 10_000
+        ):
+            raise ValueError("Combined Dipay percentage fees must not exceed 10000 bp")
+        return self
 
     # --- Biteship (live courier API) ---
     biteship_api_base: str = "https://api.biteship.com"

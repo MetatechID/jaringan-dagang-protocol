@@ -45,6 +45,8 @@ def _patch_settings(monkeypatch, **overrides) -> SimpleNamespace:
             "dipay_base_url", "https://api-b2x-demo.dipay.id/snap/v2.1"
         ),
         dipay_merchant_id=overrides.get("dipay_merchant_id", ""),
+        dipay_callback_public_key=overrides.get("dipay_callback_public_key", ""),
+        dipay_qris_duration_seconds=overrides.get("dipay_qris_duration_seconds", 1800),
     )
     monkeypatch.setattr(dipay_client, "settings", fake)
     return fake
@@ -103,6 +105,26 @@ def _body_of(request: httpx.Request) -> dict:
     return raw
 
 
+def _config(**overrides) -> dipay_client.DipayConfig:
+    current = dipay_client.settings
+    return dipay_client.DipayConfig(
+        base_url=overrides.get("base_url", current.dipay_base_url).rstrip("/"),
+        client_key=overrides.get("client_key", current.dipay_client_key),
+        client_secret=overrides.get("client_secret", current.dipay_client_secret),
+        private_key_b64=overrides.get(
+            "private_key_b64", current.dipay_private_key_b64
+        ),
+        private_key_path=overrides.get(
+            "private_key_path", current.dipay_private_key_path
+        ),
+        merchant_id=overrides.get("merchant_id", current.dipay_merchant_id),
+    )
+
+
+def _seed_token(token: str, expiry: float) -> None:
+    dipay_client._token_cache[_config().token_identity] = (token, expiry)
+
+
 def _requests_to(captured: list, path: str) -> list:
     # Match on path SUFFIX — the base URL carries a /snap/v2.1 prefix, so
     # httpx's url.path is "/snap/v2.1/access-token/b2b", not "/access-token/b2b".
@@ -119,11 +141,12 @@ def _recompute_request_signature(req: httpx.Request, client_secret: str) -> str:
         f"{hashlib.sha256(body_str.encode('utf-8')).hexdigest()}:"
         f"{req.headers['X-TIMESTAMP']}"
     )
-    return hmac.new(
+    digest = hmac.new(
         client_secret.encode("utf-8"),
         string_to_sign.encode("utf-8"),
         hashlib.sha512,
-    ).hexdigest()
+    ).digest()
+    return base64.b64encode(digest).decode("utf-8")
 
 
 def _generate_rsa_key_b64() -> tuple[str, object]:
@@ -173,9 +196,11 @@ class TestNoCreds:
         _install_transport(monkeypatch, transport)
 
         with pytest.raises(dipay_client.DipayError) as ei:
-            await dipay_client.create_qris(partner_reference_no="q-x", amount_idr=1000)
+            await dipay_client.create_qris(
+                config=dipay_client.resolve_config(), partner_reference_no="q-x", amount_idr=1000
+            )
         assert ei.value.status_code == 0
-        assert "DIPAY_CLIENT_KEY not configured" in str(ei.value.body)
+        assert "Incomplete environment Dipay credentials (missing: dipay_client_key" in str(ei.value.body)
         assert captured == []
 
     @pytest.mark.asyncio
@@ -186,7 +211,7 @@ class TestNoCreds:
         _install_transport(monkeypatch, transport)
 
         with pytest.raises(dipay_client.DipayError) as ei:
-            await dipay_client.create_qris(partner_reference_no="q-x", amount_idr=1000)
+            await dipay_client.create_qris(config=_config(), partner_reference_no="q-x", amount_idr=1000)
         assert ei.value.status_code == 0
         assert "private key" in str(ei.value.body).lower()
 
@@ -201,7 +226,7 @@ class TestAccessToken:
         captured, transport = _make_transport({})
         _install_transport(monkeypatch, transport)
 
-        await dipay_client._get_token(force=True)
+        await dipay_client._get_token(_config(), force=True)
 
         req = _requests_to(captured, "/access-token/b2b")[0]
         assert req.headers["X-CLIENT-KEY"] == "client-key"
@@ -212,7 +237,7 @@ class TestAccessToken:
         from cryptography.hazmat.primitives.asymmetric import padding
 
         public_key.verify(
-            bytes.fromhex(req.headers["X-SIGNATURE"]),
+            base64.b64decode(req.headers["X-SIGNATURE"]),
             signed_message,
             padding.PKCS1v15(),
             hashes.SHA256(),
@@ -230,11 +255,10 @@ class TestAccessToken:
 
         # Bypass the RSA fetch by pre-seeding the cache, as the real fetch
         # would leave it.
-        dipay_client._token_value = "tok-1"
-        dipay_client._token_expiry = 9_999_999_999.0
+        _seed_token("tok-1", 9_999_999_999.0)
 
-        await dipay_client.create_qris(partner_reference_no="q-a", amount_idr=1000)
-        await dipay_client.create_qris(partner_reference_no="q-b", amount_idr=1000)
+        await dipay_client.create_qris(config=_config(), partner_reference_no="q-a", amount_idr=1000)
+        await dipay_client.create_qris(config=_config(), partner_reference_no="q-b", amount_idr=1000)
 
         assert len(_requests_to(captured, "/access-token/b2b")) == 0
         assert len(_requests_to(captured, "/qr/qr-mpm-generate")) == 2
@@ -247,10 +271,9 @@ class TestAccessToken:
         captured, transport = _make_transport({})
         _install_transport(monkeypatch, transport)
 
-        dipay_client._token_value = "tok-stale"
-        dipay_client._token_expiry = 0.0  # already "expired"
+        _seed_token("tok-stale", 0.0)  # already "expired"
 
-        await dipay_client.create_qris(partner_reference_no="q-a", amount_idr=1000)
+        await dipay_client.create_qris(config=_config(), partner_reference_no="q-a", amount_idr=1000)
         token_reqs = _requests_to(captured, "/access-token/b2b")
         assert len(token_reqs) == 1
         # The signed call must carry the *fresh* token, not the stale one.
@@ -264,10 +287,9 @@ class TestSignedRequestHeaders:
         _patch_settings(monkeypatch, dipay_private_key_b64="x")
         captured, transport = _make_transport({})
         _install_transport(monkeypatch, transport)
-        dipay_client._token_value = "tok-1"
-        dipay_client._token_expiry = 9_999_999_999.0
+        _seed_token("tok-1", 9_999_999_999.0)
 
-        await dipay_client.create_qris(partner_reference_no="q-a", amount_idr=1000)
+        await dipay_client.create_qris(config=_config(), partner_reference_no="q-a", amount_idr=1000)
 
         req = _requests_to(captured, "/qr/qr-mpm-generate")[0]
         assert req.headers["Authorization"] == "Bearer tok-1"
@@ -278,10 +300,11 @@ class TestSignedRequestHeaders:
         external_id = req.headers["X-EXTERNAL-ID"]
         assert len(external_id) == 32
         assert all(c in "0123456789abcdef" for c in external_id)
-        # X-TIMESTAMP: ISO-8601 with milliseconds, +07:00 offset (Jakarta).
+        # X-TIMESTAMP: ISO-8601 of length 25 (seconds precision), +07:00 offset (Jakarta).
         ts = req.headers["X-TIMESTAMP"]
         assert ts.endswith("+07:00")
-        assert "." in ts and len(ts.split(".")[1].split("+")[0]) == 3
+        assert len(ts) == 25
+        assert "." not in ts
 
     @pytest.mark.asyncio
     async def test_hmac_sha512_string_to_sign_recomputation(self, monkeypatch):
@@ -290,10 +313,9 @@ class TestSignedRequestHeaders:
         _patch_settings(monkeypatch, dipay_private_key_b64="x")
         captured, transport = _make_transport({})
         _install_transport(monkeypatch, transport)
-        dipay_client._token_value = "tok-1"
-        dipay_client._token_expiry = 9_999_999_999.0
+        _seed_token("tok-1", 9_999_999_999.0)
 
-        await dipay_client.create_qris(partner_reference_no="q-a", amount_idr=12345)
+        await dipay_client.create_qris(config=_config(), partner_reference_no="q-a", amount_idr=12345)
 
         req = _requests_to(captured, "/qr/qr-mpm-generate")[0]
         assert req.headers["X-SIGNATURE"] == _recompute_request_signature(req, "client-secret")
@@ -305,10 +327,9 @@ class TestSignedRequestHeaders:
         _patch_settings(monkeypatch, dipay_private_key_b64="x")
         captured, transport = _make_transport({})
         _install_transport(monkeypatch, transport)
-        dipay_client._token_value = "tok-1"
-        dipay_client._token_expiry = 9_999_999_999.0
+        _seed_token("tok-1", 9_999_999_999.0)
 
-        await dipay_client.create_qris(partner_reference_no="q-a", amount_idr=1000)
+        await dipay_client.create_qris(config=_config(), partner_reference_no="q-a", amount_idr=1000)
 
         req = _requests_to(captured, "/qr/qr-mpm-generate")[0]
         raw = req.content.decode("utf-8")
@@ -321,17 +342,18 @@ class TestSignedRequestHeaders:
 
     @pytest.mark.asyncio
     async def test_empty_body_hashes_empty_json_object(self, monkeypatch):
-        """get_balance sends no meaningful body — the hashed body must be
-        the literal '{}' and the wire body must match."""
+        """A signed request with no body (json=None) hashes the literal '{}' and
+        the wire body must match."""
         _patch_settings(monkeypatch, dipay_private_key_b64="x")
         captured, transport = _make_transport({})
         _install_transport(monkeypatch, transport)
-        dipay_client._token_value = "tok-1"
-        dipay_client._token_expiry = 9_999_999_999.0
+        _seed_token("tok-1", 9_999_999_999.0)
 
-        await dipay_client.get_balance()
+        await dipay_client._signed_request(
+            "POST", "/test-empty", config=_config(), access_token="tok-1", json=None
+        )
 
-        req = _requests_to(captured, "/balance-inquiry")[0]
+        req = _requests_to(captured, "/test-empty")[0]
         assert req.content.decode("utf-8") == "{}"
         assert req.headers["X-SIGNATURE"] == _recompute_request_signature(req, "client-secret")
 
@@ -346,11 +368,10 @@ class TestRequestErrors:
             ]}
         )
         _install_transport(monkeypatch, transport)
-        dipay_client._token_value = "tok-1"
-        dipay_client._token_expiry = 9_999_999_999.0
+        _seed_token("tok-1", 9_999_999_999.0)
 
         with pytest.raises(dipay_client.DipayError) as ei:
-            await dipay_client.create_qris(partner_reference_no="q-x", amount_idr=1000)
+            await dipay_client.create_qris(config=_config(), partner_reference_no="q-x", amount_idr=1000)
         assert ei.value.status_code == 400
         assert ei.value.body == {"responseCode": "4004700", "responseMessage": "Bad Request"}
         # No retry on non-401: exactly one business call.
@@ -363,11 +384,10 @@ class TestRequestErrors:
             {"/qr/qr-mpm-generate": [httpx.Response(503, text="dipay service down")]}
         )
         _install_transport(monkeypatch, transport)
-        dipay_client._token_value = "tok-1"
-        dipay_client._token_expiry = 9_999_999_999.0
+        _seed_token("tok-1", 9_999_999_999.0)
 
         with pytest.raises(dipay_client.DipayError) as ei:
-            await dipay_client.create_qris(partner_reference_no="q-x", amount_idr=1000)
+            await dipay_client.create_qris(config=_config(), partner_reference_no="q-x", amount_idr=1000)
         assert ei.value.status_code == 503
         assert ei.value.body == "dipay service down"
 
@@ -383,10 +403,9 @@ class TestRequestErrors:
             ]}
         )
         _install_transport(monkeypatch, transport)
-        dipay_client._token_value = "tok-stale"
-        dipay_client._token_expiry = 9_999_999_999.0  # cache says valid → 401 is what triggers refresh
+        _seed_token("tok-stale", 9_999_999_999.0)  # cache says valid → 401 is what triggers refresh
 
-        out = await dipay_client.create_qris(partner_reference_no="q-x", amount_idr=1000)
+        out = await dipay_client.create_qris(config=_config(), partner_reference_no="q-x", amount_idr=1000)
 
         assert out["responseCode"] == "2004700"
         # 1 initial token refresh + 2 business calls.
@@ -402,11 +421,10 @@ class TestCreateQrisPayload:
         _patch_settings(monkeypatch, dipay_private_key_b64="x")
         captured, transport = _make_transport({})
         _install_transport(monkeypatch, transport)
-        dipay_client._token_value = "tok-1"
-        dipay_client._token_expiry = 9_999_999_999.0
+        _seed_token("tok-1", 9_999_999_999.0)
 
-        await dipay_client.create_qris(
-            partner_reference_no="q-abc", amount_idr=50000, merchant_id="M-77"
+        await dipay_client.create_qris(config=_config(merchant_id="M-77"),
+            partner_reference_no="q-abc", amount_idr=50000
         )
 
         req = _requests_to(captured, "/qr/qr-mpm-generate")[0]
@@ -422,10 +440,9 @@ class TestCreateQrisPayload:
         _patch_settings(monkeypatch, dipay_private_key_b64="x", dipay_merchant_id="ENV-MERCH")
         captured, transport = _make_transport({})
         _install_transport(monkeypatch, transport)
-        dipay_client._token_value = "tok-1"
-        dipay_client._token_expiry = 9_999_999_999.0
+        _seed_token("tok-1", 9_999_999_999.0)
 
-        await dipay_client.create_qris(partner_reference_no="q-abc", amount_idr=1000)
+        await dipay_client.create_qris(config=_config(), partner_reference_no="q-abc", amount_idr=1000)
 
         body = _body_of(_requests_to(captured, "/qr/qr-mpm-generate")[0])
         assert body["merchantId"] == "ENV-MERCH"
@@ -435,10 +452,9 @@ class TestCreateQrisPayload:
         _patch_settings(monkeypatch, dipay_private_key_b64="x")
         captured, transport = _make_transport({})
         _install_transport(monkeypatch, transport)
-        dipay_client._token_value = "tok-1"
-        dipay_client._token_expiry = 9_999_999_999.0
+        _seed_token("tok-1", 9_999_999_999.0)
 
-        await dipay_client.create_qris(
+        await dipay_client.create_qris(config=_config(),
             partner_reference_no="q-abc", amount_idr=1000,
             validity_period="2026-09-21T23:59:59+07:00",
         )
@@ -453,10 +469,9 @@ class TestQueryQris:
         _patch_settings(monkeypatch, dipay_private_key_b64="x")
         captured, transport = _make_transport({})
         _install_transport(monkeypatch, transport)
-        dipay_client._token_value = "tok-1"
-        dipay_client._token_expiry = 9_999_999_999.0
+        _seed_token("tok-1", 9_999_999_999.0)
 
-        out = await dipay_client.query_qris(partner_reference_no="q-abc")
+        out = await dipay_client.query_qris(config=_config(), partner_reference_no="q-abc")
 
         req = _requests_to(captured, "/qr/qr-mpm-query")[0]
         body = _body_of(req)
@@ -470,10 +485,9 @@ class TestDisbursementPayload:
         _patch_settings(monkeypatch, dipay_private_key_b64="x")
         captured, transport = _make_transport({})
         _install_transport(monkeypatch, transport)
-        dipay_client._token_value = "tok-1"
-        dipay_client._token_expiry = 9_999_999_999.0
+        _seed_token("tok-1", 9_999_999_999.0)
 
-        await dipay_client.create_disbursement(
+        await dipay_client.create_disbursement(config=_config(),
             partner_reference_no="r-abc",
             beneficiary_account="1234567890",
             beneficiary_bank_code="014",
@@ -494,10 +508,9 @@ class TestDisbursementPayload:
         _patch_settings(monkeypatch, dipay_private_key_b64="x")
         captured, transport = _make_transport({})
         _install_transport(monkeypatch, transport)
-        dipay_client._token_value = "tok-1"
-        dipay_client._token_expiry = 9_999_999_999.0
+        _seed_token("tok-1", 9_999_999_999.0)
 
-        await dipay_client.create_disbursement(
+        await dipay_client.create_disbursement(config=_config(),
             partner_reference_no="r-abc",
             beneficiary_account="1234567890",
             beneficiary_bank_code="014",
@@ -519,10 +532,9 @@ class TestDisbursementPayload:
         _patch_settings(monkeypatch, dipay_private_key_b64="x")
         captured, transport = _make_transport({})
         _install_transport(monkeypatch, transport)
-        dipay_client._token_value = "tok-1"
-        dipay_client._token_expiry = 9_999_999_999.0
+        _seed_token("tok-1", 9_999_999_999.0)
 
-        await dipay_client.inquiry_bank_account(
+        await dipay_client.inquiry_bank_account(config=_config(),
             partner_reference_no="i-abc",
             beneficiary_account="1234567890",
             beneficiary_bank_code="014",
@@ -543,10 +555,9 @@ class TestDisbursementPayload:
         _patch_settings(monkeypatch, dipay_private_key_b64="x")
         captured, transport = _make_transport({})
         _install_transport(monkeypatch, transport)
-        dipay_client._token_value = "tok-1"
-        dipay_client._token_expiry = 9_999_999_999.0
+        _seed_token("tok-1", 9_999_999_999.0)
 
-        await dipay_client.get_disbursement_status(partner_reference_no="r-abc")
+        await dipay_client.get_disbursement_status(config=_config(), partner_reference_no="r-abc")
 
         body = _body_of(_requests_to(captured, "/transfer/status")[0])
         assert body == {
@@ -559,13 +570,223 @@ class TestDisbursementPayload:
         _patch_settings(monkeypatch, dipay_private_key_b64="x")
         captured, transport = _make_transport({})
         _install_transport(monkeypatch, transport)
-        dipay_client._token_value = "tok-1"
-        dipay_client._token_expiry = 9_999_999_999.0
+        _seed_token("tok-1", 9_999_999_999.0)
 
-        await dipay_client.get_disbursement_status(
+        await dipay_client.get_disbursement_status(config=_config(),
             partner_reference_no="r-abc", send_callback=True
         )
 
         body = _body_of(_requests_to(captured, "/transfer/status")[0])
         assert body["additionalInfo"] == {"sendCallback": True}
+
+
+class TestBalanceInquiry:
+    @pytest.mark.asyncio
+    async def test_get_balance_payload_and_partner_ref(self, monkeypatch):
+        """get_balance sends partnerReferenceNo and balanceTypes."""
+        _patch_settings(monkeypatch, dipay_private_key_b64="x")
+        captured, transport = _make_transport({})
+        _install_transport(monkeypatch, transport)
+        _seed_token("tok-1", 9_999_999_999.0)
+
+        await dipay_client.get_balance(config=_config(), partner_reference_no="b-123")
+
+        req = _requests_to(captured, "/balance-inquiry")[0]
+        body = _body_of(req)
+        assert body == {
+            "partnerReferenceNo": "b-123",
+            "balanceTypes": ["deposit"],
+        }
+        assert req.headers["X-SIGNATURE"] == _recompute_request_signature(req, "client-secret")
+
+    @pytest.mark.asyncio
+    async def test_get_balance_generates_partner_ref_when_omitted(self, monkeypatch):
+        """get_balance generates a compliant partnerReferenceNo when omitted."""
+        _patch_settings(monkeypatch, dipay_private_key_b64="x")
+        captured, transport = _make_transport({})
+        _install_transport(monkeypatch, transport)
+        _seed_token("tok-1", 9_999_999_999.0)
+
+        await dipay_client.get_balance(config=_config())
+
+        req = _requests_to(captured, "/balance-inquiry")[0]
+        body = _body_of(req)
+        assert body["balanceTypes"] == ["deposit"]
+        assert body["partnerReferenceNo"].startswith("b-")
+        assert len(body["partnerReferenceNo"]) <= 32
+        assert req.headers["X-SIGNATURE"] == _recompute_request_signature(req, "client-secret")
+
+
+class TestVerifyNotificationSignature:
+    def test_verify_notification_signature_b64_success(self):
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding, rsa
+
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        pub_pem = key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("utf-8")
+
+        body = {"originalPartnerReferenceNo": "q-123", "latestTransactionStatus": "00"}
+        body_hash = hashlib.sha256(json.dumps(body, separators=(",", ":")).encode("utf-8")).hexdigest()
+        method = "POST"
+        path = "/webhooks/dipay/qris"
+        ts = "2026-09-23T14:30:00+07:00"
+        string_to_sign = f"{method}:{path}:{body_hash}:{ts}"
+        raw_sig = key.sign(string_to_sign.encode("utf-8"), padding.PKCS1v15(), hashes.SHA256())
+        sig_b64 = base64.b64encode(raw_sig).decode("utf-8")
+
+        assert dipay_client.verify_notification_signature(
+            method=method,
+            path=path,
+            body=body,
+            timestamp=ts,
+            signature=sig_b64,
+            public_key=pub_pem,
+        ) is True
+
+    def test_verify_notification_signature_hex_success(self):
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding, rsa
+
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        pub_pem = key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("utf-8")
+
+        body = {"originalPartnerReferenceNo": "q-123", "latestTransactionStatus": "00"}
+        body_hash = hashlib.sha256(json.dumps(body, separators=(",", ":")).encode("utf-8")).hexdigest()
+        method = "POST"
+        path = "/webhooks/dipay/qris"
+        ts = "2026-09-23T14:30:00+07:00"
+        string_to_sign = f"{method}:{path}:{body_hash}:{ts}"
+        raw_sig = key.sign(string_to_sign.encode("utf-8"), padding.PKCS1v15(), hashes.SHA256())
+        sig_hex = raw_sig.hex()
+
+        assert dipay_client.verify_notification_signature(
+            method=method,
+            path=path,
+            body=body,
+            timestamp=ts,
+            signature=sig_hex,
+            public_key=pub_pem,
+        ) is True
+
+    def test_verify_notification_signature_uses_settings_key(self, monkeypatch):
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding, rsa
+
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        pub_pem = key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("utf-8")
+
+        _patch_settings(monkeypatch, dipay_callback_public_key=pub_pem)
+
+        body = {"originalPartnerReferenceNo": "q-123", "latestTransactionStatus": "00"}
+        body_hash = hashlib.sha256(json.dumps(body, separators=(",", ":")).encode("utf-8")).hexdigest()
+        method = "POST"
+        path = "/webhooks/dipay/qris"
+        ts = "2026-09-23T14:30:00+07:00"
+        string_to_sign = f"{method}:{path}:{body_hash}:{ts}"
+        raw_sig = key.sign(string_to_sign.encode("utf-8"), padding.PKCS1v15(), hashes.SHA256())
+        sig_b64 = base64.b64encode(raw_sig).decode("utf-8")
+
+        assert dipay_client.verify_notification_signature(
+            method=method,
+            path=path,
+            body=body,
+            timestamp=ts,
+            signature=sig_b64,
+        ) is True
+
+    def test_verify_notification_signature_tampered_fails(self):
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding, rsa
+
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        pub_pem = key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("utf-8")
+
+        body = {"originalPartnerReferenceNo": "q-123", "latestTransactionStatus": "00"}
+        body_hash = hashlib.sha256(json.dumps(body, separators=(",", ":")).encode("utf-8")).hexdigest()
+        method = "POST"
+        path = "/webhooks/dipay/qris"
+        ts = "2026-09-23T14:30:00+07:00"
+        string_to_sign = f"{method}:{path}:{body_hash}:{ts}"
+        raw_sig = key.sign(string_to_sign.encode("utf-8"), padding.PKCS1v15(), hashes.SHA256())
+        sig_b64 = base64.b64encode(raw_sig).decode("utf-8")
+
+        # Tampered body
+        assert dipay_client.verify_notification_signature(
+            method=method,
+            path=path,
+            body={"originalPartnerReferenceNo": "q-tampered"},
+            timestamp=ts,
+            signature=sig_b64,
+            public_key=pub_pem,
+        ) is False
+
+        # Tampered timestamp
+        assert dipay_client.verify_notification_signature(
+            method=method,
+            path=path,
+            body=body,
+            timestamp="2026-09-23T15:00:00+07:00",
+            signature=sig_b64,
+            public_key=pub_pem,
+        ) is False
+
+        # Empty signature
+        assert dipay_client.verify_notification_signature(
+            method=method,
+            path=path,
+            body=body,
+            timestamp=ts,
+            signature="",
+            public_key=pub_pem,
+        ) is False
+
+    def test_verify_notification_signature_missing_key(self, monkeypatch):
+        _patch_settings(monkeypatch, dipay_callback_public_key="")
+        assert dipay_client.verify_notification_signature(
+            method="POST",
+            path="/webhooks/dipay/qris",
+            body={},
+            timestamp="2026-09-23T14:30:00+07:00",
+            signature="invalid",
+            public_key=None,
+        ) is False
+
+
+class TestLoadPrivateKey:
+    def test_load_private_key_raw_pem_and_b64(self):
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        pem_bytes = key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        pem_str = pem_bytes.decode("utf-8")
+        b64_str = base64.b64encode(pem_bytes).decode("utf-8")
+
+        cfg_pem = _config(private_key_b64=pem_str)
+        loaded_pem = dipay_client._load_private_key(cfg_pem)
+        assert loaded_pem is not None
+
+        cfg_b64 = _config(private_key_b64=b64_str)
+        loaded_b64 = dipay_client._load_private_key(cfg_b64)
+        assert loaded_b64 is not None
+
+    def test_load_private_key_invalid_returns_none(self):
+        cfg_invalid = _config(private_key_b64="not-a-valid-key")
+        assert dipay_client._load_private_key(cfg_invalid) is None
 

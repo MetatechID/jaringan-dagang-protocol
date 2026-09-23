@@ -328,22 +328,20 @@ async def handle_on_confirm(
     cart = (await db.execute(
         select(Cart).where(Cart.transaction_id == txn_id)
     )).scalar_one_or_none()
-    if cart is not None and cart.status not in (
-        CartStatus.EXPIRED,
-    ):
-        # Re-build the payload shape extract_qr_image_url expects.
+    if cart is not None and cart.status not in (CartStatus.EXPIRED,):
+        # A Beckn /on_confirm QR is an advisory payment surface. Preserve the
+        # authoritative Dipay renderer/content and never infer payment from a
+        # mere URL; only the verified provider webhook may mark paid.
+        provider = (cart.invoice_provider or "").lower()
         qr = extract_qr_image_url({"message": {"order": order_msg}})
-        if qr is not None:
+        if provider != "dipay" and qr is not None:
             cart.qr_image_url = qr
-        # Guard: never re-flip a cancelled / expired payment_state back
-        # to paid. Today CartStatus has no CANCELLED member, but the
-        # payment_state column is a free string written elsewhere (e.g.
-        # status endpoint flipping pending → expired).
-        if cart.payment_state not in ("cancelled", "expired"):
+        if provider != "dipay" and cart.payment_state not in ("cancelled", "expired"):
+            # Existing non-Dipay behaviour remains, but URL presence alone is
+            # not treated as proof for Dipay carts.
             if qr is not None:
                 cart.payment_state = "paid"
         cart.updated_at = datetime.now(timezone.utc)
-
     return None
 
 

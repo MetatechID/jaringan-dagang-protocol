@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.bot_auth import require_bot
 from config import settings
-from database import get_db
+from database import async_session, get_db
 from models.bot_rest import Cart, CartStatus
 from models.brand import Brand
 from services import order_flow
@@ -45,8 +45,10 @@ class ConfirmIn(BaseModel):
 
 
 class ConfirmPaymentBlock(BaseModel):
-    qr_image_url: str | None = None
     invoice_url: str | None = None
+    qr_image_url: str | None = None
+    qris_image_url: str | None = None
+    qris_content: str | None = None
     expires_at: str | None = None
 
 
@@ -66,8 +68,10 @@ class StatusOut(BaseModel):
     # can show it. Populated either by the seller's /on_confirm
     # callback (when delivery works) or by the post-confirm
     # backchannel poll below (Vercel/network workaround).
-    qr_image_url: str | None = None
     invoice_url: str | None = None
+    qr_image_url: str | None = None
+    qris_image_url: str | None = None
+    qris_content: str | None = None
 
 
 # ---------- Endpoints ----------
@@ -95,7 +99,12 @@ async def confirm_cart(
             cart_id=cart.id,
             order_id=cart.order_id,
             status=cart.status.value,
-            payment=ConfirmPaymentBlock(qr_image_url=cart.qr_image_url),
+            payment=ConfirmPaymentBlock(
+                invoice_url=cart.qr_image_url,
+                qr_image_url=cart.qr_image_url,
+                qris_image_url=cart.qris_image_url,
+                qris_content=cart.qris_content,
+            ),
         )
     if cart.status not in (CartStatus.DRAFTED, CartStatus.QUOTED, CartStatus.OPEN):
         raise HTTPException(
@@ -133,12 +142,9 @@ async def confirm_cart(
     cart.order_id = pseudo_order_id
     cart.payment_state = "pending"
 
-    # Mint a hosted invoice routed via the brand's payment_provider
-    # (Xendit hosted page or OY Indonesia's checkout URL). The invoice URL
-    # is the canonical payment surface — works as both a QR-bearing
-    # checkout page and a direct-pay link. Funds land in the brand's PSP
-    # balance, not ours. The matching PSP webhook flips the cart and
-    # order to paid/ESCROW_HELD.
+    # Mint the brand provider's payment surface. Hosted providers return a
+    # checkout page; Dipay returns a durable QRIS renderer URL plus raw QRIS
+    # content. Only a verified provider webhook can mark the cart paid.
     brand_q = await db.execute(
         select(Brand).where(Brand.bpp_id == cart.bpp_id)
     )
@@ -153,7 +159,13 @@ async def confirm_cart(
             from services import dipay_invoices as _invoice_mod
         else:
             _invoice_mod = xendit_invoices
-        await _invoice_mod.create_invoice_for_cart(db, cart)
+        if provider == "dipay":
+            async with async_session() as reservation_db:
+                await _invoice_mod.create_invoice_for_cart(
+                    db, cart, reservation_db=reservation_db,
+                )
+        else:
+            await _invoice_mod.create_invoice_for_cart(db, cart)
     except HTTPException:
         raise
     except Exception:
@@ -167,7 +179,10 @@ async def confirm_cart(
         order_id=cart.order_id,
         status=cart.status.value,
         payment=ConfirmPaymentBlock(
+            invoice_url=cart.qr_image_url,
             qr_image_url=cart.qr_image_url,
+            qris_image_url=cart.qris_image_url,
+            qris_content=cart.qris_content,
         ),
     )
 
@@ -211,6 +226,8 @@ async def checkout_status(
         order_id=cart.order_id,
         payment_state=cart.payment_state,
         status=cart.status.value,
+        invoice_url=cart.qr_image_url,
         qr_image_url=cart.qr_image_url,
-        invoice_url=cart.qr_image_url,  # same URL; bot may render either
+        qris_image_url=cart.qris_image_url,
+        qris_content=cart.qris_content,
     )

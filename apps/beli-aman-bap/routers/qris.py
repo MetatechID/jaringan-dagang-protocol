@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
@@ -36,6 +37,7 @@ from models.bot_rest import Cart
 _LOG = logging.getLogger("beli_aman_bap.qris")
 
 router = APIRouter(prefix="/api/v1/qris", tags=["qris"])
+_QRIS_REF_RE = re.compile(r"^q-[A-Za-z0-9]{1,30}$")
 
 
 def _render_png(content: str) -> bytes:
@@ -75,6 +77,12 @@ async def _resolve_qr_content(db: AsyncSession, invoice_ref: str) -> str | None:
     order = order_q.scalars().first()
     if order is not None:
         snap = order.payment_method_snapshot or {}
+        if snap.get("payment_provider") != "dipay":
+            return None
+        # A paid/terminal invoice must not keep exposing reusable QR content.
+        from models.order import OrderState
+        if order.state != OrderState.CART_REVIEWED:
+            return None
         return snap.get("qris_content")
 
     # 2. Cart lookup: bot-flow QRIS invoices live on the cart columns.
@@ -86,6 +94,8 @@ async def _resolve_qr_content(db: AsyncSession, invoice_ref: str) -> str | None:
     )
     cart = cart_q.scalars().first()
     if cart is not None:
+        if cart.payment_state != "pending":
+            return None
         return cart.qris_content
 
     return None
@@ -95,7 +105,7 @@ async def _resolve_qr_content(db: AsyncSession, invoice_ref: str) -> str | None:
 async def qris_png(invoice_ref: str, db: AsyncSession = Depends(get_db)) -> Response:
     """Render the QRIS QR PNG for ``invoice_ref``. 404 for unknown refs and
     mock refs (``dipay-dev-*`` — those are mock-checkout pages, not QRIS)."""
-    if invoice_ref.startswith("dipay-dev-"):
+    if not _QRIS_REF_RE.fullmatch(invoice_ref):
         raise HTTPException(404, "Not found")
     qr_content = await _resolve_qr_content(db, invoice_ref)
     if not qr_content:
@@ -104,5 +114,8 @@ async def qris_png(invoice_ref: str, db: AsyncSession = Depends(get_db)) -> Resp
     return Response(
         content=png,
         media_type="image/png",
-        headers={"Cache-Control": "public, max-age=3600"},
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
     )

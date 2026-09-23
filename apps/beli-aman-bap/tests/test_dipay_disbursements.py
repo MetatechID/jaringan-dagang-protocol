@@ -102,7 +102,7 @@ class TestGuards:
         db = _make_session(brand=None)
         order = StubOrder(brand_id="ghost-brand")
         with pytest.raises(DisbursementSkipped) as ei:
-            await dipay_disbursements.disburse_to_seller(db, order=order)
+            await dipay_disbursements.disburse_to_seller(db, order=order, partner_reference_no="r-attempt-1")
         assert "ghost-brand" in str(ei.value)
 
     @pytest.mark.asyncio
@@ -118,8 +118,8 @@ class TestGuards:
 
         monkeypatch.setattr(dipay_client, "create_disbursement", fake_create)
         with pytest.raises(DisbursementSkipped) as ei:
-            await dipay_disbursements.disburse_to_seller(db, order=order)
-        assert "client key" in str(ei.value)
+            await dipay_disbursements.disburse_to_seller(db, order=order, partner_reference_no="r-attempt-1")
+        assert "dipay_client_key" in str(ei.value) or "client key" in str(ei.value)
 
     @pytest.mark.asyncio
     async def test_skips_when_bank_fields_incomplete(self, monkeypatch):
@@ -131,7 +131,7 @@ class TestGuards:
 
         monkeypatch.setattr(dipay_client, "create_disbursement", fake_create)
         with pytest.raises(DisbursementSkipped) as ei:
-            await dipay_disbursements.disburse_to_seller(db, order=order)
+            await dipay_disbursements.disburse_to_seller(db, order=order, partner_reference_no="r-attempt-1")
         assert "bank fields incomplete" in str(ei.value)
 
     @pytest.mark.asyncio
@@ -140,7 +140,7 @@ class TestGuards:
         db = _make_session(StubBrand())
         order = StubOrder(total_idr=10_100)
         with pytest.raises(DisbursementSkipped) as ei:
-            await dipay_disbursements.disburse_to_seller(db, order=order)
+            await dipay_disbursements.disburse_to_seller(db, order=order, partner_reference_no="r-attempt-1")
         msg = str(ei.value)
         assert "9_898" in msg or "9898" in msg
         assert "10_000" in msg or "10000" in msg
@@ -151,7 +151,7 @@ class TestGuards:
         db = _make_session(StubBrand())
         order = StubOrder(total_idr=0)
         with pytest.raises(DisbursementSkipped):
-            await dipay_disbursements.disburse_to_seller(db, order=order)
+            await dipay_disbursements.disburse_to_seller(db, order=order, partner_reference_no="r-attempt-1")
 
 
 class TestResponseCodeClassification:
@@ -173,7 +173,7 @@ class TestResponseCodeClassification:
 
         monkeypatch.setattr(dipay_client, "create_disbursement", fake_create)
         monkeypatch.setattr(dipay_client, "get_disbursement_status", fake_status)
-        out = await dipay_disbursements.disburse_to_seller(db, order=order)
+        out = await dipay_disbursements.disburse_to_seller(db, order=order, partner_reference_no="r-attempt-1")
         return out, captured, status_calls
 
     @pytest.mark.asyncio
@@ -221,7 +221,7 @@ class TestResponseCodeClassification:
 
         monkeypatch.setattr(dipay_client, "create_disbursement", fake_create)
         monkeypatch.setattr(dipay_client, "get_disbursement_status", fake_status)
-        out = await dipay_disbursements.disburse_to_seller(db, order=order)
+        out = await dipay_disbursements.disburse_to_seller(db, order=order, partner_reference_no="r-attempt-1")
         assert out["status"] == "pending"
         assert out["id"] == out["partner_ref"]  # falls back to partner_ref
 
@@ -240,7 +240,7 @@ class TestResponseCodeClassification:
         monkeypatch.setattr(dipay_client, "create_disbursement", fake_create)
         monkeypatch.setattr(dipay_client, "get_disbursement_status", fake_status)
         with pytest.raises(DipayError) as ei:
-            await dipay_disbursements.disburse_to_seller(db, order=order)
+            await dipay_disbursements.disburse_to_seller(db, order=order, partner_reference_no="r-attempt-1")
         assert code in str(ei.value.body)
         assert "Rejected" in str(ei.value.body)
 
@@ -267,7 +267,8 @@ class TestCreateCallShape:
             return {"responseCode": "2004300", "referenceNo": "REF-1"}
 
         monkeypatch.setattr(dipay_client, "create_disbursement", fake_create)
-        await dipay_disbursements.disburse_to_seller(db, order=order)
+        partner_ref = dipay_client.snap_ref("r", str(order.id))
+        await dipay_disbursements.disburse_to_seller(db, order=order, partner_reference_no=partner_ref)
         ref = captured["partner_reference_no"]
         assert ref.startswith("r-")
         assert len(ref) <= 32
@@ -284,7 +285,7 @@ class TestCreateCallShape:
             return {"responseCode": "2004300", "referenceNo": "REF-1"}
 
         monkeypatch.setattr(dipay_client, "create_disbursement", fake_create)
-        await dipay_disbursements.disburse_to_seller(db, order=order)
+        await dipay_disbursements.disburse_to_seller(db, order=order, partner_reference_no="r-attempt-1")
         assert captured["beneficiary_account"] == "1234567890"
         assert captured["beneficiary_bank_code"] == "014"
         assert captured["partner_merchant_id"] == "safiya"
@@ -303,7 +304,7 @@ class TestCreateCallShape:
 
         monkeypatch.setattr(dipay_client, "create_disbursement", fake_create)
         out = await dipay_disbursements.disburse_to_seller(
-            db, order=order, amount_idr=100_000
+            db, order=order, partner_reference_no="r-attempt-1", amount_idr=100_000
         )
         # 2% platform fee on the override gross → net 98_000.
         assert captured["amount_idr"] == 98_000
@@ -319,7 +320,7 @@ class TestCreateCallShape:
             return {"responseCode": "2004300", "referenceNo": "REF-1"}
 
         monkeypatch.setattr(dipay_client, "create_disbursement", fake_create)
-        out = await dipay_disbursements.disburse_to_seller(db, order=order)
+        out = await dipay_disbursements.disburse_to_seller(db, order=order, partner_reference_no="r-attempt-1")
         assert set(out) == {
             "id", "code", "status",
             "gross_idr", "platform_fee_idr", "dipay_fee_idr", "net_idr",

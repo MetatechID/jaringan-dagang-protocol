@@ -51,6 +51,9 @@ class FakeSession:
     async def commit(self):
         self.committed = True
 
+    async def flush(self):
+        return None
+
     def add(self, obj):
         self.added.append(obj)
         return None
@@ -83,7 +86,7 @@ def StubBrand(
     payment_provider: str = "dipay",
     dipay_client_key: str = "brand-client-key",
     dipay_client_secret: str = "brand-client-secret",
-    dipay_private_key_b64: str = "",
+    dipay_private_key_b64: str = "test-private-key-b64",
     dipay_merchant_id: str = "M-123",
     dipay_disbursement_bank_code: str = "014",
     dipay_disbursement_bank_account: str = "1234567890",

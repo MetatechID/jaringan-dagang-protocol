@@ -7,7 +7,7 @@ shape is right for partial refunds + multi-payment in v2.
 
 import enum
 
-from sqlalchemy import BigInteger, Enum, ForeignKey, String, Text
+from sqlalchemy import BigInteger, Enum, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -43,6 +43,12 @@ class EscrowLedger(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     (which flips PENDING → COMPLETED on the matching PSP callback)."""
 
     __tablename__ = "escrow_ledger"
+    __table_args__ = (
+        UniqueConstraint(
+            "partner_ref",
+            name="uq_escrow_ledger_partner_ref",
+        ),
+    )
 
     order_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("orders.id"), index=True, nullable=False
@@ -63,6 +69,12 @@ class EscrowLedger(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # the ledger row by the ref echoed back in the callback body, even
     # before a PSP-side id (external_ref) is known.
     partner_ref: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # Explicit payout reconciliation. For Dipay releases amount_idr is gross;
+    # these fields retain the fee split used to calculate the provider amount.
+    gross_amount_idr: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    platform_fee_idr: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    provider_fee_idr: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    net_amount_idr: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     status: Mapped[EscrowEntryStatus] = mapped_column(
         Enum(EscrowEntryStatus, name="escrow_entry_status"),
         nullable=False,

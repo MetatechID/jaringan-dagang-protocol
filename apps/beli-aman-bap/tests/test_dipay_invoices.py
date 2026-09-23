@@ -51,6 +51,7 @@ class _StubCart:
         self.qr_image_url = None
         self.qris_image_url = None
         self.qris_content = None
+        self.expires_at = None
 
 
 def _qris_response(qr_content="00020101021226…5303360…5802ID"):
@@ -70,8 +71,13 @@ def _make_session(brand: SimpleNamespace) -> FakeSession:
 
 def _fake_settings(**overrides) -> SimpleNamespace:
     base = dict(
+        environment="test",
+        dipay_base_url="https://api.dipay.id",
         dipay_client_key="env-client-key",
-        dipay_merchant_id="",
+        dipay_client_secret="env-client-secret",
+        dipay_private_key_b64="test-private-key-b64",
+        dipay_private_key_path="",
+        dipay_merchant_id="M-ENV",
         qr_public_base="https://api.beli-aman.metatech.id",
         mock_checkout_public_base="",
     )
@@ -87,7 +93,9 @@ class TestCreateInvoiceForCart:
     @pytest.fixture(autouse=True)
     def _deterministic_settings(self, monkeypatch):
         """Pin settings so ambient .env / env vars can't flip mock-mode."""
-        monkeypatch.setattr(dipay_invoices, "settings", _fake_settings())
+        s = _fake_settings()
+        monkeypatch.setattr(dipay_invoices, "settings", s)
+        monkeypatch.setattr(dipay_invoices.dipay_client, "settings", s)
 
     @pytest.mark.asyncio
     async def test_real_path_persists_ref_before_api_call(self, monkeypatch):
@@ -114,11 +122,14 @@ class TestCreateInvoiceForCart:
         assert seen_invoice_id_at_call == [("q-carttestid", "dipay")]
         assert captured["partner_reference_no"] == "q-carttestid"
         assert captured["amount_idr"] == 250_000
-        assert captured["merchant_id"] == "M-123"
+        assert (captured.get("merchant_id") or captured["config"].merchant_id) == "M-123"
+        assert captured["validity_period"]
+        assert len(captured["validity_period"]) == 25
         # Normalized response + persisted columns.
         assert response["id"] == "q-carttestid"
         png = "https://api.beli-aman.metatech.id/api/v1/qris/q-carttestid.png"
         assert response["invoice_url"] == png
+        assert response["expires_at"] == captured["validity_period"]
         assert cart.invoice_id == "q-carttestid"
         assert cart.invoice_provider == "dipay"
         assert cart.qr_image_url == png
@@ -141,7 +152,8 @@ class TestCreateInvoiceForCart:
         response = await dipay_invoices.create_invoice_for_cart(db, cart)
         assert cart.qris_content is None
         assert response["qris_content"] is None
-        assert response["expires_at"] is None
+        assert response["expires_at"] is not None
+        assert len(response["expires_at"]) == 25
 
     @pytest.mark.asyncio
     async def test_mock_mode_when_brand_missing(self, monkeypatch):
@@ -181,9 +193,9 @@ class TestCreateInvoiceForCart:
     async def test_mock_mode_when_no_keys_anywhere(self, monkeypatch):
         cart = _StubCart(total_idr=10_000)
         db = _make_session(StubBrand(dipay_client_key=""))
-        monkeypatch.setattr(
-            dipay_invoices, "settings", _fake_settings(dipay_client_key="")
-        )
+        s = _fake_settings(dipay_client_key="")
+        monkeypatch.setattr(dipay_invoices, "settings", s)
+        monkeypatch.setattr(dipay_invoices.dipay_client, "settings", s)
 
         async def fake_create_qris(**_kwargs):
             raise AssertionError("mock-mode: no Dipay call")
@@ -199,9 +211,9 @@ class TestCreateInvoiceForCart:
     async def test_real_path_when_env_key_only(self, monkeypatch):
         cart = _StubCart(total_idr=10_000)
         db = _make_session(StubBrand(dipay_client_key=""))
-        monkeypatch.setattr(
-            dipay_invoices, "settings", _fake_settings(dipay_client_key="env-only")
-        )
+        s = _fake_settings(dipay_client_key="env-only")
+        monkeypatch.setattr(dipay_invoices, "settings", s)
+        monkeypatch.setattr(dipay_invoices.dipay_client, "settings", s)
 
         called = []
 
@@ -252,7 +264,9 @@ class TestCreateInvoiceForCart:
 class TestCreateInvoiceForOrder:
     @pytest.fixture(autouse=True)
     def _deterministic_settings(self, monkeypatch):
-        monkeypatch.setattr(dipay_invoices, "settings", _fake_settings())
+        s = _fake_settings()
+        monkeypatch.setattr(dipay_invoices, "settings", s)
+        monkeypatch.setattr(dipay_invoices.dipay_client, "settings", s)
 
     @pytest.mark.asyncio
     async def test_writes_snapshot_keys_incl_partner_ref(self, monkeypatch):
@@ -280,8 +294,11 @@ class TestCreateInvoiceForOrder:
         assert snap["invoice_url"] == png
         assert snap["qris_image_url"] == png
         assert snap["qris_content"] == "EMVCO-PAYLOAD-1"
+        assert snap["expires_at"] is not None
+        assert len(snap["expires_at"]) == 25
         assert response["id"] == "q-ordertestid"
         assert response["invoice_url"] == png
+        assert response["expires_at"] == snap["expires_at"]
 
     @pytest.mark.asyncio
     async def test_real_path_persists_snapshot_before_api_call(self, monkeypatch):
@@ -417,7 +434,7 @@ class TestMockModeMatrix:
     )
     async def test_matrix(self, monkeypatch, brand_kwargs, env_key, expected_mock):
         brand = StubBrand(**brand_kwargs) if brand_kwargs is not None else None
-        monkeypatch.setattr(
-            dipay_invoices, "settings", _fake_settings(dipay_client_key=env_key)
-        )
+        s = _fake_settings(dipay_client_key=env_key)
+        monkeypatch.setattr(dipay_invoices, "settings", s)
+        monkeypatch.setattr(dipay_invoices.dipay_client, "settings", s)
         assert dipay_invoices._mock_mode(brand) is expected_mock

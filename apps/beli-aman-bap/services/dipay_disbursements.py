@@ -37,7 +37,7 @@ from config import settings
 from models.brand import Brand
 from models.order import Order
 from services import dipay_client
-from services.dipay_client import DipayError, snap_ref
+from services.dipay_client import DipayError
 # Shared with the Xendit/Sento paths: ``escrow.release()`` catches one
 # ``DisbursementSkipped`` that covers all providers. (Pragmatic import — a
 # shared ``services/disbursement_errors.py`` is the cleaner refactor but not
@@ -93,6 +93,7 @@ async def disburse_to_seller(
     db: AsyncSession,
     *,
     order: Order,
+    partner_reference_no: str,
     description: str = "",
     amount_idr: int | None = None,
 ) -> dict[str, Any]:
@@ -117,13 +118,17 @@ async def disburse_to_seller(
     """
     brand_q = await db.execute(select(Brand).where(Brand.id == order.brand_id))
     brand = brand_q.scalar_one_or_none()
+    config = None
+    if brand is not None:
+        try:
+            config = dipay_client.resolve_config(brand)
+        except DipayError as e:
+            raise DisbursementSkipped(str(e)) from e
     if brand is None:
         raise DisbursementSkipped(f"Brand {order.brand_id} not found")
-    # Dipay creds: per-Brand override, else the env master.
-    if not (getattr(brand, "dipay_client_key", None) or settings.dipay_client_key):
+    if config is None:
         raise DisbursementSkipped(
-            f"Brand {brand.slug!r} has no Dipay client key "
-            "(env or Brand.dipay_client_key)"
+            f"Brand {brand.slug!r} has incomplete Dipay credentials"
         )
     if not (
         brand.dipay_disbursement_bank_code
@@ -142,8 +147,9 @@ async def disburse_to_seller(
             f"{settings.dipay_disbursement_min_amount_idr} for brand {brand.slug}"
         )
 
-    partner_ref = snap_ref("r", str(order.id))
+    partner_ref = partner_reference_no
     response = await dipay_client.create_disbursement(
+        config=config,
         partner_reference_no=partner_ref,
         beneficiary_account=brand.dipay_disbursement_bank_account,
         beneficiary_bank_code=brand.dipay_disbursement_bank_code,
@@ -168,6 +174,7 @@ async def disburse_to_seller(
         )
         try:
             status_resp = await dipay_client.get_disbursement_status(
+                config=config,
                 partner_reference_no=partner_ref,
             )
             reference_no = reference_no or status_resp.get("referenceNo") or None

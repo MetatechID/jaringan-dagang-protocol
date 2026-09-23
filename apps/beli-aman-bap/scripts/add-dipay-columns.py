@@ -47,9 +47,27 @@ DDL_STATEMENTS: list[str] = [
     "ALTER TABLE brands ADD COLUMN IF NOT EXISTS dipay_disbursement_bank_code VARCHAR(16);",
     "ALTER TABLE brands ADD COLUMN IF NOT EXISTS dipay_disbursement_bank_account VARCHAR(64);",
     "ALTER TABLE brands ADD COLUMN IF NOT EXISTS dipay_disbursement_holder_name VARCHAR(255);",
-    # --- escrow_ledger: SNAP partnerReferenceNo correlation key ---
+    # --- escrow_ledger: SNAP correlation + payout reconciliation ---
     "ALTER TABLE escrow_ledger ADD COLUMN IF NOT EXISTS partner_ref VARCHAR(64);",
-    "CREATE INDEX IF NOT EXISTS ix_escrow_ledger_partner_ref ON escrow_ledger(partner_ref);",
+    "ALTER TABLE escrow_ledger ADD COLUMN IF NOT EXISTS gross_amount_idr BIGINT;",
+    "ALTER TABLE escrow_ledger ADD COLUMN IF NOT EXISTS platform_fee_idr BIGINT;",
+    "ALTER TABLE escrow_ledger ADD COLUMN IF NOT EXISTS provider_fee_idr BIGINT;",
+    "ALTER TABLE escrow_ledger ADD COLUMN IF NOT EXISTS net_amount_idr BIGINT;",
+    # Abort instead of silently dropping/re-keying callback identities if an
+    # older deployment already minted duplicate non-null references.
+    """
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM escrow_ledger
+        WHERE partner_ref IS NOT NULL
+        GROUP BY partner_ref HAVING COUNT(*) > 1
+      ) THEN
+        RAISE EXCEPTION 'duplicate escrow_ledger.partner_ref values exist';
+      END IF;
+    END $$;
+    """,
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_escrow_ledger_partner_ref ON escrow_ledger(partner_ref);",
     # --- bot_carts: QRIS image URL + raw EMVCo payload ---
     "ALTER TABLE bot_carts ADD COLUMN IF NOT EXISTS qris_image_url VARCHAR(1024);",
     "ALTER TABLE bot_carts ADD COLUMN IF NOT EXISTS qris_content VARCHAR(1024);",

@@ -37,13 +37,18 @@ Reference: https://api-docs.dipay.id/ (QRIS MPM / Disbursement).
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 import logging
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config import settings
 from database import get_db
 from models.bot_rest import Cart, CartStatus
 from models.brand import Brand
@@ -129,22 +134,218 @@ async def _parse_body(request: Request) -> dict[str, Any]:
     if body_bytes:
         try:
             body = await request.json()
-        except Exception:  # noqa: BLE001
-            raise HTTPException(400, "Invalid JSON body")
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(400, "Invalid JSON body") from exc
     return body
+
+
+def _verify_rsa_signature(
+    public_key_pem: str | bytes,
+    signature_str: str,
+    timestamp: str | None,
+    body_bytes: bytes,
+    path: str = "",
+    method: str = "POST",
+) -> bool:
+    try:
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import padding
+        from cryptography.hazmat.primitives.serialization import (
+            load_der_public_key,
+            load_pem_public_key,
+        )
+        from cryptography.exceptions import InvalidSignature
+
+        if isinstance(public_key_pem, str):
+            pem_bytes = public_key_pem.strip().encode("utf-8")
+        else:
+            pem_bytes = public_key_pem.strip()
+
+        pub_key = None
+        if b"BEGIN PUBLIC KEY" in pem_bytes or b"BEGIN RSA PUBLIC KEY" in pem_bytes:
+            pub_key = load_pem_public_key(pem_bytes)
+        else:
+            try:
+                decoded = base64.b64decode(pem_bytes)
+                if b"BEGIN PUBLIC KEY" in decoded or b"BEGIN RSA PUBLIC KEY" in decoded:
+                    pub_key = load_pem_public_key(decoded)
+                else:
+                    pub_key = load_der_public_key(decoded)
+            except Exception:
+                pub_key = load_pem_public_key(pem_bytes)
+
+        sig_bytes = None
+        try:
+            sig_bytes = bytes.fromhex(signature_str.strip())
+        except ValueError:
+            try:
+                sig_bytes = base64.b64decode(signature_str.strip())
+            except Exception:
+                return False
+
+        if not sig_bytes:
+            return False
+
+        ts = timestamp or ""
+        body_sha256 = hashlib.sha256(body_bytes).hexdigest().lower()
+        minified_sha256 = body_sha256
+        try:
+            parsed = json.loads(body_bytes.decode("utf-8"))
+            minified_str = json.dumps(parsed, separators=(",", ":"), ensure_ascii=False)
+            minified_sha256 = hashlib.sha256(minified_str.encode("utf-8")).hexdigest().lower()
+        except Exception:
+            pass
+
+        candidates = [
+            f"{method.upper()}:{path}:{minified_sha256}:{ts}".encode("utf-8"),
+            f"{method.upper()}:{path}:{body_sha256}:{ts}".encode("utf-8"),
+            f"{method.upper()}:{path.rstrip('/')}:{minified_sha256}:{ts}".encode("utf-8"),
+            f"{method.upper()}:{path.rstrip('/')}:{body_sha256}:{ts}".encode("utf-8"),
+            f"{minified_sha256}:{ts}".encode("utf-8"),
+            f"{body_sha256}:{ts}".encode("utf-8"),
+            f"{path}:{minified_sha256}:{ts}".encode("utf-8"),
+            f"{path}:{body_sha256}:{ts}".encode("utf-8"),
+            body_bytes,
+            f"{body_bytes.decode('utf-8', errors='replace')}|{ts}".encode("utf-8"),
+            f"{ts}|{body_bytes.decode('utf-8', errors='replace')}".encode("utf-8"),
+            f"{ts}".encode("utf-8"),
+        ]
+
+        for candidate in candidates:
+            try:
+                pub_key.verify(
+                    sig_bytes,
+                    candidate,
+                    padding.PKCS1v15(),
+                    hashes.SHA256(),
+                )
+                return True
+            except InvalidSignature:
+                continue
+            except Exception:
+                continue
+
+        return False
+    except Exception as exc:
+        _LOG.warning("Failed to verify Dipay RSA signature: %s", exc)
+        return False
+
+
+async def _verify_inbound_signature(
+    request: Request,
+    body_bytes: bytes,
+    x_signature: str | None,
+    x_timestamp: str | None,
+) -> None:
+    public_key = getattr(settings, "dipay_callback_public_key", None)
+    is_prod = getattr(settings, "environment", "development") == "production"
+
+    if not public_key and not is_prod:
+        _LOG.warning(
+            "Dipay callback signature verification skipped in %s mode (no dipay_callback_public_key configured)",
+            getattr(settings, "environment", "development"),
+        )
+        return
+
+    if not x_signature:
+        raise HTTPException(401, "Invalid Dipay callback signature")
+
+    if hasattr(dipay_client, "verify_notification_signature") and callable(
+        getattr(dipay_client, "verify_notification_signature")
+    ):
+        try:
+            fn = getattr(dipay_client, "verify_notification_signature")
+            import inspect
+
+            sig = inspect.signature(fn)
+            kwargs = {}
+            for name in sig.parameters:
+                if name in ("x_signature", "signature"):
+                    kwargs[name] = x_signature
+                elif name in ("x_timestamp", "timestamp"):
+                    kwargs[name] = x_timestamp
+                elif name in ("body", "raw_body", "body_bytes"):
+                    kwargs[name] = body_bytes
+                elif name in ("public_key", "key"):
+                    kwargs[name] = public_key
+                elif name in ("path", "endpoint_url", "url"):
+                    kwargs[name] = request.url.path
+                elif name in ("method", "http_method"):
+                    kwargs[name] = request.method
+            if kwargs:
+                res = fn(**kwargs)
+            else:
+                res = fn(x_signature, x_timestamp, body_bytes, public_key)
+            if inspect.iscoroutine(res):
+                res = await res
+            if res is False:
+                raise HTTPException(401, "Invalid Dipay callback signature")
+            return
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(401, "Invalid Dipay callback signature") from exc
+
+    if not public_key:
+        raise HTTPException(401, "Invalid Dipay callback signature")
+
+    valid = _verify_rsa_signature(
+        public_key_pem=public_key,
+        signature_str=x_signature,
+        timestamp=x_timestamp,
+        body_bytes=body_bytes,
+        path=request.url.path,
+        method=request.method,
+    )
+    if not valid:
+        raise HTTPException(401, "Invalid Dipay callback signature")
+
+
+def _provider_error(exc: DipayError) -> HTTPException:
+    """Map failed authoritative verification without mutating local state."""
+    code = ""
+    if isinstance(exc.body, dict):
+        code = str(exc.body.get("responseCode") or "")
+    if exc.status_code == 404 or code.startswith(_QRIS_QUERY_NOT_FOUND_PREFIX):
+        return HTTPException(404, "Dipay reports transaction not found")
+    return HTTPException(502, "Could not verify Dipay callback")
+
+
+def _verified_amount(response: dict[str, Any]) -> tuple[int, str]:
+    amount = response.get("amount")
+    if not isinstance(amount, dict):
+        raise HTTPException(502, "Dipay verification omitted amount")
+    currency = str(amount.get("currency") or "").upper()
+    try:
+        value = Decimal(str(amount.get("value")))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise HTTPException(502, "Dipay verification returned invalid amount") from exc
+    if value != value.to_integral_value() or value < 0:
+        raise HTTPException(502, "Dipay verification returned invalid amount")
+    return int(value), currency
+
+
+def _expected_amount(cart: Cart | None, order: Any | None, ref: str = "") -> int:
+    if order is not None:
+        return int(order.total_idr)
+    if cart is not None:
+        return int((cart.quote_json or {}).get("total_idr") or 0)
+    if ref.startswith("dipay-dev-"):
+        return -1
+    raise HTTPException(404, "Unknown Dipay invoice")
 
 
 @router.post("/qris")
 async def qris_callback(
     request: Request,
-    # ponytail: header accepted for future Dipay-side signing; v1 verifies
-    # state via the QRIS query API instead. Remove when Dipay documents
-    # per-tenant callback signature verification.
     x_signature: str | None = Header(default=None, alias="x-signature"),
+    x_timestamp: str | None = Header(default=None, alias="x-timestamp"),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Receive Dipay QRIS payment-status callbacks and flip the matching
     cart / order to paid (or expired)."""
+    body_bytes = await request.body()
+    await _verify_inbound_signature(request, body_bytes, x_signature, x_timestamp)
     body = await _parse_body(request)
 
     ref = body.get("originalPartnerReferenceNo")
@@ -160,33 +361,42 @@ async def qris_callback(
         )
         raise HTTPException(404, "Unknown Dipay invoice")
 
-    # Verify the live state via Dipay's QRIS query — webhook is advisory.
-    # If Dipay says the transaction doesn't exist (HTTP 404 or SNAP business
-    # code 40451xx), bounce — defense against forged webhooks for refs we
-    # never issued. Other Dipay errors (5xx, network) → proceed with the
-    # body's status: webhooks are best-effort, the query may be transient.
+    if brand is None:
+        raise HTTPException(502, "Dipay callback owner is not configured")
     try:
-        await dipay_client.query_qris(partner_reference_no=ref)
-    except DipayError as e:
-        response_code = ""
-        if isinstance(e.body, dict):
-            response_code = str(e.body.get("responseCode") or "")
-        if e.status_code == 404 or response_code.startswith(
-            _QRIS_QUERY_NOT_FOUND_PREFIX
-        ):
-            _LOG.warning(
-                "Dipay QRIS query reports not-found for ref=%s (http=%s "
-                "responseCode=%s) — refusing",
-                ref, e.status_code, response_code,
-            )
-            raise HTTPException(404, "Dipay reports transaction not found")
-        _LOG.warning(
-            "Dipay QRIS query error %s for ref=%s — proceeding with body "
-            "status (advisory)",
-            e.status_code, ref,
+        config = dipay_client.resolve_config(brand)
+        verified = await dipay_client.query_qris(
+            config=config, partner_reference_no=ref
         )
+    except DipayError as exc:
+        code = ""
+        if isinstance(exc.body, dict):
+            code = str(exc.body.get("responseCode") or "")
+        if exc.status_code == 404 or code.startswith(_QRIS_QUERY_NOT_FOUND_PREFIX):
+            raise HTTPException(404, "Dipay reports transaction not found") from exc
+        _LOG.warning(
+            "Dipay QRIS query error %s for ref=%s — proceeding with body status (advisory)",
+            exc.status_code, ref,
+        )
+        verified = body
+    except Exception as exc:  # noqa: BLE001
+        _LOG.exception("Dipay QRIS verification failed for ref=%s", ref)
+        raise HTTPException(502, "Could not verify Dipay callback") from exc
+    if not isinstance(verified, dict):
+        raise HTTPException(502, "Malformed Dipay verification response")
+    verified_ref = str(
+        verified.get("originalPartnerReferenceNo")
+        or verified.get("partnerReferenceNo")
+        or ""
+    ).strip()
+    if verified_ref != ref:
+        raise HTTPException(502, "Dipay verification reference mismatch")
+    amount, currency = _verified_amount(verified)
+    expected = _expected_amount(cart, order, ref=ref)
+    if expected != -1 and (currency != "IDR" or amount != expected):
+        raise HTTPException(409, "Dipay payment amount or currency mismatch")
 
-    status = str(body.get("latestTransactionStatus") or "").strip()
+    status = str(verified.get("latestTransactionStatus") or "").strip()
     _LOG.info(
         "Dipay QRIS callback: brand=%s ref=%s status=%s",
         getattr(brand, "slug", None), ref, status,
@@ -196,14 +406,26 @@ async def qris_callback(
         return await _handle_paid(db, ref, cart, order)
     if status == _QRIS_PENDING:
         # Non-final — nothing to do yet; a later callback finalizes.
-        return {"ok": True, "ref": ref, "status": "pending"}
+        return {
+            "responseCode": "2004800",
+            "responseMessage": "Successful",
+            "ok": True,
+            "ref": ref,
+            "status": "pending",
+        }
     if status == _QRIS_EXPIRED:
         return await _handle_expired(db, ref, cart)
     _LOG.warning(
         "Dipay QRIS callback: unhandled latestTransactionStatus=%s for ref=%s "
         "— no-op", status, ref,
     )
-    return {"ok": True, "ref": ref, "ignored_status": status}
+    return {
+        "responseCode": "2004800",
+        "responseMessage": "Successful",
+        "ok": True,
+        "ref": ref,
+        "ignored_status": status,
+    }
 
 
 async def _handle_paid(
@@ -222,7 +444,13 @@ async def _handle_paid(
             invoice_id=ref,
             actor=actor,
         )
-        return {"ok": True, "order_id": order.id, "state": order.state.value}
+        return {
+            "responseCode": "2004800",
+            "responseMessage": "Request has been processed successfully",
+            "ok": True,
+            "order_id": order.id,
+            "state": order.state.value,
+        }
 
     if cart is not None:
         if cart.payment_state != "paid":
@@ -251,7 +479,13 @@ async def _handle_paid(
                     external_ref=ref,
                     status=EscrowEntryStatus.COMPLETED,
                 ))
-        return {"ok": True, "cart_id": cart.id, "payment_state": cart.payment_state}
+        return {
+            "responseCode": "2004800",
+            "responseMessage": "Request has been processed successfully",
+            "ok": True,
+            "cart_id": cart.id,
+            "payment_state": cart.payment_state,
+        }
 
     # ponytail: mock-mode invoice ids look like ``dipay-dev-{order_id}`` —
     # no resolvable surface row (e.g. the snapshot write raced a crash).
@@ -274,7 +508,13 @@ async def _handle_paid(
                 invoice_id=ref,
                 actor=actor,
             )
-            return {"ok": True, "order_id": order.id, "state": order.state.value}
+            return {
+                "responseCode": "2004800",
+                "responseMessage": "Request has been processed successfully",
+                "ok": True,
+                "order_id": order.id,
+                "state": order.state.value,
+            }
 
     raise HTTPException(404, "Unknown Dipay invoice")
 
@@ -285,8 +525,19 @@ async def _handle_expired(db: AsyncSession, ref: str, cart: Cart | None) -> dict
     if cart and cart.payment_state == "pending":
         cart.payment_state = "expired"
         cart.status = CartStatus.EXPIRED
-        return {"ok": True, "cart_id": cart.id, "payment_state": cart.payment_state}
-    return {"ok": True, "expired_ref": ref}
+        return {
+            "responseCode": "2004800",
+            "responseMessage": "Successful",
+            "ok": True,
+            "cart_id": cart.id,
+            "payment_state": cart.payment_state,
+        }
+    return {
+        "responseCode": "2004800",
+        "responseMessage": "Successful",
+        "ok": True,
+        "expired_ref": ref,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -305,10 +556,13 @@ async def remit_callback(
     # Accepted for a future Dipay-side signing scheme; v1 verifies via the
     # status API instead. Remove when Dipay documents signature verification.
     x_signature: str | None = Header(default=None, alias="x-signature"),
+    x_timestamp: str | None = Header(default=None, alias="x-timestamp"),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Receive Dipay disbursement ("remit") status callbacks and flip the
     matching RELEASE escrow-ledger row to COMPLETED / FAILED."""
+    body_bytes = await request.body()
+    await _verify_inbound_signature(request, body_bytes, x_signature, x_timestamp)
     body = await _parse_body(request)
 
     partner_ref = body.get("originalPartnerReferenceNo")
@@ -326,7 +580,7 @@ async def remit_callback(
             EscrowLedger.entry_type == EscrowEntryType.RELEASE,
         )
     )
-    row = ledger_q.scalars().first()
+    row = ledger_q.scalar_one_or_none()
     if row is None:
         _LOG.warning(
             "Dipay remit callback: no RELEASE row for partner_ref=%s — refusing",
@@ -342,41 +596,49 @@ async def remit_callback(
             partner_ref, row.status.value,
         )
 
-    # Advisory callback → re-verify the live status via POST /transfer/status.
-    # Use Dipay's answer as the authority when it comes back; if Dipay says
-    # the disbursement doesn't exist (404), bounce — defense against forged
-    # POSTs. Other Dipay errors (5xx, network) → proceed with the body.
+    from models.order import Order
+    order = (await db.execute(select(Order).where(Order.id == order_id))).scalar_one_or_none()
+    if order is None:
+        raise HTTPException(404, "Unknown Dipay order")
+    brand = (await db.execute(select(Brand).where(Brand.id == order.brand_id))).scalar_one_or_none()
+    if brand is None:
+        raise HTTPException(502, "Dipay callback owner is not configured")
     try:
-        status_resp = await dipay_client.get_disbursement_status(
-            partner_reference_no=partner_ref,
+        config = dipay_client.resolve_config(brand)
+        verified = await dipay_client.get_disbursement_status(
+            config=config, partner_reference_no=partner_ref,
         )
-    except DipayError as e:
-        if e.status_code == 404:
+    except DipayError as exc:
+        if exc.status_code == 404:
             _LOG.warning(
                 "Dipay remit status API 404 for partner_ref=%s — refusing",
                 partner_ref,
             )
-            raise HTTPException(404, "Dipay reports disbursement not found")
+            raise HTTPException(404, "Dipay reports disbursement not found") from exc
         _LOG.warning(
-            "Dipay remit status API error %s for partner_ref=%s — proceeding "
-            "with body status (advisory)",
-            e.status_code, partner_ref,
+            "Dipay remit status API error %s for partner_ref=%s — proceeding with body status (advisory)",
+            exc.status_code, partner_ref,
         )
-        status_resp = body
-
-    code = str(
-        status_resp.get("latestTransactionStatus")
-        or body.get("latestTransactionStatus")
-        or ""
+        verified = body
+    except Exception as exc:  # noqa: BLE001
+        _LOG.exception("Dipay remit verification failed for ref=%s", partner_ref)
+        raise HTTPException(502, "Could not verify Dipay callback") from exc
+    if not isinstance(verified, dict):
+        raise HTTPException(502, "Malformed Dipay verification response")
+    verified_ref = str(
+        verified.get("originalPartnerReferenceNo")
+        or verified.get("partnerReferenceNo") or ""
     ).strip()
-    reference_no = (
-        status_resp.get("originalReferenceNo")
-        or body.get("originalReferenceNo")
-        or None
-    )
-    additional_info = status_resp.get("additionalInfo") or {}
+    if verified_ref != partner_ref:
+        raise HTTPException(502, "Dipay verification reference mismatch")
+    code = str(verified.get("latestTransactionStatus") or "").strip()
+    reference_no = verified.get("originalReferenceNo") or None
+    additional_info = verified.get("additionalInfo") or {}
+    if not isinstance(additional_info, dict):
+        raise HTTPException(502, "Malformed Dipay verification details")
     receipt = additional_info.get("receiptUrl") or None
     failed_reason = additional_info.get("failedReason") or None
+
     _LOG.info(
         "Dipay remit callback: order=%s partner_ref=%s code=%s",
         order_id, partner_ref, code,
@@ -400,12 +662,33 @@ async def remit_callback(
         # poll resolves it. Still refresh external_ref if we now have one.
         if reference_no and not row.external_ref:
             row.external_ref = reference_no
-        return {"ok": True, "order_id": order_id, "code": code, "status": "pending"}
+        return {
+            "responseCode": "2003600",
+            "responseMessage": "Request has been processed successfully",
+            "ok": True,
+            "order_id": order_id,
+            "code": code,
+            "status": "pending",
+        }
     else:
         _LOG.warning(
             "Dipay remit callback: unhandled latestTransactionStatus=%s for "
             "partner_ref=%s — no-op", code, partner_ref,
         )
-        return {"ok": True, "order_id": order_id, "code": code, "noop": True}
+        return {
+            "responseCode": "2003600",
+            "responseMessage": "Request has been processed successfully",
+            "ok": True,
+            "order_id": order_id,
+            "code": code,
+            "noop": True,
+        }
 
-    return {"ok": True, "order_id": order_id, "code": code, "status": row.status.value}
+    return {
+        "responseCode": "2003600",
+        "responseMessage": "Request has been processed successfully",
+        "ok": True,
+        "order_id": order_id,
+        "code": code,
+        "status": row.status.value,
+    }

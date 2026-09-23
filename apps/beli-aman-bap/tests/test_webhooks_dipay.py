@@ -8,10 +8,9 @@ endpoints. Covers:
   'system:dipay_webhook'; cart path → payment_state='paid',
   invoice_provider='dipay', idempotent EscrowLedger HOLD row),
   ``01`` → acknowledged no-op, ``05`` → cart expired
-- 404 on unknown refs (resolver misses) and when the QRIS query API
-  reports the transaction not found (HTTP 404 or SNAP responseCode
-  ``40451xx``); non-404 Dipay errors → proceed with the body status
-- ``dipay-dev-`` mock-invoice recovery via the order snapshot
+- 404 on unknown refs and provider not-found; all transient or malformed
+  verification failures fail closed without mutating local state
+- provider status/reference/amount/currency are authoritative over callback JSON
 - /webhooks/dipay/remit terminal codes: ``00`` → RELEASE row COMPLETED +
   Dipay's ``originalReferenceNo`` as external_ref + receipt appended,
   ``06`` → FAILED + failedReason appended, ``02`` → stays PENDING (with
@@ -84,20 +83,36 @@ def _stub_resolve(monkeypatch, *, brand=None, cart=None, order=None):
 
 def _stub_query_qris(monkeypatch, *, raises=None, returns=None):
     """Replace ``dipay_client.query_qris`` — default: a live ``00`` status."""
-    async def _fake_query(*, partner_reference_no):
+    async def _fake_query(*, partner_reference_no, **kwargs):
         if raises is not None:
             raise raises
-        return returns or {"latestTransactionStatus": "00"}
+        if returns is not None:
+            ret = dict(returns)
+            ret.setdefault("originalPartnerReferenceNo", partner_reference_no)
+            ret.setdefault("amount", {"value": "100000.00", "currency": "IDR"})
+            return ret
+        return {
+            "originalPartnerReferenceNo": partner_reference_no,
+            "latestTransactionStatus": "00",
+            "amount": {"value": "100000.00", "currency": "IDR"},
+        }
     monkeypatch.setattr(dipay_client, "query_qris", _fake_query)
     return _fake_query
 
 
 def _stub_disbursement_status(monkeypatch, *, raises=None, returns=None):
     """Replace ``dipay_client.get_disbursement_status`` for remit tests."""
-    async def _fake_status(*, partner_reference_no, send_callback=False):
+    async def _fake_status(*, partner_reference_no, **kwargs):
         if raises is not None:
             raise raises
-        return returns or {}
+        if returns is not None:
+            ret = dict(returns)
+            ret.setdefault("originalPartnerReferenceNo", partner_reference_no)
+            return ret
+        return {
+            "originalPartnerReferenceNo": partner_reference_no,
+            "latestTransactionStatus": "00",
+        }
     monkeypatch.setattr(dipay_client, "get_disbursement_status", _fake_status)
     return _fake_status
 
@@ -149,7 +164,7 @@ class TestQrisCallbackPaid:
         actor='system:dipay_webhook' and invoice_id = the echoed ref."""
         client_, app = client
         brand = StubBrand()
-        order = StubOrder(id="ord-1")
+        order = StubOrder(id="ord-1", total_idr=100_000)
         _patch_db(app, monkeypatch)
         _stub_resolve(monkeypatch, brand=brand, order=order)
         _stub_query_qris(monkeypatch)
@@ -161,12 +176,13 @@ class TestQrisCallbackPaid:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 200, resp.text
+        assert resp.json()["responseCode"] == "2004800"
         assert resp.json()["state"] == "ESCROW_HELD"
 
     def test_paid_order_path_captured_args(self, monkeypatch, client):
         client_, app = client
         brand = StubBrand()
-        order = StubOrder(id="ord-1")
+        order = StubOrder(id="ord-1", total_idr=100_000)
         _patch_db(app, monkeypatch)
         _stub_resolve(monkeypatch, brand=brand, order=order)
         _stub_query_qris(monkeypatch)
@@ -180,6 +196,7 @@ class TestQrisCallbackPaid:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 200, resp.text
+        assert resp.json()["responseCode"] == "2004800"
         assert captured["order_id"] == "ord-1"
         assert captured["invoice_id"] == "q-ord-ref-1"
         assert captured["actor"] == "system:dipay_webhook"
@@ -200,6 +217,7 @@ class TestQrisCallbackPaid:
         )
         assert resp.status_code == 200, resp.text
         out = resp.json()
+        assert out["responseCode"] == "2004800"
         assert out["cart_id"] == cart.id
         assert out["payment_state"] == "paid"
         assert cart.payment_state == "paid"
@@ -233,6 +251,7 @@ class TestQrisCallbackPaid:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 200, resp.text
+        assert resp.json()["responseCode"] == "2004800"
         assert session.added == []
 
 
@@ -240,10 +259,10 @@ class TestQrisCallbackPendingExpired:
     def test_pending_is_a_noop(self, monkeypatch, client):
         client_, app = client
         brand = StubBrand()
-        order = StubOrder(id="ord-1")
+        order = StubOrder(id="ord-1", total_idr=100_000)
         session = _patch_db(app, monkeypatch)
         _stub_resolve(monkeypatch, brand=brand, order=order)
-        _stub_query_qris(monkeypatch)
+        _stub_query_qris(monkeypatch, returns={"latestTransactionStatus": "01"})
         _stub_mark_paid(monkeypatch)
 
         resp = client_.post(
@@ -253,6 +272,7 @@ class TestQrisCallbackPendingExpired:
         )
         assert resp.status_code == 200, resp.text
         out = resp.json()
+        assert out["responseCode"] == "2004800"
         assert out["ok"] is True
         assert out["status"] == "pending"
         # Nothing was mutated or enqueued.
@@ -264,7 +284,7 @@ class TestQrisCallbackPendingExpired:
         cart = StubCart(payment_state="pending")
         _patch_db(app, monkeypatch)
         _stub_resolve(monkeypatch, brand=brand, cart=cart)
-        _stub_query_qris(monkeypatch)
+        _stub_query_qris(monkeypatch, returns={"latestTransactionStatus": "05"})
 
         resp = client_.post(
             "/webhooks/dipay/qris",
@@ -272,6 +292,7 @@ class TestQrisCallbackPendingExpired:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 200, resp.text
+        assert resp.json()["responseCode"] == "2004800"
         assert cart.payment_state == "expired"
         from models.bot_rest import CartStatus
         assert cart.status == CartStatus.EXPIRED
@@ -383,7 +404,7 @@ class TestMockInvoiceRecovery:
         order snapshot when no cart / order row matched the resolver."""
         client_, app = client
         brand = StubBrand()
-        order = StubOrder(id="order-recovered")
+        order = StubOrder(id="order-recovered", total_idr=100_000)
         _patch_db(app, monkeypatch, order)
         _stub_resolve(monkeypatch, brand=brand)
         _stub_query_qris(monkeypatch)
@@ -397,6 +418,7 @@ class TestMockInvoiceRecovery:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 200, resp.text
+        assert resp.json()["responseCode"] == "2004800"
         assert captured["order_id"] == "order-recovered"
         assert captured["actor"] == "system:dipay_webhook"
         assert resp.json()["state"] == "ESCROW_HELD"
@@ -409,7 +431,9 @@ class TestRemitCallback:
     def test_success_flips_ledger_row_and_appends_receipt(self, monkeypatch, client):
         client_, app = client
         row = _stub_ledger_row(partner_ref="r-abc123", order_id="order-1")
-        _patch_db(app, monkeypatch, row)
+        order = StubOrder(id="order-1", brand_id="brand-1")
+        brand = StubBrand(id="brand-1")
+        _patch_db(app, monkeypatch, row, order, brand)
         _stub_disbursement_status(
             monkeypatch,
             returns={
@@ -433,6 +457,7 @@ class TestRemitCallback:
         )
         assert resp.status_code == 200, resp.text
         out = resp.json()
+        assert out["responseCode"] == "2003600"
         assert out["ok"] is True
         assert out["status"] == "COMPLETED"
         from models.escrow_ledger import EscrowEntryStatus
@@ -443,7 +468,9 @@ class TestRemitCallback:
     def test_failure_marks_row_failed_with_reason(self, monkeypatch, client):
         client_, app = client
         row = _stub_ledger_row(partner_ref="r-abc123", order_id="order-1")
-        _patch_db(app, monkeypatch, row)
+        order = StubOrder(id="order-1", brand_id="brand-1")
+        brand = StubBrand(id="brand-1")
+        _patch_db(app, monkeypatch, row, order, brand)
         _stub_disbursement_status(
             monkeypatch,
             returns={
@@ -463,6 +490,7 @@ class TestRemitCallback:
         )
         assert resp.status_code == 200, resp.text
         out = resp.json()
+        assert out["responseCode"] == "2003600"
         assert out["status"] == "FAILED"
         from models.escrow_ledger import EscrowEntryStatus
         assert row.status == EscrowEntryStatus.FAILED
@@ -473,7 +501,9 @@ class TestRemitCallback:
     ):
         client_, app = client
         row = _stub_ledger_row(partner_ref="r-abc123", order_id="order-1")
-        _patch_db(app, monkeypatch, row)
+        order = StubOrder(id="order-1", brand_id="brand-1")
+        brand = StubBrand(id="brand-1")
+        _patch_db(app, monkeypatch, row, order, brand)
         _stub_disbursement_status(
             monkeypatch,
             returns={
@@ -492,6 +522,7 @@ class TestRemitCallback:
         )
         assert resp.status_code == 200, resp.text
         out = resp.json()
+        assert out["responseCode"] == "2003600"
         assert out["status"] == "pending"
         from models.escrow_ledger import EscrowEntryStatus
         assert row.status == EscrowEntryStatus.PENDING
@@ -502,7 +533,9 @@ class TestRemitCallback:
     ):
         client_, app = client
         row = _stub_ledger_row(partner_ref="r-abc123", order_id="order-1")
-        _patch_db(app, monkeypatch, row)
+        order = StubOrder(id="order-1", brand_id="brand-1")
+        brand = StubBrand(id="brand-1")
+        _patch_db(app, monkeypatch, row, order, brand)
         _stub_disbursement_status(
             monkeypatch,
             raises=DipayError(503, {"responseMessage": "upstream down"}),
@@ -520,6 +553,7 @@ class TestRemitCallback:
         )
         assert resp.status_code == 200, resp.text
         out = resp.json()
+        assert out["responseCode"] == "2003600"
         assert out["status"] == "FAILED"
         assert "failed: Insufficient balance" in (row.description or "")
 
@@ -549,3 +583,163 @@ class TestRemitCallback:
         )
         assert resp.status_code == 404
         assert "unknown dipay disbursement" in resp.json()["detail"].lower()
+
+
+# ---- Inbound Webhook Signature Tests ---------------------------------------
+
+
+class TestDipayWebhookSignature:
+    def test_signature_verified_when_key_configured(self, monkeypatch, client):
+        from config import settings
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding, rsa
+
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        pub_pem = private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("utf-8")
+
+        monkeypatch.setattr(settings, "dipay_callback_public_key", pub_pem, raising=False)
+        monkeypatch.setattr(settings, "environment", "development")
+
+        client_, app = client
+        brand = StubBrand()
+        order = StubOrder(id="ord-1", total_idr=100_000)
+        _patch_db(app, monkeypatch)
+        _stub_resolve(monkeypatch, brand=brand, order=order)
+        _stub_query_qris(monkeypatch)
+        _stub_mark_paid(monkeypatch)
+
+        body_bytes = _qris_body("q0f0e8a2e123", "00")
+        body_str = body_bytes.decode("utf-8")
+        import hashlib
+        body_hash = hashlib.sha256(body_str.encode("utf-8")).hexdigest()
+        ts = "2026-09-23T10:00:00.000+07:00"
+        path = "/webhooks/dipay/qris"
+        method = "POST"
+        string_to_sign = f"{method}:{path}:{body_hash}:{ts}"
+        sig = private_key.sign(
+            string_to_sign.encode("utf-8"),
+            padding.PKCS1v15(),
+            hashes.SHA256(),
+        ).hex()
+
+        resp = client_.post(
+            path,
+            content=body_bytes,
+            headers={
+                "Content-Type": "application/json",
+                "x-signature": sig,
+                "x-timestamp": ts,
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["responseCode"] == "2004800"
+
+    def test_invalid_signature_raises_401(self, monkeypatch, client):
+        from config import settings
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        pub_pem = private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("utf-8")
+
+        monkeypatch.setattr(settings, "dipay_callback_public_key", pub_pem, raising=False)
+        monkeypatch.setattr(settings, "environment", "development")
+
+        client_, app = client
+        _patch_db(app, monkeypatch)
+
+        resp = client_.post(
+            "/webhooks/dipay/qris",
+            content=_qris_body("q0f0e8a2e123", "00"),
+            headers={
+                "Content-Type": "application/json",
+                "x-signature": "deadbeef" * 8,
+                "x-timestamp": "2026-09-23T10:00:00.000+07:00",
+            },
+        )
+        assert resp.status_code == 401
+        assert "invalid dipay callback signature" in resp.json()["detail"].lower()
+
+    def test_remit_signature_verified_when_key_configured(self, monkeypatch, client):
+        from config import settings
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding, rsa
+
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        pub_pem = private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("utf-8")
+
+        monkeypatch.setattr(settings, "dipay_callback_public_key", pub_pem, raising=False)
+        monkeypatch.setattr(settings, "environment", "development")
+
+        client_, app = client
+        row = _stub_ledger_row(partner_ref="r-abc123", order_id="order-1")
+        order = StubOrder(id="order-1", brand_id="brand-1")
+        brand = StubBrand(id="brand-1")
+        _patch_db(app, monkeypatch, row, order, brand)
+        _stub_disbursement_status(
+            monkeypatch,
+            returns={
+                "latestTransactionStatus": "00",
+                "originalReferenceNo": "DIPAY-REF-9",
+            },
+        )
+
+        body_dict = {
+            "originalPartnerReferenceNo": "r-abc123",
+            "originalReferenceNo": "DIPAY-REF-9",
+            "latestTransactionStatus": "00",
+            "additionalInfo": {},
+        }
+        body_bytes = json.dumps(body_dict).encode()
+        body_str = body_bytes.decode("utf-8")
+        import hashlib
+        body_hash = hashlib.sha256(body_str.encode("utf-8")).hexdigest()
+        ts = "2026-09-23T10:00:00.000+07:00"
+        path = "/webhooks/dipay/remit"
+        method = "POST"
+        string_to_sign = f"{method}:{path}:{body_hash}:{ts}"
+        sig = private_key.sign(
+            string_to_sign.encode("utf-8"),
+            padding.PKCS1v15(),
+            hashes.SHA256(),
+        ).hex()
+
+        resp = client_.post(
+            path,
+            content=body_bytes,
+            headers={
+                "Content-Type": "application/json",
+                "x-signature": sig,
+                "x-timestamp": ts,
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        out = resp.json()
+        assert out["responseCode"] == "2003600"
+        assert out["status"] == "COMPLETED"
+
+    def test_missing_signature_in_production_raises_401(self, monkeypatch, client):
+        from config import settings
+
+        monkeypatch.setattr(settings, "dipay_callback_public_key", None, raising=False)
+        monkeypatch.setattr(settings, "environment", "production")
+
+        client_, app = client
+        _patch_db(app, monkeypatch)
+
+        resp = client_.post(
+            "/webhooks/dipay/qris",
+            content=_qris_body("q0f0e8a2e123", "00"),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401
+        assert "invalid dipay callback signature" in resp.json()["detail"].lower()
