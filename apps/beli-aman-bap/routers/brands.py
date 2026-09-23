@@ -68,7 +68,31 @@ async def get_product(slug: str, product_slug: str) -> dict:
 # ----- Payouts & Fulfillment (vibe-admin) -----
 
 
-ALLOWED_PAYMENT_PROVIDERS = {"xendit", "sento"}
+ALLOWED_PAYMENT_PROVIDERS = {"xendit", "sento", "dipay", "oy"}
+
+
+class PayoutsOut(BaseModel):
+    slug: str
+    xendit_sub_account_id: str | None = None
+    xendit_disbursement_bank_code: str | None = None
+    xendit_disbursement_bank_account_masked: str | None = None
+    xendit_disbursement_holder_name: str | None = None
+    sento_disbursement_bank_code: str | None = None
+    sento_disbursement_bank_account_masked: str | None = None
+    sento_disbursement_holder_name: str | None = None
+    dipay_client_key_masked: str | None = None
+    dipay_client_key_configured: bool
+    dipay_client_secret_configured: bool
+    dipay_private_key_configured: bool
+    dipay_merchant_id: str | None = None
+    dipay_disbursement_bank_code: str | None = None
+    dipay_disbursement_bank_account_masked: str | None = None
+    dipay_disbursement_holder_name: str | None = None
+    biteship_origin_address: dict | None = None
+    biteship_default_courier: str | None = None
+    payment_provider: str
+    courier_provider: str
+    jubelio_origin_address: dict | None = None
 
 
 class PayoutsIn(BaseModel):
@@ -79,6 +103,16 @@ class PayoutsIn(BaseModel):
     sento_disbursement_bank_code: str | None = None
     sento_disbursement_bank_account: str | None = None
     sento_disbursement_holder_name: str | None = None
+    # Dipay (SNAP v2.1) — client key/secret + RSA private key (base64 PEM)
+    # for request signing, merchant id for QRIS, and the bank account the
+    # brand pays out to on escrow release (see services/dipay_*.py).
+    dipay_client_key: str | None = None
+    dipay_client_secret: str | None = None
+    dipay_private_key_b64: str | None = None
+    dipay_merchant_id: str | None = None
+    dipay_disbursement_bank_code: str | None = None
+    dipay_disbursement_bank_account: str | None = None
+    dipay_disbursement_holder_name: str | None = None
     biteship_origin_address: dict | None = None
     biteship_default_courier: str | None = None
     payment_provider: str | None = None
@@ -109,6 +143,28 @@ def _payouts_view(brand: Brand) -> dict:
             else brand.sento_disbursement_bank_account
         ),
         "sento_disbursement_holder_name": brand.sento_disbursement_holder_name,
+        # Dipay (SNAP) disbursement target — used when payment_provider ==
+        # "dipay". Like Sento above: masked account, plain code/holder.
+        "dipay_disbursement_bank_code": brand.dipay_disbursement_bank_code,
+        "dipay_disbursement_bank_account_masked": (
+            "•••• " + brand.dipay_disbursement_bank_account[-4:]
+            if brand.dipay_disbursement_bank_account
+            and len(brand.dipay_disbursement_bank_account) > 4
+            else brand.dipay_disbursement_bank_account
+        ),
+        "dipay_disbursement_holder_name": brand.dipay_disbursement_holder_name,
+        # Dipay identifiers — never echo the secret or the RSA private key.
+        # ``dipay_client_key`` is the public X-CLIENT-KEY; only the last 4
+        # chars come back so admins can tell which key is configured.
+        "dipay_merchant_id": brand.dipay_merchant_id,
+        "dipay_client_key_masked": (
+            "•••• " + brand.dipay_client_key[-4:]
+            if brand.dipay_client_key and len(brand.dipay_client_key) > 4
+            else brand.dipay_client_key
+        ),
+        "dipay_client_key_configured": bool(brand.dipay_client_key),
+        "dipay_client_secret_configured": bool(brand.dipay_client_secret),
+        "dipay_private_key_configured": bool(brand.dipay_private_key_b64),
         "biteship_origin_address": brand.biteship_origin_address,
         "biteship_default_courier": brand.biteship_default_courier,
         "payment_provider": (brand.payment_provider or "xendit")
@@ -170,7 +226,7 @@ async def _resolve_brand_for_edit(
     return brand
 
 
-@router.get("/{slug}/payouts")
+@router.get("/{slug}/payouts", response_model=PayoutsOut)
 async def get_payouts(
     slug: str,
     profile: BeliAmanProfile = Depends(get_current_profile),
@@ -180,7 +236,7 @@ async def get_payouts(
     return _payouts_view(brand)
 
 
-@router.put("/{slug}/payouts")
+@router.put("/{slug}/payouts", response_model=PayoutsOut)
 async def put_payouts(
     slug: str,
     body: PayoutsIn,
@@ -209,28 +265,56 @@ async def put_payouts(
         brand.sento_disbursement_bank_account = _normalize(body.sento_disbursement_bank_account)
     if body.sento_disbursement_holder_name is not None:
         brand.sento_disbursement_holder_name = _normalize(body.sento_disbursement_holder_name)
+    # Dipay rotation contract: omitted and JSON null preserve; explicit empty
+    # strings clear. model_fields_set distinguishes omission from null.
+    dipay_fields = (
+        "dipay_client_key",
+        "dipay_client_secret",
+        "dipay_private_key_b64",
+        "dipay_merchant_id",
+        "dipay_disbursement_bank_code",
+        "dipay_disbursement_bank_account",
+        "dipay_disbursement_holder_name",
+    )
+    for field in dipay_fields:
+        if field in body.model_fields_set:
+            value = getattr(body, field)
+            if value is not None:
+                setattr(brand, field, _normalize(value))
     if body.biteship_origin_address is not None:
         brand.biteship_origin_address = body.biteship_origin_address or None
     if body.biteship_default_courier is not None:
         brand.biteship_default_courier = _normalize(body.biteship_default_courier)
     if body.payment_provider is not None:
         normalized_pp = _normalize(body.payment_provider)
-        brand.payment_provider = (
-            normalized_pp if normalized_pp in ALLOWED_PAYMENT_PROVIDERS else "xendit"
-        )
+        if normalized_pp not in ALLOWED_PAYMENT_PROVIDERS:
+            raise HTTPException(422, "Unsupported payment_provider")
+        if normalized_pp == "dipay":
+            from services.dipay_client import DipayError, resolve_config
+            try:
+                resolve_config(brand)
+            except DipayError as exc:
+                raise HTTPException(
+                    422, "Complete Dipay credentials are required"
+                ) from exc
+            if not (
+                brand.dipay_disbursement_bank_code
+                and brand.dipay_disbursement_bank_account
+                and brand.dipay_disbursement_holder_name
+            ):
+                raise HTTPException(
+                    422, "Complete Dipay payout bank configuration is required"
+                )
+        brand.payment_provider = normalized_pp
     if body.courier_provider is not None:
         brand.jubelio_enabled = _normalize(body.courier_provider) == "jubelio"
-    # jubelio_origin_address — separate from the "is not None = skip" pattern
-    # used above because JSON ``null`` here means "explicit clear" (matches
-    # the field's read shape, which returns ``None`` when the column is
-    # unset). Pydantic can't distinguish "missing" from "null" in an
-    # ``Optional`` field, so we always process the body field. Empty dict
-    # also clears (handy for callers that want to clear without knowing
-    # the full key list).
-    brand.jubelio_origin_address = _validate_jubelio_origin(
-        body.jubelio_origin_address if body.jubelio_origin_address
-        else None
-    )
+    # Preserve an omitted origin, while an explicit JSON null or empty object
+    # clears it. ``model_fields_set`` is the authoritative omission signal.
+    if "jubelio_origin_address" in body.model_fields_set:
+        brand.jubelio_origin_address = _validate_jubelio_origin(
+            body.jubelio_origin_address if body.jubelio_origin_address
+            else None
+        )
 
     await db.flush()
     return _payouts_view(brand)

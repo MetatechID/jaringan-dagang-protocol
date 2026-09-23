@@ -25,9 +25,19 @@ from models.escrow_ledger import (
 )
 from models.order import Order
 from services import xendit_client, xendit_disbursements
+from services.dipay_client import DipayError
 from services.sento_client import SentoError
 from services.xendit_client import XenditError
 from services.xendit_disbursements import DisbursementSkipped
+
+
+class ReleaseFailed(Exception):
+    """Provider initiation failed; the order must not be marked released."""
+
+    def __init__(self, message: str, *, status_code: int = 502) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
 
 _LOG = logging.getLogger("beli_aman_bap.escrow")
 
@@ -65,7 +75,7 @@ async def release(
     amount_idr: int,
     description: str = "",
 ) -> EscrowLedger:
-    """Write a RELEASE ledger entry AND kick off a Xendit disbursement.
+    """Persist a release attempt, initiate payout, then return its ledger row.
 
     Lifecycle:
     1. Ledger row inserted with status=PENDING.
@@ -79,6 +89,24 @@ async def release(
        manually then flips the row by hand.
     5. If Xendit rejects, ledger row → FAILED. Ops recovers.
     """
+    active = (
+        await db.execute(
+            select(EscrowLedger).where(
+                EscrowLedger.order_id == order_id,
+                EscrowLedger.entry_type == EscrowEntryType.RELEASE,
+                EscrowLedger.status.in_((
+                    EscrowEntryStatus.PENDING,
+                    EscrowEntryStatus.COMPLETED,
+                )),
+            )
+        )
+    ).scalars().first()
+    if active is not None:
+        raise ReleaseFailed(
+            "A release is already pending or completed for this order",
+            status_code=409,
+        )
+
     entry = EscrowLedger(
         order_id=order_id,
         entry_type=EscrowEntryType.RELEASE,
@@ -93,54 +121,77 @@ async def release(
         await db.execute(select(Order).where(Order.id == order_id))
     ).scalar_one_or_none()
     if order is None:
-        _LOG.error("release() called with unknown order_id=%s", order_id)
-        return entry
+        entry.status = EscrowEntryStatus.FAILED
+        await db.commit()
+        raise ReleaseFailed(f"Unknown order {order_id}")
 
-    # Disbursement provider is per-Brand — mirror the invoice leg's dispatch
-    # (routers/orders.py create_invoice). Sento brands disburse via the remit
-    # API; everything else (default "xendit") via Xendit. Both services return
-    # {"id": <psp-id>} and raise the shared DisbursementSkipped when the brand
-    # isn't payout-configured, so this branch stays uniform.
+    # Disbursement provider is per brand. A Dipay callback arrives with our
+    # partnerReferenceNo, so derive it from the release-row id rather than the
+    # order id: every retry has a distinct, durable correlation key.
     from models.brand import Brand
     from services import sento_disbursements
+    from services.dipay_client import snap_ref
 
     brand_q = await db.execute(select(Brand).where(Brand.id == order.brand_id))
     brand = brand_q.scalar_one_or_none()
     provider = (brand.payment_provider if brand is not None else "xendit") or "xendit"
+    if provider == "dipay":
+        entry.partner_ref = snap_ref("r", str(entry.id))
+
+    # Make the callback lookup visible before any network I/O. Callers invoke
+    # release before changing order state, so this commits only the attempt.
+    await db.commit()
 
     try:
         if provider == "sento":
             response = await sento_disbursements.disburse_to_seller(
                 db, order=order, description=description,
             )
+        elif provider == "dipay":
+            from services import dipay_disbursements
+
+            response = await dipay_disbursements.disburse_to_seller(
+                db,
+                order=order,
+                partner_reference_no=entry.partner_ref,
+                description=description,
+                amount_idr=amount_idr,
+            )
         else:
             response = await xendit_disbursements.disburse_to_seller(
                 db, order=order, description=description,
             )
-        entry.external_ref = response.get("id")
-        _LOG.info(
-            "%s disbursement %s kicked off for order %s",
-            provider, entry.external_ref, order_id,
-        )
-    except DisbursementSkipped as e:
-        _LOG.warning(
-            "Disbursement skipped for order %s (ops manual): %s",
-            order_id, e,
-        )
-    except (XenditError, SentoError) as e:
+    except DisbursementSkipped as exc:
         entry.status = EscrowEntryStatus.FAILED
-        _LOG.exception(
-            "%s disbursement FAILED for order %s: %s — ledger row marked FAILED",
-            provider, order_id, e,
-        )
-    except Exception:  # noqa: BLE001
+        entry.description = f"{entry.description} — initiation skipped: {exc}"
+        await db.commit()
+        raise ReleaseFailed(str(exc)) from exc
+    except (XenditError, SentoError, DipayError) as exc:
         entry.status = EscrowEntryStatus.FAILED
-        _LOG.exception(
-            "Unexpected error kicking off disbursement for order %s — "
-            "ledger row marked FAILED", order_id,
-        )
+        entry.description = f"{entry.description} — initiation failed: {exc}"
+        await db.commit()
+        _LOG.exception("%s disbursement failed for order %s", provider, order_id)
+        raise ReleaseFailed(str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        entry.status = EscrowEntryStatus.FAILED
+        entry.description = f"{entry.description} — initiation failed"
+        await db.commit()
+        _LOG.exception("Unexpected disbursement failure for order %s", order_id)
+        raise ReleaseFailed("Disbursement initiation failed") from exc
 
-    await db.flush()
+    entry.external_ref = response.get("id")
+    if provider == "dipay" and "net_idr" in response:
+        entry.gross_amount_idr = response["gross_idr"]
+        entry.platform_fee_idr = response["platform_fee_idr"]
+        entry.provider_fee_idr = response["dipay_fee_idr"]
+        entry.net_amount_idr = response["net_idr"]
+    await db.commit()
+    _LOG.info(
+        "%s disbursement %s accepted for order %s",
+        provider,
+        entry.external_ref,
+        order_id,
+    )
     return entry
 
 
@@ -170,26 +221,39 @@ async def refund(
         await db.execute(select(Order).where(Order.id == order_id))
     ).scalar_one_or_none()
     if order is None:
-        _LOG.error("refund() called with unknown order_id=%s", order_id)
+        entry.status = EscrowEntryStatus.FAILED
+        entry.description = f"{entry.description} — unknown order"
+        await db.flush()
         return entry
 
     invoice_id = (order.payment_method_snapshot or {}).get("invoice_id")
     if not invoice_id:
-        _LOG.warning(
-            "Refund skipped for order %s — no invoice_id on snapshot "
-            "(ops manual)", order_id,
-        )
+        entry.status = EscrowEntryStatus.FAILED
+        entry.description = f"{entry.description} — manual: no provider invoice id"
+        await db.flush()
         return entry
 
-    # Brand sub-account routing — funds come out of the same pocket.
+    # Refund support is provider-aware. Dipay has no automated refund API in
+    # this integration, so record an explicit failed/manual result rather than
+    # silently routing a Dipay payment through Xendit.
     from models.brand import Brand
     brand_q = await db.execute(select(Brand).where(Brand.id == order.brand_id))
     brand = brand_q.scalar_one_or_none()
+    provider = (brand.payment_provider if brand is not None else "xendit") or "xendit"
+    if provider == "dipay":
+        entry.status = EscrowEntryStatus.FAILED
+        entry.description = f"{entry.description} — manual Dipay refund required"
+        await db.flush()
+        return entry
+    if provider != "xendit":
+        entry.status = EscrowEntryStatus.FAILED
+        entry.description = f"{entry.description} — manual {provider} refund required"
+        await db.flush()
+        return entry
     if brand is None or not brand.xendit_sub_account_id:
-        _LOG.warning(
-            "Refund skipped for order %s — brand not Xendit-onboarded",
-            order_id,
-        )
+        entry.status = EscrowEntryStatus.FAILED
+        entry.description = f"{entry.description} — brand not Xendit-onboarded"
+        await db.flush()
         return entry
 
     try:
@@ -223,8 +287,10 @@ async def held_balance(db: AsyncSession, *, order_id: str) -> int:
     rows = result.scalars().all()
     total = 0
     for r in rows:
+        if r.status != EscrowEntryStatus.COMPLETED:
+            continue
         if r.entry_type == EscrowEntryType.HOLD:
             total += r.amount_idr
-        else:
+        elif r.entry_type in (EscrowEntryType.RELEASE, EscrowEntryType.REFUND):
             total -= r.amount_idr
     return total

@@ -7,3 +7,7 @@ httpx>=0.26.0
 firebase-admin>=6.5.0
 mangum>=0.17.0
 pynacl>=1.5.0
+# Dipay SNAP v2.1 client: RSA (SHA256withRSA) signing of the access-token
+# request; QRIS PNG rendering for /api/v1/qris/{ref}.png.
+cryptography>=42.0
+qrcode[pil]>=7.4.2

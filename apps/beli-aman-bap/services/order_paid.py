@@ -63,10 +63,13 @@ def _provider_phrase(invoice_id: str, actor: str) -> str:
     """Return a provider-aware escrow-ledger description.
 
     The ``actor`` parameter (e.g. ``system:sento_webhook``,
-    ``system:xendit_webhook``, ``system:oy_webhook``) carries the gateway
-    name as a substring. Default to ``invoice {id}`` for unknown actors so
-    we never mislabel a future provider.
+    ``system:xendit_webhook``, ``system:oy_webhook``,
+    ``system:dipay_webhook``) carries the gateway name as a substring.
+    Default to ``invoice {id}`` for unknown actors so we never mislabel a
+    future provider.
     """
+    if "dipay" in actor:
+        return f"dipay invoice {invoice_id}"
     if "sento" in actor:
         return f"sento invoice {invoice_id}"
     if "xendit" in actor:

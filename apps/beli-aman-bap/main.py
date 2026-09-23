@@ -173,6 +173,8 @@ from routers.webhooks_biteship import router as webhooks_biteship_router  # noqa
 from routers.webhooks_jubelio import router as webhooks_jubelio_router  # noqa: E402
 from routers.webhooks_oy import router as webhooks_oy_router  # noqa: E402
 from routers.webhooks_sento import router as webhooks_sento_router  # noqa: E402
+from routers.webhooks_dipay import router as webhooks_dipay_router  # noqa: E402
+from routers.qris import router as qris_router  # noqa: E402
 from routers.wishlist import router as wishlist_router  # noqa: E402
 from routers.loyalty import router as loyalty_router  # noqa: E402
 from routers.coupons import router as coupons_router  # noqa: E402
@@ -256,8 +258,10 @@ app.include_router(storefront_integrations_router)
 app.include_router(webhooks_xendit_router)
 app.include_router(webhooks_oy_router)
 app.include_router(webhooks_sento_router)
+app.include_router(webhooks_dipay_router)
 app.include_router(webhooks_biteship_router)
 app.include_router(webhooks_jubelio_router)
+app.include_router(qris_router)
 app.include_router(wishlist_router)
 app.include_router(loyalty_router)
 app.include_router(coupons_router)
@@ -294,5 +298,10 @@ async def debug_config() -> dict:
         "sento_configured": bool(settings.sento_api_key),
         "sento_base_url": settings.sento_base_url,
         "sento_callback_configured": bool(settings.sento_callback_base_url),
+        "dipay_configured": bool(settings.dipay_client_key),
+        "dipay_base_url": settings.dipay_base_url,
+        "dipay_merchant_configured": bool(settings.dipay_merchant_id),
+        "qr_public_base": settings.qr_public_base,
+        "platform_release_fee_pct_bp": settings.platform_release_fee_pct_bp,
         "environment": settings.environment,
     }

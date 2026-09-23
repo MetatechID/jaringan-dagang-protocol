@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
-from database import get_db
+from database import async_session, get_db
 from deps import get_current_profile, require_admin_token
 from models.address import Address
 from models.brand import Brand
@@ -230,14 +230,14 @@ async def get_order(
         order = await lock_order_for_update(db, order_id)
         if order and order.state == OrderState.RECEIVED:
             try:
+                await escrow_service.release(
+                    db, order_id=order.id, amount_idr=order.total_idr,
+                    description="Auto-release after D+3 (lazy)",
+                )
                 await transition(
                     db, order, OrderState.ESCROW_RELEASED,
                     actor="system:auto_release",
                     payload={"reason": "D+3 elapsed (lazy release on read)"},
-                )
-                await escrow_service.release(
-                    db, order_id=order.id, amount_idr=order.total_idr,
-                    description="Auto-release after D+3 (lazy)",
                 )
                 order.released_at = datetime.now(timezone.utc)
                 # Loyalty: earn points on auto-release too (idempotent per order).
@@ -251,6 +251,10 @@ async def get_order(
                     )
                 )
             except StateTransitionError:
+                pass
+            except escrow_service.ReleaseFailed:
+                # The failed attempt is durably recorded by release(); leave
+                # the order RECEIVED and do not accrue/notify completion.
                 pass
 
     # Also include the ledger
@@ -800,9 +804,13 @@ async def create_invoice(
     ``payment_provider``).
     """
     from models.brand import Brand
-    from services import oy_invoices, sento_invoices, xendit_invoices
+    from services import dipay_invoices, oy_invoices, sento_invoices, xendit_invoices
 
-    order = await lock_order_for_update(db, order_id)
+    # Do not retain a row lock over provider I/O. Dipay reserves the
+    # deterministic reference in its own short committed transaction below.
+    order = (
+        await db.execute(select(Order).where(Order.id == order_id))
+    ).scalar_one_or_none()
     if not order or order.profile_id != profile.id:
         raise HTTPException(404, "Order not found")
     if order.state != OrderState.CART_REVIEWED:
@@ -815,6 +823,11 @@ async def create_invoice(
                 "provider": snap.get("payment_provider"),
                 "invoice_id": snap.get("invoice_id"),
                 "invoice_url": snap.get("invoice_url"),
+                # Dipay QRIS surfaces — the SDK re-renders the QR from the
+                # raw EMVCo payload when the PNG URL isn't reachable.
+                "qr_image_url": snap.get("qris_image_url"),
+                "qris_image_url": snap.get("qris_image_url"),
+                "qris_content": snap.get("qris_content"),
             }
         raise HTTPException(409, f"Cannot create invoice in state {order.state.value}")
 
@@ -835,6 +848,16 @@ async def create_invoice(
         response = await sento_invoices.create_invoice_for_order(
             db, order, buyer_email=profile.email,
         )
+    elif provider == "dipay":
+        # Same buyer-email threading as the Sento path — QRIS MPM generate
+        # itself takes no email, but the snapshot stores it for ops parity.
+        async with async_session() as reservation_db:
+            response = await dipay_invoices.create_invoice_for_order(
+                db,
+                order,
+                buyer_email=profile.email,
+                reservation_db=reservation_db,
+            )
     else:
         response = await xendit_invoices.create_invoice_for_order(db, order)
     return {
@@ -848,7 +871,9 @@ async def create_invoice(
             or response.get("payment_url")
         ),
         "expires_at": response.get("expires_at") or response.get("expiry_date"),
+        "qr_image_url": response.get("qris_image_url"),
         "qris_image_url": response.get("qris_image_url"),
+        "qris_content": response.get("qris_content"),
     }
 
 

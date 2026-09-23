@@ -18,6 +18,16 @@ from services import escrow as escrow_service
 from services import seller_bridge
 from services.state_machine import StateTransitionError, lock_order_for_update, transition
 
+
+async def _release_or_409(db: AsyncSession, order, *, description: str):
+    try:
+        return await escrow_service.release(
+            db, order_id=order.id, amount_idr=order.total_idr,
+            description=description,
+        )
+    except escrow_service.ReleaseFailed as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+
 router = APIRouter(prefix="/api/v1/orders", tags=["escrow"])
 
 
@@ -74,6 +84,9 @@ async def buyer_confirm_receipt(
         except StateTransitionError as e:
             raise HTTPException(409, str(e))
 
+    await _release_or_409(
+        db, order, description="Released — buyer confirmed receipt"
+    )
     try:
         await transition(db, order, OrderState.ESCROW_RELEASED,
                          actor=f"buyer:{profile.id}",
@@ -81,11 +94,8 @@ async def buyer_confirm_receipt(
     except StateTransitionError as e:
         raise HTTPException(409, str(e))
 
-    await escrow_service.release(
-        db, order_id=order.id, amount_idr=order.total_idr,
-        description="Released — buyer confirmed receipt",
-    )
     order.released_at = datetime.now(timezone.utc)
+
     # Loyalty: earn points now the transaction is complete (idempotent per order).
     from models.loyalty import accrue_for_order
     await accrue_for_order(db, profile_id=order.profile_id, order_id=order.id, total_idr=order.total_idr)

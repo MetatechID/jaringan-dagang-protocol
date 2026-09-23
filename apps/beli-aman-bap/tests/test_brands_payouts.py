@@ -40,6 +40,13 @@ def _brand(**overrides) -> SimpleNamespace:
         sento_disbursement_bank_code=None,
         sento_disbursement_bank_account=None,
         sento_disbursement_holder_name=None,
+        dipay_client_key=None,
+        dipay_client_secret=None,
+        dipay_private_key_b64=None,
+        dipay_merchant_id=None,
+        dipay_disbursement_bank_code=None,
+        dipay_disbursement_bank_account=None,
+        dipay_disbursement_holder_name=None,
         biteship_origin_address=None,
         biteship_default_courier=None,
         payment_provider="xendit",
@@ -66,6 +73,24 @@ class TestPayoutsView:
         assert view["jubelio_origin_address"] is None
         assert view["xendit_disbursement_bank_account_masked"] is None
         assert view["sento_disbursement_bank_account_masked"] is None
+        assert view["dipay_client_key_configured"] is False
+        assert view["dipay_client_secret_configured"] is False
+        assert view["dipay_private_key_configured"] is False
+
+    def test_dipay_secrets_are_masked_as_configuration_flags(self):
+        from routers.brands import _payouts_view
+
+        view = _payouts_view(_brand(
+            dipay_client_key="client-key-1234",
+            dipay_client_secret="never-return-me",
+            dipay_private_key_b64="never-return-key",
+        ))
+        assert view["dipay_client_key_masked"] == "•••• 1234"
+        assert view["dipay_client_key_configured"] is True
+        assert view["dipay_client_secret_configured"] is True
+        assert view["dipay_private_key_configured"] is True
+        assert "dipay_client_secret" not in view
+        assert "dipay_private_key_b64" not in view
 
     def test_mask_hides_xendit_account_number(self):
         from routers.brands import _payouts_view
@@ -86,11 +111,16 @@ class TestPayoutsView:
         view = _payouts_view(_brand(payment_provider="sento"))
         assert view["payment_provider"] == "sento"
 
-    def test_payment_provider_unknown_value_falls_back_to_xendit(self):
-        """Mirrors the dispatch fallback at routers/checkout.py:146."""
+    def test_payment_provider_oy_is_allowed(self):
         from routers.brands import _payouts_view
 
         view = _payouts_view(_brand(payment_provider="oy"))
+        assert view["payment_provider"] == "oy"
+
+    def test_payment_provider_unknown_value_falls_back_to_xendit(self):
+        from routers.brands import _payouts_view
+
+        view = _payouts_view(_brand(payment_provider="unknown"))
         assert view["payment_provider"] == "xendit"
 
     def test_payment_provider_none_falls_back_to_xendit(self):
@@ -329,8 +359,7 @@ def test_put_payouts_toggles_payment_provider_in_db(client):
     assert brand is not None and brand.payment_provider == "sento"
 
 
-def test_put_payouts_garbage_payment_provider_falls_back_in_db(client):
-    """End-to-end: PUT ``"oy"`` falls back to ``"xendit"`` on the row."""
+def test_put_payouts_oy_remains_allowed(client):
     import asyncio
 
     tc, _Session, seed, _fetch = client
@@ -338,10 +367,19 @@ def test_put_payouts_garbage_payment_provider_falls_back_in_db(client):
 
     r = _put(tc, "antarestar", {"payment_provider": "oy"})
     assert r.status_code == 200, r.text
-    assert r.json()["payment_provider"] == "xendit"
+    assert r.json()["payment_provider"] == "oy"
 
     brand = asyncio.run(_fetch("antarestar"))
-    assert brand is not None and brand.payment_provider == "xendit"
+    assert brand is not None and brand.payment_provider == "oy"
+
+
+def test_put_payouts_rejects_unknown_provider(client):
+    import asyncio
+
+    tc, _Session, seed, _fetch = client
+    asyncio.run(seed())
+    r = _put(tc, "antarestar", {"payment_provider": "bogus"})
+    assert r.status_code == 422
 
 
 def test_put_payouts_garbage_courier_falls_back_in_db(client):
