@@ -3,35 +3,35 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timezone
 from typing import Any
-
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from database import async_session, get_db
 from deps import get_current_profile, require_admin_token
+from fastapi import APIRouter, Depends, HTTPException
 from models.address import Address
 from models.brand import Brand
 from models.dispute import Dispute
-from models.escrow_ledger import EscrowEntryType, EscrowLedger
+from models.escrow_ledger import EscrowLedger
 from models.order import Order, OrderState
 from models.order_event import OrderEvent
 from models.profile import BeliAmanProfile
+from pydantic import BaseModel, Field
 from services import catalog as catalog_service
 from services import escrow as escrow_service
-from services import pricing
-from services import seller_bridge
+from services import pricing, seller_bridge
 from services.state_machine import (
     StateTransitionError,
     lock_order_for_update,
     transition,
 )
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/api/v1/orders", tags=["orders"])
+_LOG = logging.getLogger("beli_aman_bap.orders")
 
 # Courier logo URLs for the AWB label, keyed by Jubelio's numeric courier_id
 # (the string codes from `services/jubelio._mock_rates`). Unknown codes map to
@@ -786,6 +786,57 @@ async def book_shipment(
     return _serialize_order(order)
 
 
+def _serialize_invoice_snapshot(
+    order: Order,
+    snap: dict,
+    provider: str | None = None,
+) -> dict:
+    resolved_provider = snap.get("payment_provider") or provider
+    png_or_url = (
+        snap.get("invoice_url")
+        or snap.get("checkout_url")
+        or snap.get("payment_url")
+        or snap.get("qris_image_url")
+        or snap.get("qr_image_url")
+    )
+    return {
+        "order_id": order.id,
+        "state": order.state.value,
+        "provider": resolved_provider,
+        "invoice_id": (
+            snap.get("invoice_id")
+            or snap.get("partner_ref")
+            or snap.get("id")
+            or snap.get("trx_id")
+        ),
+        "invoice_url": png_or_url,
+        "expires_at": snap.get("expires_at") or snap.get("expiry_date"),
+        "qr_image_url": snap.get("qris_image_url") or snap.get("qr_image_url"),
+        "qris_image_url": snap.get("qris_image_url") or snap.get("qr_image_url"),
+        "qris_content": snap.get("qris_content"),
+    }
+
+
+def _is_invoice_ready(snap: dict | None) -> bool:
+    if not snap:
+        return False
+    provider = str(snap.get("payment_provider") or "").lower()
+    if provider == "dipay":
+        if snap.get("invoice_status") == "failed":
+            return False
+        qris_content = snap.get("qris_content")
+        return bool(
+            isinstance(qris_content, str)
+            and qris_content.strip()
+            and (snap.get("invoice_url") or snap.get("qris_image_url"))
+        )
+    return bool(
+        snap.get("invoice_url")
+        or snap.get("checkout_url")
+        or snap.get("payment_url")
+    )
+
+
 @router.post("/{order_id}/invoice")
 async def create_invoice(
     order_id: str,
@@ -805,6 +856,7 @@ async def create_invoice(
     """
     from models.brand import Brand
     from services import dipay_invoices, oy_invoices, sento_invoices, xendit_invoices
+    from services.dipay_client import DipayError
 
     # Do not retain a row lock over provider I/O. Dipay reserves the
     # deterministic reference in its own short committed transaction below.
@@ -813,22 +865,13 @@ async def create_invoice(
     ).scalar_one_or_none()
     if not order or order.profile_id != profile.id:
         raise HTTPException(404, "Order not found")
+
+    # Idempotent return if invoice already minted for this order
+    snap = order.payment_method_snapshot or {}
+    if _is_invoice_ready(snap):
+        return _serialize_invoice_snapshot(order, snap)
+
     if order.state != OrderState.CART_REVIEWED:
-        # Idempotent return if invoice already minted for this order
-        snap = order.payment_method_snapshot or {}
-        if snap.get("invoice_url"):
-            return {
-                "order_id": order.id,
-                "state": order.state.value,
-                "provider": snap.get("payment_provider"),
-                "invoice_id": snap.get("invoice_id"),
-                "invoice_url": snap.get("invoice_url"),
-                # Dipay QRIS surfaces — the SDK re-renders the QR from the
-                # raw EMVCo payload when the PNG URL isn't reachable.
-                "qr_image_url": snap.get("qris_image_url"),
-                "qris_image_url": snap.get("qris_image_url"),
-                "qris_content": snap.get("qris_content"),
-            }
         raise HTTPException(409, f"Cannot create invoice in state {order.state.value}")
 
     # Resolve the brand once to pick the provider — avoids a 500 inside
@@ -837,42 +880,66 @@ async def create_invoice(
     brand = brand_q.scalar_one_or_none()
     provider = (brand.payment_provider if brand is not None else "xendit") or "xendit"
 
-    if provider == "oy":
-        response = await oy_invoices.create_invoice_for_order(db, order)
-    elif provider == "sento":
-        # ponytail: thread the authenticated buyer's email so the Sento
-        # payment link is sent to them — the order's shipping_address
-        # snapshot (built by advance_to_authed) doesn't carry an email key,
-        # so without this the link gets no buyer email. OY/Xendit have the
-        # same latent gap but are out of scope here.
-        response = await sento_invoices.create_invoice_for_order(
-            db, order, buyer_email=profile.email,
-        )
-    elif provider == "dipay":
-        # Same buyer-email threading as the Sento path — QRIS MPM generate
-        # itself takes no email, but the snapshot stores it for ops parity.
-        async with async_session() as reservation_db:
-            response = await dipay_invoices.create_invoice_for_order(
-                db,
-                order,
-                buyer_email=profile.email,
-                reservation_db=reservation_db,
+    try:
+        if provider == "oy":
+            response = await oy_invoices.create_invoice_for_order(db, order)
+        elif provider == "sento":
+            # ponytail: thread the authenticated buyer's email so the Sento
+            # payment link is sent to them — the order's shipping_address
+            # snapshot (built by advance_to_authed) doesn't carry an email key,
+            # so without this the link gets no buyer email. OY/Xendit have the
+            # same latent gap but are out of scope here.
+            response = await sento_invoices.create_invoice_for_order(
+                db, order, buyer_email=profile.email,
             )
-    else:
-        response = await xendit_invoices.create_invoice_for_order(db, order)
+        elif provider == "dipay":
+            # Same buyer-email threading as the Sento path — QRIS MPM generate
+            # itself takes no email, but the snapshot stores it for ops parity.
+            async with async_session() as reservation_db:
+                response = await dipay_invoices.create_invoice_for_order(
+                    db,
+                    order,
+                    buyer_email=profile.email,
+                    reservation_db=reservation_db,
+                )
+        else:
+            response = await xendit_invoices.create_invoice_for_order(db, order)
+    except HTTPException:
+        raise
+    except DipayError as exc:
+        code = None
+        if isinstance(getattr(exc, "body", None), dict):
+            code = exc.body.get("responseCode")
+        _LOG.warning(
+            "Dipay invoice creation failed for order %s (status=%s, code=%s)",
+            order.id,
+            exc.status_code,
+            code,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Payment provider temporarily unavailable",
+        ) from None
+    except Exception:
+        _LOG.exception("%s invoice creation failed for order %s", provider, order.id)
+        raise HTTPException(
+            status_code=502,
+            detail="Payment provider temporarily unavailable",
+        ) from None
+
     return {
         "order_id": order.id,
         "state": order.state.value,
         "provider": provider,
-        "invoice_id": response.get("id") or response.get("trx_id"),
+        "invoice_id": response.get("id") or response.get("trx_id") or response.get("invoice_id"),
         "invoice_url": (
             response.get("invoice_url")
             or response.get("checkout_url")
             or response.get("payment_url")
         ),
         "expires_at": response.get("expires_at") or response.get("expiry_date"),
-        "qr_image_url": response.get("qris_image_url"),
-        "qris_image_url": response.get("qris_image_url"),
+        "qr_image_url": response.get("qris_image_url") or response.get("qr_image_url"),
+        "qris_image_url": response.get("qris_image_url") or response.get("qr_image_url"),
         "qris_content": response.get("qris_content"),
     }
 

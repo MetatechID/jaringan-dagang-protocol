@@ -24,24 +24,26 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Any
+from datetime import UTC, datetime, timedelta
 from urllib.parse import quote
 
-from fastapi import HTTPException
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from config import settings
+from fastapi import HTTPException
 from models.bot_rest import Cart
 from models.brand import Brand
 from models.order import Order
 from services import dipay_client
 from services.dipay_client import DipayConfig, DipayError, snap_ref
 from services.release_clock import JAKARTA
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 _LOG = logging.getLogger("beli_aman_bap.dipay_invoices")
 _QRIS_SUCCESS_PREFIX = "20047"
+_INVOICE_CREATING_STALE_SECONDS = 120
+_INVOICE_STATUS_CREATING = "creating"
+_INVOICE_STATUS_READY = "ready"
+_INVOICE_STATUS_FAILED = "failed"
 
 
 def _mock_allowed() -> bool:
@@ -75,7 +77,7 @@ def _validity_period() -> str:
     return exp.isoformat(timespec="seconds")
 
 
-def _validate_qris_response(response: dict) -> str | None:
+def _validate_qris_response(response: dict) -> str:
     code = str(response.get("responseCode") or "")
     message = str(response.get("responseMessage") or "")
     if not code.startswith(_QRIS_SUCCESS_PREFIX):
@@ -84,7 +86,9 @@ def _validate_qris_response(response: dict) -> str | None:
         )
     qr_content = response.get("qrContent") or response.get("qrString")
     if not isinstance(qr_content, str) or not qr_content.strip():
-        return None
+        raise DipayError(
+            0, f"Dipay QRIS response missing qrContent: {code} {message}".strip(),
+        )
     return qr_content.strip()
 
 
@@ -218,7 +222,7 @@ async def create_invoice_for_cart(
     cart.qr_image_url = norm["invoice_url"]
     cart.qris_image_url = norm["qris_image_url"]
     cart.qris_content = norm.get("qris_content")
-    cart.expires_at = datetime.fromisoformat(validity_period).astimezone(timezone.utc)
+    cart.expires_at = datetime.fromisoformat(validity_period).astimezone(UTC)
     return norm
 
 
@@ -252,13 +256,20 @@ async def create_invoice_for_order(
             "payment_provider": "dipay",
             "invoice_id": mock_invoice_id,
             "invoice_url": mock_url,
+            "qris_image_url": mock_url,
+            "invoice_status": _INVOICE_STATUS_READY,
         })
         order.payment_method_snapshot = snap
         _LOG.warning(
             "create_invoice_for_order(dipay): authorized mock for order=%s",
             order.id,
         )
-        return {"id": mock_invoice_id, "invoice_url": mock_url, "mock": True}
+        return {
+            "id": mock_invoice_id,
+            "invoice_url": mock_url,
+            "qris_image_url": mock_url,
+            "mock": True,
+        }
 
     if order.total_idr <= 0:
         raise HTTPException(409, "Order total is 0 — cannot create Dipay invoice")
@@ -266,6 +277,25 @@ async def create_invoice_for_order(
     partner_ref = snap_ref("q", str(order.id))
     validity_period = _validity_period()
     png_url = _qris_png_url(partner_ref)
+
+    # Check if order already has an active ready snapshot
+    existing_snap = dict(order.payment_method_snapshot or {})
+    if (
+        existing_snap.get("invoice_status") == _INVOICE_STATUS_READY
+        and existing_snap.get("qris_content")
+        and existing_snap.get("invoice_url")
+    ):
+        return {
+            "id": existing_snap.get("invoice_id") or partner_ref,
+            "invoice_url": existing_snap.get("invoice_url"),
+            "qris_image_url": (
+                existing_snap.get("qris_image_url")
+                or existing_snap.get("invoice_url")
+            ),
+            "qris_content": existing_snap.get("qris_content"),
+            "expires_at": existing_snap.get("expires_at"),
+        }
+
     items = [
         {
             "name": (i.get("name") or i.get("sku") or "item")[:255],
@@ -278,16 +308,16 @@ async def create_invoice_for_order(
     # description field in our wrapper. Fold them into the snapshot for
     # webhook / ops parity (mirrors how the Sento path folds items into a
     # description). Re-model if Dipay surfaces a description field.
+    brand_name = getattr(brand, "name", "Brand") or "Brand"
     description = (
-        f"{brand.name} order {order.id} — {order.total_idr:,} IDR"
+        f"{brand_name} order {order.id} — {order.total_idr:,} IDR"
         + (" — " + ", ".join(f"{i['name']} x{i['quantity']}" for i in items)
             if items else "")
     )
     email = buyer_email or (order.shipping_address or {}).get("email")
     sender_name = (order.shipping_address or {}).get("recipient_name") or "Buyer"
 
-    snap = dict(order.payment_method_snapshot or {})
-    snap.update({
+    reservation_snap = {
         "type": "dipay_qris",
         "payment_provider": "dipay",
         # partner_ref is the lookup key Dipay echoes back in the
@@ -296,13 +326,14 @@ async def create_invoice_for_order(
         # if we crash mid-create.
         "partner_ref": partner_ref,
         "invoice_id": partner_ref,
-        "invoice_url": png_url,
+        "invoice_status": _INVOICE_STATUS_CREATING,
         "description": description,
         "sender_name": sender_name,
         "email": email,
         "expires_at": validity_period,
-    })
-    order.payment_method_snapshot = snap
+        "reservation_updated_at": datetime.now(UTC).isoformat(),
+    }
+
     if reservation_db is not None:
         reserved = (
             await reservation_db.execute(
@@ -315,28 +346,110 @@ async def create_invoice_for_order(
         existing = current.get("invoice_id")
         if existing and existing != partner_ref:
             raise HTTPException(409, "Order already has a different invoice")
-        current.update(snap)
+
+        if (
+            current.get("invoice_status") == _INVOICE_STATUS_READY
+            and current.get("qris_content")
+            and current.get("invoice_url")
+        ):
+            order.payment_method_snapshot = current
+            return {
+                "id": current.get("invoice_id") or partner_ref,
+                "invoice_url": current.get("invoice_url"),
+                "qris_image_url": (
+                    current.get("qris_image_url") or current.get("invoice_url")
+                ),
+                "qris_content": current.get("qris_content"),
+                "expires_at": current.get("expires_at"),
+            }
+
+        current.update(reservation_snap)
+        current.pop("invoice_url", None)
+        current.pop("qris_image_url", None)
+        current.pop("qris_content", None)
         reserved.payment_method_snapshot = current
         await reservation_db.commit()
+        order.payment_method_snapshot = current
     else:
+        current = dict(order.payment_method_snapshot or {})
+        current.update(reservation_snap)
+        current.pop("invoice_url", None)
+        current.pop("qris_image_url", None)
+        current.pop("qris_content", None)
+        order.payment_method_snapshot = current
         flush = getattr(db, "flush", None)
         if flush is not None:
             await flush()
 
-    response = await dipay_client.create_qris(
-        config=config,
-        partner_reference_no=partner_ref,
-        amount_idr=order.total_idr,
-        validity_period=validity_period,
-    )
+    try:
+        response = await dipay_client.create_qris(
+            config=config,
+            partner_reference_no=partner_ref,
+            amount_idr=order.total_idr,
+            validity_period=validity_period,
+        )
+        qr_content = _validate_qris_response(response)
+    except Exception as exc:
+        failed_snap = dict(order.payment_method_snapshot or {})
+        failed_snap["invoice_status"] = _INVOICE_STATUS_FAILED
+        failed_snap["failed_at"] = datetime.now(UTC).isoformat()
+        if isinstance(exc, DipayError):
+            failed_snap["failure_code"] = exc.status_code
+        if reservation_db is not None:
+            try:
+                res_rec = (
+                    await reservation_db.execute(
+                        select(Order).where(Order.id == str(order.id)).with_for_update()
+                    )
+                ).scalar_one_or_none()
+                if res_rec is not None:
+                    curr = dict(res_rec.payment_method_snapshot or {})
+                    curr.update(failed_snap)
+                    res_rec.payment_method_snapshot = curr
+                    await reservation_db.commit()
+            except Exception as rec_err:
+                _LOG.warning(
+                    "Failed to record invoice failure snapshot for order %s: %s",
+                    order.id,
+                    rec_err,
+                )
+        else:
+            order.payment_method_snapshot = failed_snap
+            flush = getattr(db, "flush", None)
+            if flush is not None:
+                await flush()
+        order.payment_method_snapshot = failed_snap
+        raise
 
-    qr_content = _validate_qris_response(response)
-    if qr_content:
-        snap["qris_content"] = qr_content
-    snap["qris_image_url"] = png_url
-    snap["expires_at"] = validity_period
-    order.payment_method_snapshot = snap
+    success_snap = dict(order.payment_method_snapshot or {})
+    success_snap.update({
+        "invoice_status": _INVOICE_STATUS_READY,
+        "invoice_url": png_url,
+        "qris_image_url": png_url,
+        "qris_content": qr_content,
+        "expires_at": validity_period,
+    })
+    success_snap.pop("failed_at", None)
+    success_snap.pop("failure_code", None)
 
+    if reservation_db is not None:
+        res_success = (
+            await reservation_db.execute(
+                select(Order).where(Order.id == str(order.id)).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if res_success is not None:
+            curr = dict(res_success.payment_method_snapshot or {})
+            curr.update(success_snap)
+            res_success.payment_method_snapshot = curr
+            await reservation_db.commit()
+    else:
+        order.payment_method_snapshot = success_snap
+        flush = getattr(db, "flush", None)
+        if flush is not None:
+            await flush()
+
+    order.payment_method_snapshot = success_snap
     return {
         "id": partner_ref,
         "invoice_url": png_url,

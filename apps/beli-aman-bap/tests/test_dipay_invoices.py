@@ -138,8 +138,8 @@ class TestCreateInvoiceForCart:
         assert len(cart.invoice_id) <= 32
 
     @pytest.mark.asyncio
-    async def test_real_path_qris_content_missing_is_none(self, monkeypatch):
-        """Defensive: a response without qrContent must not explode."""
+    async def test_real_path_qris_content_missing_is_rejected(self, monkeypatch):
+        """A response without qrContent is malformed upstream and must be rejected."""
         cart = _StubCart(total_idr=100_000)
         db = _make_session(StubBrand())
 
@@ -149,11 +149,8 @@ class TestCreateInvoiceForCart:
         monkeypatch.setattr(
             dipay_invoices.dipay_client, "create_qris", fake_create_qris,
         )
-        response = await dipay_invoices.create_invoice_for_cart(db, cart)
-        assert cart.qris_content is None
-        assert response["qris_content"] is None
-        assert response["expires_at"] is not None
-        assert len(response["expires_at"]) == 25
+        with pytest.raises(dipay_invoices.DipayError, match="missing qrContent"):
+            await dipay_invoices.create_invoice_for_cart(db, cart)
 
     @pytest.mark.asyncio
     async def test_mock_mode_when_brand_missing(self, monkeypatch):
@@ -414,6 +411,156 @@ class TestCreateInvoiceForOrder:
         ref = captured["partner_reference_no"]
         assert len(ref) <= 32
         assert ref == order.payment_method_snapshot["partner_ref"]
+
+    @pytest.mark.asyncio
+    async def test_preflight_reservation_has_creating_status_and_no_phantom_urls(self, monkeypatch):
+        brand = StubBrand()
+        db = _make_session(brand)
+        order = StubOrder()
+
+        seen: list = []
+
+        async def fake_create_qris(**_kwargs):
+            seen.append(dict(order.payment_method_snapshot or {}))
+            return _qris_response(qr_content="EMVCO-VALID-1")
+
+        monkeypatch.setattr(
+            dipay_invoices.dipay_client, "create_qris", fake_create_qris,
+        )
+        await dipay_invoices.create_invoice_for_order(db, order)
+        assert seen[0]["invoice_status"] == "creating"
+        assert seen[0]["partner_ref"] == "q-ordertestid"
+        assert "invoice_url" not in seen[0]
+        assert "qris_image_url" not in seen[0]
+        assert "qris_content" not in seen[0]
+
+    @pytest.mark.asyncio
+    async def test_success_promotes_snapshot_to_ready_with_qris_content(self, monkeypatch):
+        brand = StubBrand()
+        db = _make_session(brand)
+        order = StubOrder()
+
+        monkeypatch.setattr(
+            dipay_invoices.dipay_client, "create_qris",
+            lambda **_kwargs: _async_returning(_qris_response(qr_content="EMVCO-READY-1")),
+        )
+        res = await dipay_invoices.create_invoice_for_order(db, order)
+        snap = order.payment_method_snapshot
+        assert snap["invoice_status"] == "ready"
+        assert snap["qris_content"] == "EMVCO-READY-1"
+        assert snap["invoice_url"].endswith("/q-ordertestid.png")
+        assert snap["qris_image_url"].endswith("/q-ordertestid.png")
+        assert res["qris_content"] == "EMVCO-READY-1"
+        assert res["invoice_url"] == snap["invoice_url"]
+
+    @pytest.mark.asyncio
+    async def test_upstream_failure_marks_snapshot_failed_without_phantom_urls(self, monkeypatch):
+        brand = StubBrand()
+        db = _make_session(brand)
+        order = StubOrder()
+
+        async def fake_create_qris(**_kwargs):
+            raise dipay_invoices.DipayError(
+                401, {"responseCode": "4017300", "responseMessage": "Unauthorized. Unknown Client"},
+            )
+
+        monkeypatch.setattr(
+            dipay_invoices.dipay_client, "create_qris", fake_create_qris,
+        )
+        with pytest.raises(dipay_invoices.DipayError):
+            await dipay_invoices.create_invoice_for_order(db, order)
+
+        snap = order.payment_method_snapshot
+        assert snap["invoice_status"] == "failed"
+        assert snap["failure_code"] == 401
+        assert snap["partner_ref"] == "q-ordertestid"
+        assert "invoice_url" not in snap
+        assert "qris_image_url" not in snap
+        assert "qris_content" not in snap
+
+    @pytest.mark.asyncio
+    async def test_retry_after_failure_reuses_deterministic_partner_ref(self, monkeypatch):
+        brand = StubBrand()
+        db = _make_session(brand)
+        order = StubOrder()
+
+        # Step 1: failure
+        async def fake_fail(**_kwargs):
+            raise dipay_invoices.DipayError(401, {"responseCode": "4017300"})
+
+        monkeypatch.setattr(dipay_invoices.dipay_client, "create_qris", fake_fail)
+        with pytest.raises(dipay_invoices.DipayError):
+            await dipay_invoices.create_invoice_for_order(db, order)
+        assert order.payment_method_snapshot["invoice_status"] == "failed"
+
+        # Step 2: retry on same order succeeds
+        db2 = _make_session(brand)
+        monkeypatch.setattr(
+            dipay_invoices.dipay_client, "create_qris",
+            lambda **_kwargs: _async_returning(_qris_response(qr_content="EMVCO-RETRY-OK")),
+        )
+        res = await dipay_invoices.create_invoice_for_order(db2, order)
+        snap = order.payment_method_snapshot
+        assert snap["invoice_status"] == "ready"
+        assert snap["partner_ref"] == "q-ordertestid"
+        assert snap["qris_content"] == "EMVCO-RETRY-OK"
+        assert res["id"] == "q-ordertestid"
+
+    @pytest.mark.asyncio
+    async def test_ready_snapshot_returns_idempotently_without_calling_create_qris(self, monkeypatch):
+        brand = StubBrand()
+        db = _make_session(brand)
+        order = StubOrder()
+        order.payment_method_snapshot = {
+            "type": "dipay_qris",
+            "payment_provider": "dipay",
+            "invoice_status": "ready",
+            "invoice_id": "q-ordertestid",
+            "partner_ref": "q-ordertestid",
+            "invoice_url": "https://api.beli-aman.metatech.id/api/v1/qris/q-ordertestid.png",
+            "qris_image_url": "https://api.beli-aman.metatech.id/api/v1/qris/q-ordertestid.png",
+            "qris_content": "00020101021226...READY",
+            "expires_at": "2026-09-24T12:00:00+07:00",
+        }
+
+        async def explode(**_kwargs):
+            raise AssertionError("create_qris should not be called when snapshot is already ready")
+
+        monkeypatch.setattr(dipay_invoices.dipay_client, "create_qris", explode)
+        res = await dipay_invoices.create_invoice_for_order(db, order)
+        assert res["id"] == "q-ordertestid"
+        assert res["qris_content"] == "00020101021226...READY"
+        assert res["invoice_url"] == "https://api.beli-aman.metatech.id/api/v1/qris/q-ordertestid.png"
+
+    @pytest.mark.asyncio
+    async def test_reservation_db_returns_ready_if_minted_concurrently(self, monkeypatch):
+        brand = StubBrand()
+        db = _make_session(brand)
+        order = StubOrder()
+
+        reserved_order = StubOrder()
+        reserved_order.payment_method_snapshot = {
+            "type": "dipay_qris",
+            "payment_provider": "dipay",
+            "invoice_status": "ready",
+            "invoice_id": "q-ordertestid",
+            "partner_ref": "q-ordertestid",
+            "invoice_url": "https://api.beli-aman.metatech.id/api/v1/qris/q-ordertestid.png",
+            "qris_image_url": "https://api.beli-aman.metatech.id/api/v1/qris/q-ordertestid.png",
+            "qris_content": "CONCURRENT-READY",
+            "expires_at": "2026-09-24T12:00:00+07:00",
+        }
+        reservation_db = FakeSession([reserved_order])
+
+        async def explode(**_kwargs):
+            raise AssertionError("create_qris must not be called when reservation_db finds ready invoice")
+
+        monkeypatch.setattr(dipay_invoices.dipay_client, "create_qris", explode)
+        res = await dipay_invoices.create_invoice_for_order(
+            db, order, reservation_db=reservation_db,
+        )
+        assert res["qris_content"] == "CONCURRENT-READY"
+        assert order.payment_method_snapshot["qris_content"] == "CONCURRENT-READY"
 
 
 class TestMockModeMatrix:
