@@ -1,0 +1,58 @@
+{
+  "brand_slug": "consumerland",
+  "brand_name": "Consumerland",
+  "products": [
+    {
+      "sku": "CL-CONF-PRESALE",
+      "slug": "consumerland-conference-presale",
+      "name": "Consumerland Conference — Presale Ticket",
+      "tagline": "2 days · 38 sessions · 80+ speakers · Jakarta",
+      "description": "Consumerland Conference, 28 Nov & 5 Dec 2026, Jakarta. Deep sessions on how people think, choose, and behave — across 9 disciplines, 4 parallel tracks. Includes session recordings for paid participants. Digital ticket; delivered by the Consumerland team after payment is confirmed.",
+      "price_idr": 1500000,
+      "compare_at_price_idr": null,
+      "image": "/brands/consumerland/products/conf-presale.svg",
+      "gallery": ["/brands/consumerland/products/conf-presale.svg"],
+      "options": {},
+      "badges": ["Presale", "28 Nov & 5 Dec 2026", "Digital ticket"]
+    },
+    {
+      "sku": "CL-CONF-REGULAR",
+      "slug": "consumerland-conference-regular",
+      "name": "Consumerland Conference — Regular Ticket",
+      "tagline": "2 days · 38 sessions · 80+ speakers · Jakarta",
+      "description": "Consumerland Conference, 28 Nov & 5 Dec 2026, Jakarta. Deep sessions on how people think, choose, and behave — across 9 disciplines, 4 parallel tracks. Includes session recordings for paid participants. Digital ticket; delivered by the Consumerland team after payment is confirmed.",
+      "price_idr": 2000000,
+      "compare_at_price_idr": null,
+      "image": "/brands/consumerland/products/conf-regular.svg",
+      "gallery": ["/brands/consumerland/products/conf-regular.svg"],
+      "options": {},
+      "badges": ["28 Nov & 5 Dec 2026", "Digital ticket"]
+    },
+    {
+      "sku": "CL-CONF-GROUP3",
+      "slug": "consumerland-conference-group3",
+      "name": "Consumerland Conference — Group Bundle (3 Tickets)",
+      "tagline": "Presale rate for groups of 3+, while tickets last",
+      "description": "Three Conference tickets at the presale rate. Per Consumerland's group pricing policy, groups of 3 or more get the presale rate even after the presale period ends, while tickets last. Covers both days (28 Nov & 5 Dec 2026), Jakarta. Digital tickets; delivered by the Consumerland team after payment is confirmed.",
+      "price_idr": 4200000,
+      "compare_at_price_idr": null,
+      "image": "/brands/consumerland/products/conf-group3.svg",
+      "gallery": ["/brands/consumerland/products/conf-group3.svg"],
+      "options": {},
+      "badges": ["Group · 3+ pax", "Best value", "Digital ticket"]
+    },
+    {
+      "sku": "CL-AWARDS-ENTRY",
+      "slug": "consumerland-awards-entry",
+      "name": "Consumerland Awards — Entry Fee (Per Category)",
+      "tagline": "Rp500K per submission / category · deadline 30 Oct 2026",
+      "description": "Entry fee for the Consumerland Awards: Rp500K per submission, per category (max 2 categories per submission). For unlimited submissions per entity (Rp1.500K), contact the Consumerland team. Submit your documents at consumerland.id/awards after paying here — payment alone does not complete your entry. Deadline: 30 Oct 2026.",
+      "price_idr": 500000,
+      "compare_at_price_idr": null,
+      "image": "/brands/consumerland/products/awards-entry.svg",
+      "gallery": ["/brands/consumerland/products/awards-entry.svg"],
+      "options": {},
+      "badges": ["Awards", "Deadline 30 Oct 2026", "Per category"]
+    }
+  ]
+}
