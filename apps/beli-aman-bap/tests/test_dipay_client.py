@@ -137,7 +137,7 @@ def _recompute_request_signature(req: httpx.Request, client_secret: str) -> str:
     token = req.headers["Authorization"].removeprefix("Bearer ")
     body_str = req.content.decode("utf-8") if req.content else "{}"
     string_to_sign = (
-        f"{req.method}:{str(req.url)}:{token}:"
+        f"{req.method}:{req.url.path}:{token}:"
         f"{hashlib.sha256(body_str.encode('utf-8')).hexdigest()}:"
         f"{req.headers['X-TIMESTAMP']}"
     )
@@ -309,7 +309,7 @@ class TestSignedRequestHeaders:
     @pytest.mark.asyncio
     async def test_hmac_sha512_string_to_sign_recomputation(self, monkeypatch):
         """X-SIGNATURE must equal HMAC-SHA512(clientSecret,
-        '{METHOD}:{full_url}:{accessToken}:{sha256(minified body)}:{X-TIMESTAMP}')."""
+        '{METHOD}:{url_path}:{accessToken}:{sha256(minified body)}:{X-TIMESTAMP}')."""
         _patch_settings(monkeypatch, dipay_private_key_b64="x")
         captured, transport = _make_transport({})
         _install_transport(monkeypatch, transport)
@@ -521,8 +521,10 @@ class TestDisbursementPayload:
         )
 
         body = _body_of(_requests_to(captured, "/emoney/transfer-bank")[0])
+        # customerReference is deliberately NOT sent — Dipay demo rejects any
+        # transfer-bank body containing it with a bogus 4014300 Invalid
+        # Signature (bisection-confirmed 2026-10-01).
         assert body["additionalInfo"] == {
-            "customerReference": "BeliAman release order 1",
             "partnerMerchantId": "safiya",
             "beneficiaryEmail": "seller@example.com",
         }

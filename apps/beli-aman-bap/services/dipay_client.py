@@ -266,9 +266,12 @@ def _x_timestamp() -> str:
 
 
 def _string_to_sign(
-    *, method: str, full_url: str, access_token: str, body_str: str, x_timestamp: str
+    *, method: str, url_path: str, access_token: str, body_str: str, x_timestamp: str
 ) -> str:
-    return f"{method}:{full_url}:{access_token}:{_sha256_hex(body_str)}:{x_timestamp}"
+    # Dipay signs the URL PATH (e.g. "/snap/v2.1/qr/qr-mpm-generate"), not the
+    # full URL — confirmed empirically 2026-09-30 (full URL => 4014700 Invalid
+    # Signature; path => 2004700 Successful).
+    return f"{method}:{url_path}:{access_token}:{_sha256_hex(body_str)}:{x_timestamp}"
 
 
 def _hmac_sha512(string_to_sign: str, client_secret: str) -> str:
@@ -380,12 +383,12 @@ async def _signed_request(
     json: dict | None = None,
 ) -> dict:
     """One signed SNAP call. Raises DipayError on HTTP >= 400."""
-    url = f"{config.base_url}{path}"
+    url = httpx.URL(f"{config.base_url}{path}")
     body_str = _minify(json)
     x_timestamp = _x_timestamp()
     string_to_sign = _string_to_sign(
         method=method,
-        full_url=url,
+        url_path=url.path,
         access_token=access_token,
         body_str=body_str,
         x_timestamp=x_timestamp,
@@ -543,8 +546,11 @@ async def create_disbursement(
     an error ``responseCode`` for many failures.
     """
     additional_info: dict[str, Any] = {}
-    if customer_reference:
-        additional_info["customerReference"] = customer_reference
+    # customerReference intentionally NOT sent: Dipay demo rejects any
+    # transfer-bank body containing additionalInfo.customerReference with a
+    # bogus "4014300 Unauthorized. Invalid Signature." (bisection-confirmed
+    # 2026-10-01 — partnerMerchantId alone signs fine). Revisit if they fix
+    # their demo signature validation.
     if partner_merchant_id:
         additional_info["partnerMerchantId"] = partner_merchant_id
     if beneficiary_email:
