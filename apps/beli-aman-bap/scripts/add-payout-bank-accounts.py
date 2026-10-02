@@ -88,7 +88,16 @@ def _brand_rows(brand: dict) -> tuple[list[tuple], list[str]]:
     is_active, origin_provider) tuples + warnings for one brand."""
     warnings: list[str] = []
     candidates: list[tuple] = []
-    for provider in ("xendit", "sento", "dipay"):
+    seen: set[tuple[str, str, str]] = set()
+    active_provider = (brand.get("payment_provider") or "").strip().lower()
+    # Active provider first, so when the SAME account is stored under two
+    # gateways the surviving deduped row carries the right origin (and the
+    # active flag) — not whichever gateway happened to iterate first.
+    provider_order = sorted(
+        ("xendit", "sento", "dipay"),
+        key=lambda p: p != active_provider,
+    )
+    for provider in provider_order:
         code = brand.get(f"{provider}_disbursement_bank_code")
         account = (brand.get(f"{provider}_disbursement_bank_account") or "").strip()
         holder = (
@@ -102,11 +111,18 @@ def _brand_rows(brand: dict) -> tuple[list[tuple], list[str]]:
                 f"brand {brand['slug']}: {provider} bank code {code!r} has no "
                 f"canonical mapping — stored verbatim"
             )
+        # Per-PG triplets often hold the SAME account under two gateways.
+        # The INSERTs dedupe on (brand, code, account), so drop later
+        # duplicates here — otherwise the surviving row could carry the
+        # WRONG provider origin (and miss the active flag).
+        key = (brand["id"], canon, account)
+        if key in seen:
+            continue
+        seen.add(key)
         candidates.append(
             (str(uuid.uuid4()), brand["id"], canon, account, holder, provider)
         )
 
-    active_provider = (brand.get("payment_provider") or "").strip().lower()
     rows: list[tuple] = []
     for i, (aid, brand_id, code, account, holder, provider) in enumerate(candidates):
         is_active = provider == active_provider or (
