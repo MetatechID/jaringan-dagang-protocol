@@ -7,11 +7,14 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config import settings
 from database import get_db
 from deps import get_current_profile
 from models.brand import Brand
+from models.payout_bank_account import PayoutBankAccount
 from models.profile import BeliAmanProfile
 from models.store_membership import StoreMembership
+from services import bank_codes
 from services import catalog as catalog_service
 
 router = APIRouter(prefix="/api/v1/brands", tags=["brands"])
@@ -71,23 +74,37 @@ async def get_product(slug: str, product_slug: str) -> dict:
 ALLOWED_PAYMENT_PROVIDERS = {"xendit", "sento", "dipay", "oy"}
 
 
+class BankAccountIn(BaseModel):
+    """One entry in ``PayoutsIn.bank_accounts``.
+
+    - With ``id``: edit that row. ``account_number`` None/omitted keeps the
+      stored number (it's write-only — GET returns only the masked form);
+      explicit empty string clears... nothing: the field is NOT NULL, so an
+      empty string is normalized to None = keep. Use delete to remove.
+    - Without ``id``: create a new row (``account_number`` required).
+    - ``bank_code`` is the CANONICAL BI numeric code ("014" = BCA) —
+      translated per payment gateway at disbursement time
+      (services/bank_codes.py).
+    """
+
+    id: str | None = None
+    bank_code: str | None = None
+    account_number: str | None = None
+    holder_name: str | None = None
+
+
 class PayoutsOut(BaseModel):
     slug: str
+    bank_accounts: list[dict]
+    # Shared bank picker for the UI: canonical codes + which gateways
+    # accept each (services/bank_codes.py).
+    bank_keys: list[dict]
     xendit_sub_account_id: str | None = None
-    xendit_disbursement_bank_code: str | None = None
-    xendit_disbursement_bank_account_masked: str | None = None
-    xendit_disbursement_holder_name: str | None = None
-    sento_disbursement_bank_code: str | None = None
-    sento_disbursement_bank_account_masked: str | None = None
-    sento_disbursement_holder_name: str | None = None
     dipay_client_key_masked: str | None = None
     dipay_client_key_configured: bool
     dipay_client_secret_configured: bool
     dipay_private_key_configured: bool
     dipay_merchant_id: str | None = None
-    dipay_disbursement_bank_code: str | None = None
-    dipay_disbursement_bank_account_masked: str | None = None
-    dipay_disbursement_holder_name: str | None = None
     biteship_origin_address: dict | None = None
     biteship_default_courier: str | None = None
     payment_provider: str
@@ -96,23 +113,20 @@ class PayoutsOut(BaseModel):
 
 
 class PayoutsIn(BaseModel):
+    # Bank accounts: create (no id) / edit (with id). The active row is
+    # chosen via ``active_bank_account_id``; rows to remove go in
+    # ``delete_bank_account_ids``.
+    bank_accounts: list[BankAccountIn] | None = None
+    delete_bank_account_ids: list[str] | None = None
+    active_bank_account_id: str | None = None
     xendit_sub_account_id: str | None = None
-    xendit_disbursement_bank_code: str | None = None
-    xendit_disbursement_bank_account: str | None = None
-    xendit_disbursement_holder_name: str | None = None
-    sento_disbursement_bank_code: str | None = None
-    sento_disbursement_bank_account: str | None = None
-    sento_disbursement_holder_name: str | None = None
     # Dipay (SNAP v2.1) — client key/secret + RSA private key (base64 PEM)
-    # for request signing, merchant id for QRIS, and the bank account the
-    # brand pays out to on escrow release (see services/dipay_*.py).
+    # for request signing, merchant id for QRIS. Credentials stay on Brand;
+    # only the bank account moved to payout_bank_accounts.
     dipay_client_key: str | None = None
     dipay_client_secret: str | None = None
     dipay_private_key_b64: str | None = None
     dipay_merchant_id: str | None = None
-    dipay_disbursement_bank_code: str | None = None
-    dipay_disbursement_bank_account: str | None = None
-    dipay_disbursement_holder_name: str | None = None
     biteship_origin_address: dict | None = None
     biteship_default_courier: str | None = None
     payment_provider: str | None = None
@@ -120,39 +134,52 @@ class PayoutsIn(BaseModel):
     jubelio_origin_address: dict | None = None
 
 
-def _payouts_view(brand: Brand) -> dict:
+def _masked(account_number: str | None) -> str | None:
+    """Mask an account number — only the last 4 digits go to the client."""
+    if not account_number:
+        return None
+    return f"•••• {account_number[-4:]}" if len(account_number) > 4 else account_number
+
+
+def _bank_accounts_view(brand: Brand, accounts: list[PayoutBankAccount]) -> list[dict]:
+    label_by_code = {b["code"]: b["label"] for b in bank_codes.BANKS}
+    return [
+        {
+            "id": a.id,
+            "bank_code": a.bank_code,
+            "bank_label": label_by_code.get(a.bank_code, a.bank_code),
+            "account_number_masked": _masked(a.account_number),
+            "holder_name": a.holder_name,
+            "is_active": a.is_active,
+            # Which gateways can pay out to this bank (for UI badges).
+            "supported_providers": bank_codes.supported_providers(a.bank_code),
+        }
+        for a in accounts
+    ]
+
+
+async def _brand_accounts(db: AsyncSession, brand_id: str) -> list[PayoutBankAccount]:
+    q = await db.execute(
+        select(PayoutBankAccount)
+        .where(PayoutBankAccount.brand_id == brand_id)
+        .order_by(PayoutBankAccount.created_at)
+    )
+    return list(q.scalars().all())
+
+
+def _payouts_view(brand: Brand, accounts: list[PayoutBankAccount]) -> dict:
     return {
         "slug": brand.slug,
+        "bank_accounts": _bank_accounts_view(brand, accounts),
+        "bank_keys": [
+            {
+                "code": b["code"],
+                "label": b["label"],
+                "supported": bank_codes.supported_providers(b["code"]),
+            }
+            for b in bank_codes.BANKS
+        ],
         "xendit_sub_account_id": brand.xendit_sub_account_id,
-        "xendit_disbursement_bank_code": brand.xendit_disbursement_bank_code,
-        # Mask the account number — only last 4 digits go back to the client.
-        "xendit_disbursement_bank_account_masked": (
-            "•••• " + brand.xendit_disbursement_bank_account[-4:]
-            if brand.xendit_disbursement_bank_account
-            and len(brand.xendit_disbursement_bank_account) > 4
-            else brand.xendit_disbursement_bank_account
-        ),
-        "xendit_disbursement_holder_name": brand.xendit_disbursement_holder_name,
-        # Sento disbursement ("remit") target — used when payment_provider ==
-        # "sento". Bank code is Sento's NUMERIC code (e.g. "014" BCA).
-        "sento_disbursement_bank_code": brand.sento_disbursement_bank_code,
-        "sento_disbursement_bank_account_masked": (
-            "•••• " + brand.sento_disbursement_bank_account[-4:]
-            if brand.sento_disbursement_bank_account
-            and len(brand.sento_disbursement_bank_account) > 4
-            else brand.sento_disbursement_bank_account
-        ),
-        "sento_disbursement_holder_name": brand.sento_disbursement_holder_name,
-        # Dipay (SNAP) disbursement target — used when payment_provider ==
-        # "dipay". Like Sento above: masked account, plain code/holder.
-        "dipay_disbursement_bank_code": brand.dipay_disbursement_bank_code,
-        "dipay_disbursement_bank_account_masked": (
-            "•••• " + brand.dipay_disbursement_bank_account[-4:]
-            if brand.dipay_disbursement_bank_account
-            and len(brand.dipay_disbursement_bank_account) > 4
-            else brand.dipay_disbursement_bank_account
-        ),
-        "dipay_disbursement_holder_name": brand.dipay_disbursement_holder_name,
         # Dipay identifiers — never echo the secret or the RSA private key.
         # ``dipay_client_key`` is the public X-CLIENT-KEY; only the last 4
         # chars come back so admins can tell which key is configured.
@@ -233,7 +260,7 @@ async def get_payouts(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     brand = await _resolve_brand_for_edit(slug, profile, db)
-    return _payouts_view(brand)
+    return _payouts_view(brand, await _brand_accounts(db, brand.id))
 
 
 @router.put("/{slug}/payouts", response_model=PayoutsOut)
@@ -251,20 +278,82 @@ async def put_payouts(
         v = v.strip()
         return v or None
 
+    # --- payout bank accounts: delete → create/update → set active ---
+    existing = {a.id: a for a in await _brand_accounts(db, brand.id)}
+
+    if body.delete_bank_account_ids:
+        for account_id in body.delete_bank_account_ids:
+            account = existing.get(account_id)
+            if account is None:
+                raise HTTPException(404, f"Bank account '{account_id}' not found")
+            await db.delete(account)
+            del existing[account_id]
+        # Flush so the partial unique index sees deleted rows gone before
+        # anything else activates in the same transaction.
+        await db.flush()
+
+    if body.bank_accounts:
+        for entry in body.bank_accounts:
+            bank_code = _normalize(entry.bank_code)
+            if bank_code is not None and bank_code not in {
+                b["code"] for b in bank_codes.BANKS
+            }:
+                raise HTTPException(422, f"Unknown bank_code '{bank_code}'")
+            if entry.id is not None:
+                account = existing.get(entry.id)
+                if account is None:
+                    raise HTTPException(404, f"Bank account '{entry.id}' not found")
+                if bank_code is not None:
+                    account.bank_code = bank_code
+                if entry.holder_name is not None:
+                    account.holder_name = _normalize(entry.holder_name) or account.holder_name
+                # account_number: write-only. None/omitted keeps the stored
+                # number; a non-empty string replaces it.
+                new_number = _normalize(entry.account_number)
+                if new_number:
+                    account.account_number = new_number
+            else:
+                account_number = _normalize(entry.account_number)
+                if not account_number:
+                    raise HTTPException(
+                        422, "account_number is required when adding a bank account"
+                    )
+                if bank_code is None:
+                    raise HTTPException(
+                        422, "bank_code is required when adding a bank account"
+                    )
+                account = PayoutBankAccount(
+                    brand_id=brand.id,
+                    bank_code=bank_code,
+                    account_number=account_number,
+                    holder_name=(
+                        _normalize(entry.holder_name) or brand.name or brand.slug
+                    ),
+                    is_active=False,
+                )
+                db.add(account)
+                await db.flush()
+                existing[account.id] = account
+
+    if body.active_bank_account_id is not None:
+        if body.active_bank_account_id != "":
+            account = existing.get(body.active_bank_account_id)
+            if account is None:
+                raise HTTPException(
+                    404, f"Bank account '{body.active_bank_account_id}' not found"
+                )
+            # Deactivate others FIRST, then flush, then activate — the
+            # partial unique index (brand_id) WHERE is_active rejects two
+            # active rows in one flush otherwise.
+            for other in existing.values():
+                if other.id != account.id:
+                    other.is_active = False
+            await db.flush()
+            account.is_active = True
+            await db.flush()
+
     if body.xendit_sub_account_id is not None:
         brand.xendit_sub_account_id = _normalize(body.xendit_sub_account_id)
-    if body.xendit_disbursement_bank_code is not None:
-        brand.xendit_disbursement_bank_code = _normalize(body.xendit_disbursement_bank_code)
-    if body.xendit_disbursement_bank_account is not None:
-        brand.xendit_disbursement_bank_account = _normalize(body.xendit_disbursement_bank_account)
-    if body.xendit_disbursement_holder_name is not None:
-        brand.xendit_disbursement_holder_name = _normalize(body.xendit_disbursement_holder_name)
-    if body.sento_disbursement_bank_code is not None:
-        brand.sento_disbursement_bank_code = _normalize(body.sento_disbursement_bank_code)
-    if body.sento_disbursement_bank_account is not None:
-        brand.sento_disbursement_bank_account = _normalize(body.sento_disbursement_bank_account)
-    if body.sento_disbursement_holder_name is not None:
-        brand.sento_disbursement_holder_name = _normalize(body.sento_disbursement_holder_name)
     # Dipay rotation contract: omitted and JSON null preserve; explicit empty
     # strings clear. model_fields_set distinguishes omission from null.
     dipay_fields = (
@@ -272,9 +361,6 @@ async def put_payouts(
         "dipay_client_secret",
         "dipay_private_key_b64",
         "dipay_merchant_id",
-        "dipay_disbursement_bank_code",
-        "dipay_disbursement_bank_account",
-        "dipay_disbursement_holder_name",
     )
     for field in dipay_fields:
         if field in body.model_fields_set:
@@ -297,13 +383,11 @@ async def put_payouts(
                 raise HTTPException(
                     422, "Complete Dipay credentials are required"
                 ) from exc
-            if not (
-                brand.dipay_disbursement_bank_code
-                and brand.dipay_disbursement_bank_account
-                and brand.dipay_disbursement_holder_name
-            ):
+            # The gateway pays out to the ACTIVE unified bank account.
+            accounts = await _brand_accounts(db, brand.id)
+            if not any(a.is_active for a in accounts):
                 raise HTTPException(
-                    422, "Complete Dipay payout bank configuration is required"
+                    422, "An active payout bank account is required"
                 )
         brand.payment_provider = normalized_pp
     if body.courier_provider is not None:
@@ -317,4 +401,4 @@ async def put_payouts(
         )
 
     await db.flush()
-    return _payouts_view(brand)
+    return _payouts_view(brand, await _brand_accounts(db, brand.id))

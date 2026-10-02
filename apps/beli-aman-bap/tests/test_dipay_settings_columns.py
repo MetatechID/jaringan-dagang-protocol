@@ -49,7 +49,8 @@ def test_settings_carries_dipay_block():
 
 
 def test_brand_model_has_dipay_columns():
-    """``Brand`` model exposes dipay_* mapped columns (creds + payout target)."""
+    """``Brand`` model exposes dipay_* mapped columns (creds only — the
+    payout bank account moved to the unified ``payout_bank_accounts``)."""
     from models.brand import Brand  # noqa: WPS433
 
     columns = {c.name for c in Brand.__table__.columns}
@@ -57,9 +58,28 @@ def test_brand_model_has_dipay_columns():
     assert "dipay_client_secret" in columns
     assert "dipay_private_key_b64" in columns
     assert "dipay_merchant_id" in columns
-    assert "dipay_disbursement_bank_code" in columns
-    assert "dipay_disbursement_bank_account" in columns
-    assert "dipay_disbursement_holder_name" in columns
+    for legacy in (
+        "dipay_disbursement_bank_code",
+        "dipay_disbursement_bank_account",
+        "dipay_disbursement_holder_name",
+        "xendit_disbursement_bank_code",
+        "sento_disbursement_bank_code",
+    ):
+        assert legacy not in columns, f"{legacy} should live on payout_bank_accounts"
+
+
+def test_payout_bank_account_model_columns():
+    """``PayoutBankAccount`` exposes the unified payout target columns and
+    the partial unique index enforcing one active row per brand."""
+    from models.payout_bank_account import PayoutBankAccount  # noqa: WPS433
+
+    columns = {c.name for c in PayoutBankAccount.__table__.columns}
+    assert {
+        "id", "brand_id", "bank_code", "account_number", "holder_name",
+        "is_active",
+    } <= columns
+    indexes = {i.name for i in PayoutBankAccount.__table__.indexes}
+    assert "uq_payout_bank_accounts_active" in indexes
 
 
 def test_escrow_ledger_has_partner_ref_column():

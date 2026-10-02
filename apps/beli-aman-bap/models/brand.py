@@ -36,14 +36,9 @@ class Brand(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Funds custody stays with Xendit — we emit this as ``for-user-id``
     # header so each invoice settles into the brand's Xendit balance, never
     # ours. Null = brand not yet onboarded; checkout will refuse.
+    # (The Xendit PAYOUT TARGET moved to the unified ``payout_bank_accounts``
+    # table — see models/payout_bank_account.py.)
     xendit_sub_account_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    # Bank account funds are disbursed to on release. Code = Xendit bank
-    # code (e.g. "BCA", "MANDIRI"). Account number is the seller's bank
-    # account number (digits only). Holder name is required by Xendit's
-    # disbursement payload.
-    xendit_disbursement_bank_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    xendit_disbursement_bank_account: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    xendit_disbursement_holder_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # OY Indonesia credentials. Per-Brand so each tenant can have its own
     # OY sub-account / API key; ``oy_default_username`` in settings acts as
@@ -64,18 +59,8 @@ class Brand(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     sento_username: Mapped[str | None] = mapped_column(String(128), nullable=True)
     sento_callback_secret: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
-    # Sento disbursement ("remit") target — the brand/seller's bank account the
-    # BAP pays out to on escrow release when payment_provider == "sento". Unlike
-    # Xendit there's no per-brand sub-account; buyer funds sit in the partner's
-    # single Sento balance and we disburse from it to the bank below.
-    # ``sento_disbursement_bank_code`` is Sento's NUMERIC bank code (e.g. "014"
-    # = BCA, "008" = Mandiri) — different from Xendit's string codes ("BCA").
-    # ``sento_disbursement_bank_account`` is digits only. ``holder_name`` is
-    # record/UI parity only — Sento's create-disbursement does NOT accept a
-    # recipient name (it's returned in the callback, not sent at create).
-    sento_disbursement_bank_code: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    sento_disbursement_bank_account: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    sento_disbursement_holder_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # (The Sento disbursement target moved to the unified
+    # ``payout_bank_accounts`` table — see models/payout_bank_account.py.)
 
     # Dipay (SNAP v2.1) credentials. Per-Brand — same pattern as the OY and
     # Sento blocks above. ``dipay_client_key`` is triple-duty: X-CLIENT-KEY
@@ -91,18 +76,8 @@ class Brand(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     dipay_private_key_b64: Mapped[str | None] = mapped_column(Text, nullable=True)
     dipay_merchant_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
-    # Dipay disbursement target — the brand/seller's bank account the BAP
-    # pays out to on escrow release when payment_provider == "dipay". Unlike
-    # Xendit there's no per-brand sub-account; buyer funds settle into the
-    # merchant's single Dipay balance and we transfer out of it via
-    # ``/emoney/transfer-bank``. ``dipay_disbursement_bank_code`` is Dipay's
-    # bank code (see api-docs.dipay.id disbursement bank-code table);
-    # ``dipay_disbursement_bank_account`` is digits only. ``holder_name`` is
-    # record/UI parity only — the transfer API takes the account number, not
-    # a recipient name.
-    dipay_disbursement_bank_code: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    dipay_disbursement_bank_account: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    dipay_disbursement_holder_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # (The Dipay disbursement target moved to the unified
+    # ``payout_bank_accounts`` table — see models/payout_bank_account.py.)
 
     # Biteship pickup origin used as the ``origin`` payload when creating
     # shipment orders. Shape: {contact_name, contact_phone, contact_email,

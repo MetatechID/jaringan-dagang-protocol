@@ -36,7 +36,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import settings
 from models.brand import Brand
 from models.order import Order
-from services import dipay_client
+from models.payout_bank_account import PayoutBankAccount
+from services import bank_codes, dipay_client
 from services.dipay_client import DipayError
 # Shared with the Xendit/Sento paths: ``escrow.release()`` catches one
 # ``DisbursementSkipped`` that covers all providers. (Pragmatic import — a
@@ -130,13 +131,28 @@ async def disburse_to_seller(
         raise DisbursementSkipped(
             f"Brand {brand.slug!r} has incomplete Dipay credentials"
         )
-    if not (
-        brand.dipay_disbursement_bank_code
-        and brand.dipay_disbursement_bank_account
-    ):
+    # Payout target: the brand's ACTIVE payout bank account (one per brand,
+    # picked by the seller in the dashboard). The legacy per-PG columns are
+    # gone — ``scripts/add-payout-bank-accounts.py`` backfilled them into
+    # this table before this code shipped.
+    account_q = await db.execute(
+        select(PayoutBankAccount)
+        .where(PayoutBankAccount.brand_id == brand.id)
+        .where(PayoutBankAccount.is_active.is_(True))
+    )
+    account = account_q.scalar_one_or_none()
+    if account is None:
         raise DisbursementSkipped(
-            f"Brand {brand.slug!r} Dipay disbursement bank fields incomplete"
+            f"Brand {brand.slug!r} has no active payout bank account"
         )
+    provider_code = bank_codes.resolve_for_provider(account.bank_code, "dipay")
+    if provider_code is None:
+        raise DisbursementSkipped(
+            f"Bank {account.bank_code!r} is not supported by Dipay for "
+            f"brand {brand.slug!r}"
+        )
+    bank_code = provider_code
+    bank_account = account.account_number
 
     gross = int(amount_idr if amount_idr is not None else order.total_idr)
     fees = _fee_breakdown(gross)
@@ -151,8 +167,8 @@ async def disburse_to_seller(
     response = await dipay_client.create_disbursement(
         config=config,
         partner_reference_no=partner_ref,
-        beneficiary_account=brand.dipay_disbursement_bank_account,
-        beneficiary_bank_code=brand.dipay_disbursement_bank_code,
+        beneficiary_account=bank_account,
+        beneficiary_bank_code=bank_code,
         amount_idr=net,
         partner_merchant_id=brand.slug,
         # customer_reference is our human-readable correlation string; SNAP

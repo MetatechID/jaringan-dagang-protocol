@@ -28,7 +28,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import settings
 from models.brand import Brand
 from models.order import Order
-from services import sento_client
+from models.payout_bank_account import PayoutBankAccount
+from services import bank_codes, sento_client
 from services.sento_client import SentoError
 # Shared with the Xendit path: ``escrow.release()`` catches one
 # ``DisbursementSkipped`` that covers both providers. (Pragmatic import — a
@@ -87,18 +88,31 @@ async def disburse_to_seller(
         raise DisbursementSkipped(
             f"Brand {brand.slug!r} has no Sento API key (env or Brand.sento_api_key)"
         )
-    if not (
-        brand.sento_disbursement_bank_code
-        and brand.sento_disbursement_bank_account
-    ):
+    # Payout target: the brand's ACTIVE payout bank account (one per brand,
+    # picked by the seller in the dashboard). The legacy per-PG columns are
+    # gone — ``scripts/add-payout-bank-accounts.py`` backfilled them into
+    # this table before this code shipped.
+    account_q = await db.execute(
+        select(PayoutBankAccount)
+        .where(PayoutBankAccount.brand_id == brand.id)
+        .where(PayoutBankAccount.is_active.is_(True))
+    )
+    account = account_q.scalar_one_or_none()
+    if account is None:
         raise DisbursementSkipped(
-            f"Brand {brand.slug!r} Sento disbursement bank fields incomplete"
+            f"Brand {brand.slug!r} has no active payout bank account"
+        )
+    provider_code = bank_codes.resolve_for_provider(account.bank_code, "sento")
+    if provider_code is None:
+        raise DisbursementSkipped(
+            f"Bank {account.bank_code!r} is not supported by Sento for "
+            f"brand {brand.slug!r}"
         )
 
     partner_trx_id = f"order-{order.id}-release"
     response = await sento_client.create_disbursement(
-        recipient_bank=brand.sento_disbursement_bank_code,
-        recipient_account=brand.sento_disbursement_bank_account,
+        recipient_bank=provider_code,
+        recipient_account=account.account_number,
         amount_idr=order.total_idr,
         partner_trx_id=partner_trx_id,
         note=description or f"Beli Aman release — order {order.id}",

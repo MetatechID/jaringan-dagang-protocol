@@ -6,6 +6,7 @@ from .otp_code import OtpCode
 from .address import Address
 from .payment_method import PaymentMethod
 from .brand import Brand
+from .payout_bank_account import PayoutBankAccount
 from .order import Order, OrderState
 from .order_event import OrderEvent
 from .escrow_ledger import EscrowLedger, EscrowEntryType, EscrowEntryStatus
@@ -36,6 +37,7 @@ __all__ = [
     "Address",
     "PaymentMethod",
     "Brand",
+    "PayoutBankAccount",
     "Order",
     "OrderState",
     "OrderEvent",

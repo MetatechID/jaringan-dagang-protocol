@@ -114,6 +114,28 @@ def StubBrand(
     return SimpleNamespace(**base)
 
 
+def StubAccount(
+    *,
+    bank_code: str = "014",
+    account_number: str = "1234567890",
+    holder_name: str = "Safiya",
+    is_active: bool = True,
+    **overrides,
+) -> SimpleNamespace:
+    """Minimal PayoutBankAccount-shape — the ACTIVE payout target the
+    disbursement services now read (one active row per brand)."""
+    base = dict(
+        id="account-id",
+        brand_id="brand-id",
+        bank_code=bank_code,
+        account_number=account_number,
+        holder_name=holder_name,
+        is_active=is_active,
+    )
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
 def StubOrder(*, total_idr: int = 750_000, **overrides) -> SimpleNamespace:
     """Minimal Order-shape for create_invoice_for_order tests."""
     base = dict(

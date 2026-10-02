@@ -17,7 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.brand import Brand
 from models.order import Order
-from services import xendit_client
+from models.payout_bank_account import PayoutBankAccount
+from services import bank_codes, xendit_client
 
 _LOG = logging.getLogger("beli_aman_bap.xendit_disbursements")
 
@@ -54,20 +55,35 @@ async def disburse_to_seller(
         raise DisbursementSkipped(
             f"Brand {brand.slug!r} has no xendit_sub_account_id"
         )
-    if not (brand.xendit_disbursement_bank_code
-            and brand.xendit_disbursement_bank_account
-            and brand.xendit_disbursement_holder_name):
+    # Payout target: the brand's ACTIVE payout bank account (one per brand,
+    # picked by the seller in the dashboard). The legacy per-PG columns are
+    # gone — ``scripts/add-payout-bank-accounts.py`` backfilled them into
+    # this table before this code shipped. Xendit uses its own alphabetical
+    # bank codes, translated from the canonical BI numeric code.
+    account_q = await db.execute(
+        select(PayoutBankAccount)
+        .where(PayoutBankAccount.brand_id == brand.id)
+        .where(PayoutBankAccount.is_active.is_(True))
+    )
+    account = account_q.scalar_one_or_none()
+    if account is None:
         raise DisbursementSkipped(
-            f"Brand {brand.slug!r} bank fields incomplete"
+            f"Brand {brand.slug!r} has no active payout bank account"
+        )
+    provider_code = bank_codes.resolve_for_provider(account.bank_code, "xendit")
+    if provider_code is None:
+        raise DisbursementSkipped(
+            f"Bank {account.bank_code!r} is not supported by Xendit for "
+            f"brand {brand.slug!r}"
         )
 
     response = await xendit_client.create_disbursement(
         for_user_id=brand.xendit_sub_account_id,
         external_id=f"order-{order.id}-release",
         amount_idr=order.total_idr,
-        bank_code=brand.xendit_disbursement_bank_code,
-        account_holder_name=brand.xendit_disbursement_holder_name,
-        account_number=brand.xendit_disbursement_bank_account,
+        bank_code=provider_code,
+        account_holder_name=account.holder_name,
+        account_number=account.account_number,
         description=description or f"Beli Aman release — order {order.id}",
     )
     return response

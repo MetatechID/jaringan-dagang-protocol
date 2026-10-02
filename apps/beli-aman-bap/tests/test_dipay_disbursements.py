@@ -32,6 +32,7 @@ from services.dipay_client import DipayError  # noqa: E402
 from services.xendit_disbursements import DisbursementSkipped  # noqa: E402
 from tests._dipay_fakes import (  # noqa: E402
     FakeSession,
+    StubAccount,
     StubBrand,
     StubOrder,
 )
@@ -49,8 +50,11 @@ def _fake_settings(**overrides) -> SimpleNamespace:
     return SimpleNamespace(**base)
 
 
-def _make_session(brand) -> FakeSession:
-    return FakeSession([brand])
+def _make_session(brand, account=...) -> FakeSession:
+    # Result queue: brand lookup, then the ACTIVE payout bank account.
+    if account is ...:
+        account = StubAccount()
+    return FakeSession([brand, account])
 
 
 @pytest.fixture(autouse=True)
@@ -122,8 +126,8 @@ class TestGuards:
         assert "dipay_client_key" in str(ei.value) or "client key" in str(ei.value)
 
     @pytest.mark.asyncio
-    async def test_skips_when_bank_fields_incomplete(self, monkeypatch):
-        db = _make_session(StubBrand(dipay_disbursement_bank_account=""))
+    async def test_skips_when_no_active_bank_account(self, monkeypatch):
+        db = _make_session(StubBrand(), account=None)
         order = StubOrder()
 
         async def fake_create(**_kwargs):
@@ -132,7 +136,7 @@ class TestGuards:
         monkeypatch.setattr(dipay_client, "create_disbursement", fake_create)
         with pytest.raises(DisbursementSkipped) as ei:
             await dipay_disbursements.disburse_to_seller(db, order=order, partner_reference_no="r-attempt-1")
-        assert "bank fields incomplete" in str(ei.value)
+        assert "no active payout bank account" in str(ei.value)
 
     @pytest.mark.asyncio
     async def test_skips_when_net_below_minimum(self, monkeypatch):

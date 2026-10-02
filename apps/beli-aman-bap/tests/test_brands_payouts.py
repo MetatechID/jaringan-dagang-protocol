@@ -1,15 +1,17 @@
 """Tests for /api/v1/brands/{slug}/payouts GET + PUT.
 
-Covers the dynamic provider/courier surface added in the Payouts admin
-refactor: ``payment_provider`` (xendit/sento), ``courier_provider``
-(biteship/jubelio) and ``jubelio_origin_address`` roundtrip +
-shape validation.
+Covers the unified payout-bank-accounts surface: ``bank_accounts`` CRUD
+(create/edit via ``bank_accounts``, delete via ``delete_bank_account_ids``,
+single-active via ``active_bank_account_id``), plus the dynamic
+provider/courier surface: ``payment_provider`` (xendit/sento/oy/dipay),
+``courier_provider`` (biteship/jubelio) and ``jubelio_origin_address``
+roundtrip + shape validation.
 
 Most tests use a pure stub brand (no DB, no async) because
 ``_payouts_view`` and ``_validate_jubelio_origin`` are pure functions.
-Only the end-to-end happy path runs through a sqlite-backed FastAPI
-TestClient to assert the PUT body whitelist + DB roundtrip actually
-work end to end.
+Only the bank-account CRUD + PUT whitelist tests run through a
+sqlite-backed FastAPI TestClient to assert the DB roundtrip actually
+works end to end.
 """
 
 from __future__ import annotations
@@ -34,19 +36,10 @@ def _brand(**overrides) -> SimpleNamespace:
     base = dict(
         slug="antarestar",
         xendit_sub_account_id=None,
-        xendit_disbursement_bank_code=None,
-        xendit_disbursement_bank_account=None,
-        xendit_disbursement_holder_name=None,
-        sento_disbursement_bank_code=None,
-        sento_disbursement_bank_account=None,
-        sento_disbursement_holder_name=None,
         dipay_client_key=None,
         dipay_client_secret=None,
         dipay_private_key_b64=None,
         dipay_merchant_id=None,
-        dipay_disbursement_bank_code=None,
-        dipay_disbursement_bank_account=None,
-        dipay_disbursement_holder_name=None,
         biteship_origin_address=None,
         biteship_default_courier=None,
         payment_provider="xendit",
@@ -66,13 +59,12 @@ class TestPayoutsView:
     def test_defaults_when_brand_row_is_fresh(self):
         from routers.brands import _payouts_view
 
-        view = _payouts_view(_brand())
+        view = _payouts_view(_brand(), [])
         assert view["slug"] == "antarestar"
         assert view["payment_provider"] == "xendit"
         assert view["courier_provider"] == "biteship"
         assert view["jubelio_origin_address"] is None
-        assert view["xendit_disbursement_bank_account_masked"] is None
-        assert view["sento_disbursement_bank_account_masked"] is None
+        assert view["bank_accounts"] == []
         assert view["dipay_client_key_configured"] is False
         assert view["dipay_client_secret_configured"] is False
         assert view["dipay_private_key_configured"] is False
@@ -84,7 +76,7 @@ class TestPayoutsView:
             dipay_client_key="client-key-1234",
             dipay_client_secret="never-return-me",
             dipay_private_key_b64="never-return-key",
-        ))
+        ), [])
         assert view["dipay_client_key_masked"] == "•••• 1234"
         assert view["dipay_client_key_configured"] is True
         assert view["dipay_client_secret_configured"] is True
@@ -92,47 +84,81 @@ class TestPayoutsView:
         assert "dipay_client_secret" not in view
         assert "dipay_private_key_b64" not in view
 
-    def test_mask_hides_xendit_account_number(self):
+    def test_bank_accounts_are_masked_with_labels_and_support(self):
         from routers.brands import _payouts_view
 
-        view = _payouts_view(_brand(xendit_disbursement_bank_account="1234567890"))
-        assert view["xendit_disbursement_bank_account_masked"] == "•••• 7890"
+        account = SimpleNamespace(
+            id="acc-1",
+            bank_code="014",
+            account_number="1234567890",
+            holder_name="Budi",
+            is_active=True,
+        )
+        view = _payouts_view(_brand(), [account])
+        assert view["bank_accounts"] == [
+            {
+                "id": "acc-1",
+                "bank_code": "014",
+                "bank_label": "BCA",
+                "account_number_masked": "•••• 7890",
+                "holder_name": "Budi",
+                "is_active": True,
+                "supported_providers": ["xendit", "sento", "dipay"],
+            }
+        ]
 
-    def test_mask_short_xendit_account_returns_unchanged(self):
+    def test_mask_short_account_number_returns_unchanged(self):
         """Account numbers < 5 chars are not masked (no last-4 to show)."""
         from routers.brands import _payouts_view
 
-        view = _payouts_view(_brand(xendit_disbursement_bank_account="1234"))
-        assert view["xendit_disbursement_bank_account_masked"] == "1234"
+        account = SimpleNamespace(
+            id="acc-1",
+            bank_code="014",
+            account_number="1234",
+            holder_name="Budi",
+            is_active=False,
+        )
+        view = _payouts_view(_brand(), [account])
+        assert view["bank_accounts"][0]["account_number_masked"] == "1234"
+
+    def test_bank_keys_expose_shared_picker(self):
+        from routers.brands import _payouts_view
+
+        view = _payouts_view(_brand(), [])
+        keys = {k["code"]: k for k in view["bank_keys"]}
+        assert keys["014"]["label"] == "BCA"
+        assert keys["014"]["supported"] == ["xendit", "sento", "dipay"]
+        # A Dipay-only digital bank is supported by exactly one gateway.
+        assert keys["535"]["supported"] == ["dipay"]
 
     def test_payment_provider_sento_round_trips(self):
         from routers.brands import _payouts_view
 
-        view = _payouts_view(_brand(payment_provider="sento"))
+        view = _payouts_view(_brand(payment_provider="sento"), [])
         assert view["payment_provider"] == "sento"
 
     def test_payment_provider_oy_is_allowed(self):
         from routers.brands import _payouts_view
 
-        view = _payouts_view(_brand(payment_provider="oy"))
+        view = _payouts_view(_brand(payment_provider="oy"), [])
         assert view["payment_provider"] == "oy"
 
     def test_payment_provider_unknown_value_falls_back_to_xendit(self):
         from routers.brands import _payouts_view
 
-        view = _payouts_view(_brand(payment_provider="unknown"))
+        view = _payouts_view(_brand(payment_provider="unknown"), [])
         assert view["payment_provider"] == "xendit"
 
     def test_payment_provider_none_falls_back_to_xendit(self):
         from routers.brands import _payouts_view
 
-        view = _payouts_view(_brand(payment_provider=None))
+        view = _payouts_view(_brand(payment_provider=None), [])
         assert view["payment_provider"] == "xendit"
 
     def test_courier_provider_jubelio_when_jubelio_enabled(self):
         from routers.brands import _payouts_view
 
-        view = _payouts_view(_brand(jubelio_enabled=True))
+        view = _payouts_view(_brand(jubelio_enabled=True), [])
         assert view["courier_provider"] == "jubelio"
 
     def test_jubelio_origin_address_round_trips(self):
@@ -146,7 +172,7 @@ class TestPayoutsView:
             "zipcode": "40115",
             "coordinate": [-6.2, 106.8],
         }
-        view = _payouts_view(_brand(jubelio_origin_address=origin))
+        view = _payouts_view(_brand(jubelio_origin_address=origin), [])
         assert view["jubelio_origin_address"] == origin
 
 
@@ -243,11 +269,9 @@ class TestValidateJubelioOrigin:
 # put_payouts end-to-end — sqlite-backed FastAPI test client
 # ---------------------------------------------------------------------------
 #
-# Only the PUT body whitelist + DB roundtrip need a real database. Use the
+# Bank-account CRUD + the PUT body whitelist need a real database. Use the
 # minimal in-memory sqlite harness so we exercise the same code path as
-# production (Pydantic validation → PayoutsIn → handler → brand row).
-# pytest-aio+aiosqlite handle async under the sync TestClient automatically.
-#
+# production (Pydantic validation → PayoutsIn → handler → rows).
 
 
 @pytest.fixture
@@ -259,7 +283,6 @@ def client():
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
     from sqlalchemy.ext.asyncio import (
-        AsyncSession,
         async_sessionmaker,
         create_async_engine,
     )
@@ -268,6 +291,7 @@ def client():
     from deps import get_current_profile
     from models.base import Base
     from models.brand import Brand
+    from models.payout_bank_account import PayoutBankAccount
     from models.profile import BeliAmanProfile
     from models.store_membership import StoreMembership
     from routers.brands import router as brands_router
@@ -292,6 +316,7 @@ def client():
                 Base.metadata.create_all,
                 tables=[
                     Brand.__table__,
+                    PayoutBankAccount.__table__,
                     BeliAmanProfile.__table__,
                     StoreMembership.__table__,
                 ],
@@ -329,7 +354,7 @@ def client():
             s.add(Brand(slug=slug, name=name, bpp_id=f"{slug}.bpp"))
             await s.commit()
 
-    async def _fetch(slug: str):
+    async def _fetch_brand(slug: str):
         from sqlalchemy import select
 
         async with Session() as s:
@@ -337,7 +362,22 @@ def client():
                 await s.execute(select(Brand).where(Brand.slug == slug))
             ).scalar_one_or_none()
 
-    return TestClient(app), Session, _seed, _fetch
+    async def _fetch_accounts(slug: str) -> list:
+        from sqlalchemy import select
+
+        async with Session() as s:
+            brand = (
+                await s.execute(select(Brand).where(Brand.slug == slug))
+            ).scalar_one()
+            return (
+                await s.execute(
+                    select(PayoutBankAccount)
+                    .where(PayoutBankAccount.brand_id == brand.id)
+                    .order_by(PayoutBankAccount.created_at)
+                )
+            ).scalars().all()
+
+    return TestClient(app), Session, _seed, _fetch_brand, _fetch_accounts
 
 
 def _put(tc, slug, payload):
@@ -348,35 +388,35 @@ def test_put_payouts_toggles_payment_provider_in_db(client):
     """End-to-end: PUT flips brand.payment_provider and view reflects it."""
     import asyncio
 
-    tc, _Session, seed, _fetch = client
+    tc, _Session, seed, _fetch_brand, _fetch_accounts = client
     asyncio.run(seed())
 
     r = _put(tc, "antarestar", {"payment_provider": "sento"})
     assert r.status_code == 200, r.text
     assert r.json()["payment_provider"] == "sento"
 
-    brand = asyncio.run(_fetch("antarestar"))
+    brand = asyncio.run(_fetch_brand("antarestar"))
     assert brand is not None and brand.payment_provider == "sento"
 
 
 def test_put_payouts_oy_remains_allowed(client):
     import asyncio
 
-    tc, _Session, seed, _fetch = client
+    tc, _Session, seed, _fetch_brand, _fetch_accounts = client
     asyncio.run(seed())
 
     r = _put(tc, "antarestar", {"payment_provider": "oy"})
     assert r.status_code == 200, r.text
     assert r.json()["payment_provider"] == "oy"
 
-    brand = asyncio.run(_fetch("antarestar"))
+    brand = asyncio.run(_fetch_brand("antarestar"))
     assert brand is not None and brand.payment_provider == "oy"
 
 
 def test_put_payouts_rejects_unknown_provider(client):
     import asyncio
 
-    tc, _Session, seed, _fetch = client
+    tc, _Session, seed, _fetch_brand, _fetch_accounts = client
     asyncio.run(seed())
     r = _put(tc, "antarestar", {"payment_provider": "bogus"})
     assert r.status_code == 422
@@ -386,14 +426,14 @@ def test_put_payouts_garbage_courier_falls_back_in_db(client):
     """End-to-end: PUT unknown courier keeps ``jubelio_enabled`` False."""
     import asyncio
 
-    tc, _Session, seed, _fetch = client
+    tc, _Session, seed, _fetch_brand, _fetch_accounts = client
     asyncio.run(seed())
 
     r = _put(tc, "antarestar", {"courier_provider": "fancourier"})
     assert r.status_code == 200, r.text
     assert r.json()["courier_provider"] == "biteship"
 
-    brand = asyncio.run(_fetch("antarestar"))
+    brand = asyncio.run(_fetch_brand("antarestar"))
     assert brand is not None and brand.jubelio_enabled is False
 
 
@@ -401,12 +441,11 @@ def test_put_payouts_preserves_hidden_fields(client):
     """Switching PG/courier does not wipe other columns on the row."""
     import asyncio
 
-    tc, _Session, seed, _fetch = client
+    tc, _Session, seed, _fetch_brand, _fetch_accounts = client
     asyncio.run(seed())
 
     setup = {
         "xendit_sub_account_id": "64a1b2c3d4e5f67890123456",
-        "xendit_disbursement_bank_code": "BCA",
         "biteship_origin_address": {"contact_name": "WH Jakarta"},
     }
     assert _put(tc, "antarestar", setup).status_code == 200
@@ -418,7 +457,6 @@ def test_put_payouts_preserves_hidden_fields(client):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["xendit_sub_account_id"] == "64a1b2c3d4e5f67890123456"
-    assert body["xendit_disbursement_bank_code"] == "BCA"
     assert body["biteship_origin_address"] == {"contact_name": "WH Jakarta"}
 
 
@@ -426,7 +464,7 @@ def test_put_payouts_jubelio_origin_null_clears_field(client):
     """``jubelio_origin_address: null`` clears the column."""
     import asyncio
 
-    tc, Session, seed, _fetch = client
+    tc, Session, seed, _fetch_brand, _fetch_accounts = client
     asyncio.run(seed())
 
     _put(tc, "antarestar", {
@@ -447,3 +485,193 @@ def test_put_payouts_jubelio_origin_null_clears_field(client):
             ).scalar_one().jubelio_origin_address
 
     assert asyncio.run(_val()) is None
+
+
+# ---------------------------------------------------------------------------
+# Bank-account CRUD end-to-end
+# ---------------------------------------------------------------------------
+
+
+def test_bank_account_create_and_set_active(client):
+    """Create two accounts, activate the second — first deactivates."""
+    import asyncio
+
+    tc, _Session, seed, _fetch_brand, fetch_accounts = client
+    asyncio.run(seed())
+
+    r = _put(tc, "antarestar", {"bank_accounts": [
+        {"bank_code": "014", "account_number": "111222333", "holder_name": "Budi"},
+        {"bank_code": "008", "account_number": "444555666", "holder_name": "Ani"},
+    ]})
+    assert r.status_code == 200, r.text
+    accounts = r.json()["bank_accounts"]
+    assert [a["is_active"] for a in accounts] == [False, False]
+
+    first_id = accounts[0]["id"]
+    second_id = accounts[1]["id"]
+    r = _put(tc, "antarestar", {"active_bank_account_id": second_id})
+    assert r.status_code == 200, r.text
+    accounts = {a["id"]: a for a in r.json()["bank_accounts"]}
+    assert accounts[first_id]["is_active"] is False
+    assert accounts[second_id]["is_active"] is True
+
+    rows = asyncio.run(fetch_accounts("antarestar"))
+    assert len(rows) == 2
+
+
+def test_bank_account_edit_keeps_account_number_when_omitted(client):
+    """Editing with no account_number preserves the stored (write-only) one."""
+    import asyncio
+
+    tc, _Session, seed, _fetch_brand, fetch_accounts = client
+    asyncio.run(seed())
+
+    r = _put(tc, "antarestar", {"bank_accounts": [
+        {"bank_code": "014", "account_number": "111222333", "holder_name": "Budi"},
+    ]})
+    account_id = r.json()["bank_accounts"][0]["id"]
+
+    # GET returns only the masked number; PUT with just a holder edit.
+    r = _put(tc, "antarestar", {"bank_accounts": [
+        {"id": account_id, "holder_name": "Budi Santoso"},
+    ]})
+    assert r.status_code == 200, r.text
+    accounts = r.json()["bank_accounts"]
+    assert accounts[0]["holder_name"] == "Budi Santoso"
+    assert accounts[0]["account_number_masked"] == "•••• 2333"
+
+    rows = asyncio.run(fetch_accounts("antarestar"))
+    assert rows[0].account_number == "111222333"
+
+
+def test_bank_account_edit_replaces_account_number(client):
+    import asyncio
+
+    tc, _Session, seed, _fetch_brand, fetch_accounts = client
+    asyncio.run(seed())
+
+    r = _put(tc, "antarestar", {"bank_accounts": [
+        {"bank_code": "014", "account_number": "111222333", "holder_name": "Budi"},
+    ]})
+    account_id = r.json()["bank_accounts"][0]["id"]
+
+    r = _put(tc, "antarestar", {"bank_accounts": [
+        {"id": account_id, "account_number": "999888777"},
+    ]})
+    assert r.status_code == 200, r.text
+    rows = asyncio.run(fetch_accounts("antarestar"))
+    assert rows[0].account_number == "999888777"
+
+
+def test_bank_account_delete(client):
+    import asyncio
+
+    tc, _Session, seed, _fetch_brand, fetch_accounts = client
+    asyncio.run(seed())
+
+    r = _put(tc, "antarestar", {"bank_accounts": [
+        {"bank_code": "014", "account_number": "111222333", "holder_name": "Budi"},
+        {"bank_code": "008", "account_number": "444555666", "holder_name": "Ani"},
+    ]})
+    ids = [a["id"] for a in r.json()["bank_accounts"]]
+
+    r = _put(tc, "antarestar", {"delete_bank_account_ids": [ids[0]]})
+    assert r.status_code == 200, r.text
+    assert [a["id"] for a in r.json()["bank_accounts"]] == [ids[1]]
+
+    rows = asyncio.run(fetch_accounts("antarestar"))
+    assert [row.id for row in rows] == [ids[1]]
+
+
+def test_bank_account_delete_missing_id_404(client):
+    import asyncio
+
+    tc, _Session, seed, _fetch_brand, _fetch_accounts = client
+    asyncio.run(seed())
+    r = _put(tc, "antarestar", {"delete_bank_account_ids": ["nope"]})
+    assert r.status_code == 404
+
+
+def test_bank_account_active_unknown_id_404(client):
+    import asyncio
+
+    tc, _Session, seed, _fetch_brand, _fetch_accounts = client
+    asyncio.run(seed())
+    r = _put(tc, "antarestar", {"active_bank_account_id": "nope"})
+    assert r.status_code == 404
+
+
+def test_bank_account_unknown_bank_code_422(client):
+    import asyncio
+
+    tc, _Session, seed, _fetch_brand, _fetch_accounts = client
+    asyncio.run(seed())
+    r = _put(tc, "antarestar", {"bank_accounts": [
+        {"bank_code": "XXX", "account_number": "111222333"},
+    ]})
+    assert r.status_code == 422
+
+
+def test_bank_account_create_requires_account_number(client):
+    import asyncio
+
+    tc, _Session, seed, _fetch_brand, _fetch_accounts = client
+    asyncio.run(seed())
+    r = _put(tc, "antarestar", {"bank_accounts": [{"bank_code": "014"}]})
+    assert r.status_code == 422
+
+
+def test_bank_account_create_requires_bank_code(client):
+    import asyncio
+
+    tc, _Session, seed, _fetch_brand, _fetch_accounts = client
+    asyncio.run(seed())
+    r = _put(tc, "antarestar", {"bank_accounts": [{"account_number": "111"}]})
+    assert r.status_code == 422
+
+
+def test_dipay_provider_requires_active_bank_account(client):
+    """The dipay 422 gate now keys off the unified active account."""
+    import asyncio
+
+    tc, _Session, seed, _fetch_brand, fetch_accounts = client
+    asyncio.run(seed())
+
+    # No accounts at all → 422.
+    r = _put(tc, "antarestar", {"payment_provider": "dipay"})
+    assert r.status_code == 422
+
+    # Adding an account (inactive) is still not enough.
+    r = _put(tc, "antarestar", {"bank_accounts": [
+        {"bank_code": "014", "account_number": "111222333"},
+    ]})
+    account_id = r.json()["bank_accounts"][0]["id"]
+    r = _put(tc, "antarestar", {"payment_provider": "dipay"})
+    assert r.status_code == 422
+
+    # Activate it → gate passes (creds resolve via env in this env-less
+    # test app: resolve_config is exercised by dipay-specific tests).
+    r = _put(tc, "antarestar", {"active_bank_account_id": account_id})
+    assert r.status_code == 200, r.text
+    # payment_provider is not flipped here because Dipay credentials are
+    # incomplete in the test env — assert the bank-account part worked.
+    rows = asyncio.run(fetch_accounts("antarestar"))
+    assert rows[0].is_active is True
+
+
+def test_active_account_survives_other_puts(client):
+    """A PUT touching other fields must not disturb the active flag."""
+    import asyncio
+
+    tc, _Session, seed, _fetch_brand, fetch_accounts = client
+    asyncio.run(seed())
+
+    r = _put(tc, "antarestar", {"bank_accounts": [
+        {"bank_code": "014", "account_number": "111222333"},
+    ]})
+    account_id = r.json()["bank_accounts"][0]["id"]
+    _put(tc, "antarestar", {"active_bank_account_id": account_id})
+    _put(tc, "antarestar", {"biteship_default_courier": "jne:reg"})
+
+    rows = asyncio.run(fetch_accounts("antarestar"))
+    assert rows[0].is_active is True
