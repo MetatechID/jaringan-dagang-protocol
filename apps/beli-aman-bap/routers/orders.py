@@ -44,6 +44,61 @@ _COURIER_LOGO_BY_CODE: dict[str, str] = {
 }
 
 
+def _serialize_ledger_entry(e: EscrowLedger) -> dict[str, Any]:
+    """Ledger row for API consumers. The fee-split columns are None for
+    Xendit/Sento releases (they disburse the full gross) — surfaced as
+    null so the dashboard can fall back to gross=net display."""
+    return {
+        "entry_type": e.entry_type.value,
+        "amount_idr": e.amount_idr,
+        "description": e.description,
+        "created_at": e.created_at.isoformat(),
+        "gross_amount_idr": e.gross_amount_idr,
+        "platform_fee_idr": e.platform_fee_idr,
+        "provider_fee_idr": e.provider_fee_idr,
+        "net_amount_idr": e.net_amount_idr,
+    }
+
+
+def _payout_summary(order: Order, brand: Brand | None) -> dict[str, Any]:
+    """Fee breakdown for the seller dashboard: config + projection.
+
+    ``projection`` (present only while no RELEASE row exists yet) uses the
+    same floor math as the real disbursement (``dipay_disbursements.
+    _fee_breakdown``) so held orders can show an accurate "estimasi
+    diterima". After release, the ACTUAL numbers come from the escrow
+    ledger's fee columns instead.
+    """
+    from services.dipay_disbursements import _fee_breakdown
+
+    fee_config = {
+        "payment_provider": (brand.payment_provider if brand else None) or "xendit",
+        "platform_fee_pct_bp": settings.platform_release_fee_pct_bp,
+        "dipay_fee_pct_bp": settings.dipay_disbursement_fee_pct_bp,
+        "dipay_fee_flat_idr": settings.dipay_disbursement_fee_flat_idr,
+    }
+    is_dipay = brand is not None and brand.payment_provider == "dipay"
+    breakdown = _fee_breakdown(order.total_idr) if is_dipay else None
+    return {
+        **fee_config,
+        # None when the brand is not on Dipay (no fees apply) or when the
+        # RELEASE ledger row already exists (actuals win). Key names mirror
+        # the ledger columns; _fee_breakdown's ``dipay_fee_idr`` is renamed
+        # to ``provider_fee_idr`` so dashboard code reads one vocabulary
+        # for both projection and actuals.
+        "projection": (
+            {
+                "gross_idr": breakdown["gross_idr"],
+                "platform_fee_idr": breakdown["platform_fee_idr"],
+                "provider_fee_idr": breakdown["dipay_fee_idr"],
+                "net_idr": breakdown["net_idr"],
+            }
+            if breakdown is not None
+            else None
+        ),
+    }
+
+
 # ---------- Schemas ----------
 
 
@@ -199,7 +254,21 @@ async def get_order_admin(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(404, "Order not found")
-    return _serialize_order(order)
+    out = _serialize_order(order)
+
+    # Payout/fee breakdown for the seller dashboard (projection while held).
+    brand_result = await db.execute(select(Brand).where(Brand.id == order.brand_id))
+    out["payout"] = _payout_summary(order, brand_result.scalar_one_or_none())
+
+    # Actuals after release: the dashboard reads the fee split from the
+    # RELEASE ledger row (projection is None once it exists).
+    ledger_result = await db.execute(
+        select(EscrowLedger).where(EscrowLedger.order_id == order.id).order_by(EscrowLedger.created_at)
+    )
+    out["escrow_ledger"] = [
+        _serialize_ledger_entry(e) for e in ledger_result.scalars().all()
+    ]
+    return out
 
 
 @router.get("/{order_id}")
@@ -262,12 +331,7 @@ async def get_order(
         select(EscrowLedger).where(EscrowLedger.order_id == order.id).order_by(EscrowLedger.created_at)
     )
     ledger_rows = [
-        {
-            "entry_type": e.entry_type.value,
-            "amount_idr": e.amount_idr,
-            "description": e.description,
-            "created_at": e.created_at.isoformat(),
-        }
+        _serialize_ledger_entry(e)
         for e in ledger_result.scalars().all()
     ]
 

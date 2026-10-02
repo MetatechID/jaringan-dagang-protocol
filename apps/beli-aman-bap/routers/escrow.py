@@ -55,6 +55,11 @@ async def get_escrow(
                 "amount_idr": r.amount_idr,
                 "description": r.description,
                 "created_at": r.created_at.isoformat(),
+                # Fee split (Dipay releases only; None otherwise).
+                "gross_amount_idr": r.gross_amount_idr,
+                "platform_fee_idr": r.platform_fee_idr,
+                "provider_fee_idr": r.provider_fee_idr,
+                "net_amount_idr": r.net_amount_idr,
             }
             for r in rows.scalars().all()
         ],
