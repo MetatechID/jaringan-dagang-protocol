@@ -307,6 +307,48 @@ class TestSignedRequestHeaders:
         assert "." not in ts
 
     @pytest.mark.asyncio
+    async def test_external_id_is_header_only_not_signed(self, monkeypatch):
+        """SNAP conformance lock: ``X-EXTERNAL-ID`` is sent as a header but is
+        NOT part of ``stringToSign``.
+
+        SNAP's general spec text implies a trailing external-ID leg, but no real
+        SNAP gateway signs it — Dipay's demo rejects a 6-leg stringToSign with
+        ``4014700 Invalid Signature``, and Midtrans' reference client also signs
+        only the 5-leg path form.  This test guards against a future "fix" that
+        silently re-introduces the 6th leg.
+        """
+        _patch_settings(monkeypatch, dipay_private_key_b64="x")
+        captured, transport = _make_transport({})
+        _install_transport(monkeypatch, transport)
+        _seed_token("tok-1", 9_999_999_999.0)
+
+        await dipay_client.create_qris(config=_config(), partner_reference_no="q-a", amount_idr=1000)
+
+        req = _requests_to(captured, "/qr/qr-mpm-generate")[0]
+        external_id = req.headers["X-EXTERNAL-ID"]
+        assert external_id  # header present
+
+        # The signature must recompute from the 5-leg form WITHOUT external_id.
+        token = req.headers["Authorization"].removeprefix("Bearer ")
+        body_str = req.content.decode("utf-8") if req.content else "{}"
+        five_leg = (
+            f"{req.method}:{req.url.path}:{token}:"
+            f"{hashlib.sha256(body_str.encode('utf-8')).hexdigest()}:"
+            f"{req.headers['X-TIMESTAMP']}"
+        )
+        digest = hmac.new(
+            b"client-secret", five_leg.encode("utf-8"), hashlib.sha512,
+        ).digest()
+        assert req.headers["X-SIGNATURE"] == base64.b64encode(digest).decode("utf-8")
+
+        # And a 6-leg variant with the external ID must NOT match.
+        six_leg = f"{five_leg}:{external_id}"
+        digest6 = hmac.new(
+            b"client-secret", six_leg.encode("utf-8"), hashlib.sha512,
+        ).digest()
+        assert req.headers["X-SIGNATURE"] != base64.b64encode(digest6).decode("utf-8")
+
+    @pytest.mark.asyncio
     async def test_hmac_sha512_string_to_sign_recomputation(self, monkeypatch):
         """X-SIGNATURE must equal HMAC-SHA512(clientSecret,
         '{METHOD}:{url_path}:{accessToken}:{sha256(minified body)}:{X-TIMESTAMP}')."""
@@ -515,7 +557,6 @@ class TestDisbursementPayload:
             beneficiary_account="1234567890",
             beneficiary_bank_code="014",
             amount_idr=1000,
-            customer_reference="BeliAman release order 1",
             partner_merchant_id="safiya",
             beneficiary_email="seller@example.com",
         )

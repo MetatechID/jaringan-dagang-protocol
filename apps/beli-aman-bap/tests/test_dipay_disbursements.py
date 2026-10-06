@@ -293,8 +293,6 @@ class TestCreateCallShape:
         assert captured["beneficiary_account"] == "1234567890"
         assert captured["beneficiary_bank_code"] == "014"
         assert captured["partner_merchant_id"] == "safiya"
-        assert captured["customer_reference"].startswith("BeliAman release order")
-        assert len(captured["customer_reference"]) <= 30
 
     @pytest.mark.asyncio
     async def test_amount_idr_override_changes_gross(self, monkeypatch):
