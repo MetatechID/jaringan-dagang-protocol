@@ -2,10 +2,12 @@
 
 Mirror of ``routers/webhooks_sento.py`` — same advisory-callback pattern:
 
-- Auth: NO signature verification. Dipay's callback carries an ``X-SIGNATURE``
-  header in some deployments, but the demo env does not document a per-tenant
-  verifying key, so — like Sento — we treat the webhook as an advisory
-  notification and re-verify state via the status APIs before mutating:
+- Auth: inbound ``X-SIGNATURE`` is RSA-verified (SHA256withRSA, base64) against
+  ``DIPAY_CALLBACK_PUBLIC_KEY`` — see ``services.dipay_client.
+  verify_notification_signature``.  In non-production environments with no key
+  configured the check is skipped with a warning; in production a missing or
+  invalid signature is a 401.  Independently of that, the callback is treated
+  as **advisory**: state is re-verified via the status APIs before mutating —
   ``POST /qr/qr-mpm-query`` for payments, ``POST /transfer/status`` for
   disbursements. A forged POST can at worst make us ask Dipay what's true.
 
@@ -37,9 +39,6 @@ Reference: https://api-docs.dipay.id/ (QRIS MPM / Disbursement).
 
 from __future__ import annotations
 
-import base64
-import hashlib
-import json
 import logging
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -139,98 +138,6 @@ async def _parse_body(request: Request) -> dict[str, Any]:
     return body
 
 
-def _verify_rsa_signature(
-    public_key_pem: str | bytes,
-    signature_str: str,
-    timestamp: str | None,
-    body_bytes: bytes,
-    path: str = "",
-    method: str = "POST",
-) -> bool:
-    try:
-        from cryptography.hazmat.primitives import hashes
-        from cryptography.hazmat.primitives.asymmetric import padding
-        from cryptography.hazmat.primitives.serialization import (
-            load_der_public_key,
-            load_pem_public_key,
-        )
-        from cryptography.exceptions import InvalidSignature
-
-        if isinstance(public_key_pem, str):
-            pem_bytes = public_key_pem.strip().encode("utf-8")
-        else:
-            pem_bytes = public_key_pem.strip()
-
-        pub_key = None
-        if b"BEGIN PUBLIC KEY" in pem_bytes or b"BEGIN RSA PUBLIC KEY" in pem_bytes:
-            pub_key = load_pem_public_key(pem_bytes)
-        else:
-            try:
-                decoded = base64.b64decode(pem_bytes)
-                if b"BEGIN PUBLIC KEY" in decoded or b"BEGIN RSA PUBLIC KEY" in decoded:
-                    pub_key = load_pem_public_key(decoded)
-                else:
-                    pub_key = load_der_public_key(decoded)
-            except Exception:
-                pub_key = load_pem_public_key(pem_bytes)
-
-        sig_bytes = None
-        try:
-            sig_bytes = bytes.fromhex(signature_str.strip())
-        except ValueError:
-            try:
-                sig_bytes = base64.b64decode(signature_str.strip())
-            except Exception:
-                return False
-
-        if not sig_bytes:
-            return False
-
-        ts = timestamp or ""
-        body_sha256 = hashlib.sha256(body_bytes).hexdigest().lower()
-        minified_sha256 = body_sha256
-        try:
-            parsed = json.loads(body_bytes.decode("utf-8"))
-            minified_str = json.dumps(parsed, separators=(",", ":"), ensure_ascii=False)
-            minified_sha256 = hashlib.sha256(minified_str.encode("utf-8")).hexdigest().lower()
-        except Exception:
-            pass
-
-        candidates = [
-            f"{method.upper()}:{path}:{minified_sha256}:{ts}".encode("utf-8"),
-            f"{method.upper()}:{path}:{body_sha256}:{ts}".encode("utf-8"),
-            f"{method.upper()}:{path.rstrip('/')}:{minified_sha256}:{ts}".encode("utf-8"),
-            f"{method.upper()}:{path.rstrip('/')}:{body_sha256}:{ts}".encode("utf-8"),
-            f"{minified_sha256}:{ts}".encode("utf-8"),
-            f"{body_sha256}:{ts}".encode("utf-8"),
-            f"{path}:{minified_sha256}:{ts}".encode("utf-8"),
-            f"{path}:{body_sha256}:{ts}".encode("utf-8"),
-            body_bytes,
-            f"{body_bytes.decode('utf-8', errors='replace')}|{ts}".encode("utf-8"),
-            f"{ts}|{body_bytes.decode('utf-8', errors='replace')}".encode("utf-8"),
-            f"{ts}".encode("utf-8"),
-        ]
-
-        for candidate in candidates:
-            try:
-                pub_key.verify(
-                    sig_bytes,
-                    candidate,
-                    padding.PKCS1v15(),
-                    hashes.SHA256(),
-                )
-                return True
-            except InvalidSignature:
-                continue
-            except Exception:
-                continue
-
-        return False
-    except Exception as exc:
-        _LOG.warning("Failed to verify Dipay RSA signature: %s", exc)
-        return False
-
-
 async def _verify_inbound_signature(
     request: Request,
     body_bytes: bytes,
@@ -250,53 +157,18 @@ async def _verify_inbound_signature(
     if not x_signature:
         raise HTTPException(401, "Invalid Dipay callback signature")
 
-    if hasattr(dipay_client, "verify_notification_signature") and callable(
-        getattr(dipay_client, "verify_notification_signature")
-    ):
-        try:
-            fn = getattr(dipay_client, "verify_notification_signature")
-            import inspect
+    try:
+        valid = dipay_client.verify_notification_signature(
+            method=request.method,
+            path=request.url.path,
+            body=body_bytes,
+            timestamp=x_timestamp or "",
+            signature=x_signature,
+            public_key=public_key,
+        )
+    except Exception as exc:  # noqa: BLE001 — never leak verifier internals
+        raise HTTPException(401, "Invalid Dipay callback signature") from exc
 
-            sig = inspect.signature(fn)
-            kwargs = {}
-            for name in sig.parameters:
-                if name in ("x_signature", "signature"):
-                    kwargs[name] = x_signature
-                elif name in ("x_timestamp", "timestamp"):
-                    kwargs[name] = x_timestamp
-                elif name in ("body", "raw_body", "body_bytes"):
-                    kwargs[name] = body_bytes
-                elif name in ("public_key", "key"):
-                    kwargs[name] = public_key
-                elif name in ("path", "endpoint_url", "url"):
-                    kwargs[name] = request.url.path
-                elif name in ("method", "http_method"):
-                    kwargs[name] = request.method
-            if kwargs:
-                res = fn(**kwargs)
-            else:
-                res = fn(x_signature, x_timestamp, body_bytes, public_key)
-            if inspect.iscoroutine(res):
-                res = await res
-            if res is False:
-                raise HTTPException(401, "Invalid Dipay callback signature")
-            return
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(401, "Invalid Dipay callback signature") from exc
-
-    if not public_key:
-        raise HTTPException(401, "Invalid Dipay callback signature")
-
-    valid = _verify_rsa_signature(
-        public_key_pem=public_key,
-        signature_str=x_signature,
-        timestamp=x_timestamp,
-        body_bytes=body_bytes,
-        path=request.url.path,
-        method=request.method,
-    )
     if not valid:
         raise HTTPException(401, "Invalid Dipay callback signature")
 

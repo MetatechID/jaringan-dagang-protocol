@@ -171,9 +171,6 @@ async def disburse_to_seller(
         beneficiary_bank_code=bank_code,
         amount_idr=net,
         partner_merchant_id=brand.slug,
-        # customer_reference is our human-readable correlation string; SNAP
-        # caps it, so truncate to be safe.
-        customer_reference=f"BeliAman release order {order.id}"[:30],
     )
 
     response_code = str(response.get("responseCode") or "")

@@ -1,19 +1,38 @@
 """Async Dipay payment gateway HTTP client (SNAP v2.1).
 
-Dipay's B2B API follows the Indonesian SNAP (Standard Payment API)
-v2.1 conventions: a B2B access token obtained with an RSA-signed request,
-then per-call HMAC-SHA512 request signatures over a ``stringToSign``.
+Dipay's B2B API follows the Indonesian SNAP (Standar Nasional Open API
+Pembayaran) v2.1 conventions: a B2B access token obtained with an
+RSA-signed request, then per-call HMAC-SHA512 request signatures over a
+``stringToSign``.
 
 Auth flow (https://api-docs.dipay.id/ — Authentication sections):
 - ``POST {base}/access-token/b2b`` with ``X-CLIENT-KEY`` + ``X-SIGNATURE``
   where the signature is **SHA256withRSA** (PKCS1v15 + SHA256) over
-  ``"{client_key}|{x_timestamp}"`` using the merchant's RSA private key.
-  Response: ``{accessToken, expiresIn}`` (900s in the demo env).
+  ``"{client_key}|{x_timestamp}"``, **base64**-encoded, using the
+  merchant's RSA private key.  Response: ``{accessToken, expiresIn}``
+  (900s in the demo env).
 - Business endpoints then carry ``Authorization: Bearer {accessToken}``
-  plus ``X-SIGNATURE`` = hex **HMAC-SHA512** keyed with the client secret
-  over ``"{METHOD}:{full_url}:{accessToken}:{sha256(body)}:{x_timestamp}"``
+  plus ``X-SIGNATURE`` = **base64 HMAC-SHA512** keyed with the client
+  secret over
+  ``"{METHOD}:{url_path}:{accessToken}:{sha256hex(body)}:{x_timestamp}"``
   (body hash = lowercase hex SHA-256 of the *minified* JSON body — ``{}``
   when there is no body).
+
+Conformance notes — these two points have been verified against a known-
+conformant SNAP-BI implementation (Midtrans' ``SnapBi.php``), which builds
+the identical 5-leg, path-form stringToSign and the identical
+``client_id|timestamp`` token signature:
+
+* The URL leg is the **path** (``"/snap/v2.1/qr/qr-mpm-generate"``), not
+  the full URL — confirmed empirically 2026-09-30: the full-URL form is
+  rejected by Dipay with ``4014700 Invalid Signature``.
+* ``X-EXTERNAL-ID`` is *sent as a header* but is **not** part of
+  ``stringToSign`` — SNAP's general spec text implies a trailing
+  external-ID leg, but no real SNAP gateway (Dipay or Midtrans) signs it.
+
+RSA key size is deliberately not enforced: Dipay's docs say "RSA 1024"
+while our test fixtures use 2048, and prod key material is whatever Dipay
+issued — rejecting a valid issued key would be worse than accepting it.
 
 ``partnerReferenceNo`` is our idempotency / correlation key and is capped
 at **32 characters** by the SNAP spec — use :func:`snap_ref` to build
@@ -230,20 +249,6 @@ def _rsa_sha256(message: str, private_key) -> str:
     return base64.b64encode(signature).decode("utf-8")
 
 
-def _rsa_sha256_b64(message: str, private_key) -> str:
-    return _rsa_sha256(message, private_key)
-
-
-def _rsa_sha256_hex(message: str, private_key) -> str:
-    """SHA256withRSA — PKCS1v15 + SHA256, lowercase-hex encoded."""
-    signature = private_key.sign(
-        message.encode("utf-8"),
-        padding.PKCS1v15(),
-        hashes.SHA256(),
-    )
-    return signature.hex()
-
-
 def _minify(body: dict | None) -> str:
     """Canonical JSON used for the body-hash leg of ``stringToSign``.
 
@@ -282,18 +287,6 @@ def _hmac_sha512(string_to_sign: str, client_secret: str) -> str:
         hashlib.sha512,
     ).digest()
     return base64.b64encode(digest).decode("utf-8")
-
-
-def _hmac_sha512_b64(string_to_sign: str, client_secret: str) -> str:
-    return _hmac_sha512(string_to_sign, client_secret)
-
-
-def _hmac_sha512_hex(string_to_sign: str, client_secret: str) -> str:
-    return hmac.new(
-        client_secret.encode("utf-8"),
-        string_to_sign.encode("utf-8"),
-        hashlib.sha512,
-    ).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -528,7 +521,6 @@ async def create_disbursement(
     beneficiary_account: str,
     beneficiary_bank_code: str,
     amount_idr: int,
-    customer_reference: str | None = None,
     partner_merchant_id: str | None = None,
     beneficiary_email: str | None = None,
 ) -> dict:
@@ -546,11 +538,12 @@ async def create_disbursement(
     an error ``responseCode`` for many failures.
     """
     additional_info: dict[str, Any] = {}
-    # customerReference intentionally NOT sent: Dipay demo rejects any
-    # transfer-bank body containing additionalInfo.customerReference with a
-    # bogus "4014300 Unauthorized. Invalid Signature." (bisection-confirmed
-    # 2026-10-01 — partnerMerchantId alone signs fine). Revisit if they fix
-    # their demo signature validation.
+    # There is deliberately NO ``customer_reference`` parameter: Dipay
+    # rejects any transfer-bank body containing
+    # ``additionalInfo.customerReference`` with a bogus "4014300
+    # Unauthorized. Invalid Signature." (bisection-confirmed 2026-10-01 —
+    # ``partnerMerchantId`` alone signs fine).  Do not add it back without
+    # re-confirming against the live API.
     if partner_merchant_id:
         additional_info["partnerMerchantId"] = partner_merchant_id
     if beneficiary_email:
@@ -660,8 +653,15 @@ def verify_notification_signature(
 ) -> bool:
     """Verify Dipay's incoming webhook notification signature.
 
-    Uses SHA256withRSA over '{HTTPMethod}:{HTTPPath}:{sha256(minify(body))}:{X-TIMESTAMP}'
-    with Dipay's callback public key.
+    Uses SHA256withRSA over
+    ``'{HTTPMethod}:{HTTPPath}:{sha256hex(minifiedBody)}:{X-TIMESTAMP}'``
+    with Dipay's callback public key — the same shape Midtrans' SNAP-BI
+    reference client (``isWebhookNotificationVerified``) verifies.
+
+    Two body encodings are tried, canonical first: the re-minified
+    ``separators=(",", ":")`` form, then the raw received bytes (in case
+    Dipay ever signs the wire bytes verbatim).  Which one matched is
+    logged so a future form change is diagnosable from the logs.
     """
     key_material = (
         public_key
@@ -673,17 +673,31 @@ def verify_notification_signature(
         _LOG.warning("Dipay callback public key not configured or invalid")
         return False
 
+    # Canonical body form (re-minified JSON) first; raw wire form second.
+    canonical_body: str | None = None
+    raw_body: str | None = None
     if isinstance(body, dict):
-        body_str = _minify(body)
+        canonical_body = _minify(body)
     elif isinstance(body, (bytes, bytearray)):
-        body_str = body.decode("utf-8")
+        raw_body = body.decode("utf-8")
     elif isinstance(body, str):
-        body_str = body
+        raw_body = body
     else:
-        body_str = "{}"
+        canonical_body = "{}"
 
-    body_hash = _sha256_hex(body_str)
-    string_to_verify = f"{method.upper()}:{path}:{body_hash}:{timestamp}"
+    # Re-minify the raw form too, so a wire body that differs only in
+    # whitespace still matches the canonical candidate.
+    if raw_body is not None and canonical_body is None:
+        try:
+            canonical_body = _minify(json.loads(raw_body))
+        except Exception:
+            canonical_body = None
+
+    candidates: list[tuple[str, str]] = []
+    if canonical_body is not None:
+        candidates.append(("minified-body", canonical_body))
+    if raw_body is not None and raw_body != canonical_body:
+        candidates.append(("raw-body", raw_body))
 
     sig_str = (signature or "").strip()
     if not sig_str:
@@ -700,13 +714,21 @@ def verify_notification_signature(
     except Exception:
         return False
 
-    try:
-        pub_key_obj.verify(
-            sig_bytes,
-            string_to_verify.encode("utf-8"),
-            padding.PKCS1v15(),
-            hashes.SHA256(),
+    for label, body_str in candidates:
+        string_to_verify = (
+            f"{method.upper()}:{path}:{_sha256_hex(body_str)}:{timestamp}"
         )
-        return True
-    except Exception:
-        return False
+        try:
+            pub_key_obj.verify(
+                sig_bytes,
+                string_to_verify.encode("utf-8"),
+                padding.PKCS1v15(),
+                hashes.SHA256(),
+            )
+            _LOG.debug("Dipay callback signature verified via %s candidate", label)
+            return True
+        except Exception:
+            continue
+
+    _LOG.debug("Dipay callback signature did not match any candidate form")
+    return False
