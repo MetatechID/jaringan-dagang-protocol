@@ -6,11 +6,13 @@
   GET /pay/{id}/status   — JSON poller the page JS uses (alias of the
                            public partner status endpoint)
 
-The page is a holding surface: "Bayar Sekarang" hands the buyer to the
-Xendit invoice page (QRIS / VA / e-wallet — Xendit stays the licensed
-PJP). JS polls the public status endpoint; once the order flips to
-``paid`` the page shows success and bounces to the partner's
-``success_url``.
+The page is a holding surface. Dipay orders render the QRIS inline (the
+PNG from ``routers/qris.py``, keyed by the SNAP ref in ``invoice_id``)
+with an expiry countdown; everything else shows "Bayar Sekarang", which
+hands the buyer to the Xendit invoice page (QRIS / VA / e-wallet —
+Xendit stays the licensed PJP). JS polls the status endpoint; once the
+order flips to ``paid`` the page shows success and bounces to the
+partner's ``success_url``.
 
 HTML pattern follows seller-bpp's ``app/api/mock_checkout.py`` but this
 page is production surface (no env gate) — there is no mark-paid button;
@@ -66,6 +68,9 @@ def _render_shell(title: str, body_html: str) -> str:
           font-size: 14px; }}
   .row .label {{ color: #5c6b7c; }}
   .total {{ font-size: 26px; font-weight: 700; color: #10233f; }}
+  .qr {{ text-align: center; margin: 16px 0 4px; }}
+  .qr img {{ border: 1px solid #e7ecf2; border-radius: 8px;
+             display: inline-block; }}
   .btn {{ display: block; width: 100%; padding: 15px; font-size: 16px;
           background: #2f6fed; color: #fff; border: none; border-radius: 10px;
           cursor: pointer; font-weight: 600; text-align: center;
@@ -114,6 +119,58 @@ async def pay_page(order_id: str, db: AsyncSession = Depends(get_db)) -> HTMLRes
     var su = sessionStorage.getItem('oito_success_url_' + {order_js});
     if (su) setTimeout(function () {{ window.location.href = su; }}, 1500);
   </script>"""
+    elif (
+        order.status == "pending"
+        and (order.invoice_provider or "").lower() == "dipay"
+        and order.invoice_id
+    ):
+        qr_src = html.escape(
+            f"{settings.qr_public_base.rstrip('/')}"
+            f"/api/v1/qris/{order.invoice_id}.png"
+        )
+        expires_js = json.dumps(
+            order.expires_at.isoformat() if order.expires_at else None
+        )
+        body = f"""
+  <h1>Scan QRIS</h1>
+  <p class="desc">{safe_desc}</p>
+  <div class="row"><span class="label">Total</span><span class="total">{safe_amount}</span></div>
+  <div class="row"><span class="label">Order</span><span>{html.escape(order.external_order_id[:24])}</span></div>
+  <div class="qr"><img src="{qr_src}" alt="Kode QRIS" width="240" height="240"></div>
+  <div class="row"><span class="label">Berlaku</span><span id="expires">&mdash;</span></div>
+  <p id="state" class="note"><span class="spin"></span>Menunggu pembayaran&hellip; halaman ini akan berpindah otomatis setelah pembayaran berhasil.</p>
+  <p class="note">Pindai kode QRIS dengan aplikasi bank atau e-wallet Anda. Pembayaran diproses melalui Dipay atas nama Jaringan Dagang (Oito).
+     Jangan tutup halaman ini sebelum pembayaran selesai.</p>
+  <script>
+    var orderId = {order_js};
+    var state = document.getElementById('state');
+    var expiresAt = {expires_js};
+    if (expiresAt) {{
+      var el = document.getElementById('expires');
+      var tick = function () {{
+        var left = Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000);
+        if (left <= 0) {{ el.textContent = 'kedaluwarsa'; return; }}
+        var m = Math.floor(left / 60), s = left % 60;
+        el.textContent = m + ':' + (s < 10 ? '0' : '') + s;
+        setTimeout(tick, 1000);
+      }};
+      tick();
+    }}
+    setInterval(function () {{
+      fetch('/pay/' + orderId + '/status')
+        .then(function (r) {{ return r.ok ? r.json() : null; }})
+        .then(function (d) {{
+          if (!d) return;
+          if (d.status === 'paid') {{
+            state.innerHTML = '<span class="paid">&#10003; Pembayaran diterima.</span>';
+            if (d.success_url) setTimeout(function () {{ window.location.href = d.success_url; }}, 1500);
+          }} else if (d.status === 'expired') {{
+            state.textContent = 'Pesanan ini telah kedaluwarsa. Silakan buat pesanan baru.';
+          }}
+        }})
+        .catch(function () {{}});
+    }}, 4000);
+  </script>"""
     else:
         body = f"""
   <h1>Bayar pesanan</h1>
@@ -135,7 +192,7 @@ async def pay_page(order_id: str, db: AsyncSession = Depends(get_db)) -> HTMLRes
       paying = true;
       payBtn.disabled = true;
       payBtn.textContent = 'Membuka halaman pembayaran…';
-      fetch('/api/v1/partner/public/orders/' + orderId + '/pay-target')
+      fetch('/pay/' + orderId + '/pay-target')
         .then(function (r) {{ if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }})
         .then(function (d) {{ window.location.href = d.pay_url; }})
         .catch(function () {{

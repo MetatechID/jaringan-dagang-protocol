@@ -41,6 +41,8 @@ DDL_STATEMENTS: list[str] = [
         invoice_provider VARCHAR(16),
         payment_url TEXT,
         success_url TEXT,
+        qris_content TEXT,
+        expires_at TIMESTAMPTZ,
         paid_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()

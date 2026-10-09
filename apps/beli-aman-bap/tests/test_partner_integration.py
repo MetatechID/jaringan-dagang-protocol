@@ -16,6 +16,7 @@ import hashlib
 import hmac as hmac_mod
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -32,6 +33,7 @@ from database import get_db  # noqa: E402
 from routers.partner import router as partner_router  # noqa: E402
 from routers.pay_page import router as pay_page_router  # noqa: E402
 from services import partner_webhook  # noqa: E402
+from services.dipay_client import DipayError  # noqa: E402
 from services.partner_orders import (  # noqa: E402
     mark_partner_order_expired,
     mark_partner_order_paid,
@@ -108,6 +110,7 @@ def stub_partner_brand(**overrides) -> SimpleNamespace:
         partner_callback_url="https://consumerland.id/api/tickets/webhooks/oito",
         partner_callback_secret="cl-callback-secret-456",
         xendit_sub_account_id=None,  # mock mode by default
+        payment_provider="xendit",
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -125,6 +128,8 @@ def stub_partner_order(**overrides) -> SimpleNamespace:
         status="pending",
         invoice_id=None,
         invoice_provider=None,
+        qris_content=None,
+        expires_at=None,
         payment_url=None,
         success_url="https://consumerland.id/tickets?paid=CL26-ABC123",
         paid_at=None,
@@ -468,3 +473,146 @@ def test_pay_target_mock_mode():
     resp = client.get("/pay/po-123/pay-target")
     assert resp.status_code == 200
     assert resp.json()["pay_url"].endswith("/api/mock-checkout/dev-partner-po-123")
+
+
+# ---------------------------------------------------------------------------
+# Dipay QRIS path (Brand.payment_provider == "dipay")
+
+
+def _dipay_settings() -> SimpleNamespace:
+    """Complete env-level Dipay creds — same fallback shape the VM uses
+    (brand has no per-brand creds, env bundle is complete)."""
+    return SimpleNamespace(
+        environment="production",
+        dipay_base_url="https://api-b2x-demo.dipay.id/snap/v2.1",
+        dipay_client_key="env-client-key",
+        dipay_client_secret="env-client-secret",
+        dipay_private_key_b64="",
+        dipay_private_key_path="/tmp/unused.pem",
+        dipay_merchant_id="M-ENV",
+        qr_public_base="https://api.beli-aman.metatech.id",
+        mock_checkout_public_base="",
+        partner_pay_base_url="https://api.beli-aman.metatech.id",
+    )
+
+
+_QRIS_RESPONSE = {
+    "responseCode": "2004700",
+    "responseMessage": "Success",
+    "referenceNo": "REF-1",
+    "qrContent": "000201010212265802ID5303360",
+}
+
+
+def test_register_order_dipay_path_mints_qris(monkeypatch):
+    from services import dipay_client as dipay_client_mod
+
+    brand = stub_partner_brand(payment_provider="dipay")
+    db = FakeSession([None])  # external-id lookup → no existing order
+    client = _build_partner_app(db, brand)
+
+    captured = {}
+
+    async def fake_create_qris(**kwargs):
+        captured.update(kwargs)
+        return dict(_QRIS_RESPONSE)
+
+    monkeypatch.setattr(dipay_client_mod, "settings", _dipay_settings())
+    monkeypatch.setattr(dipay_client_mod, "create_qris", fake_create_qris)
+
+    resp = client.post(
+        "/api/v1/partner/orders",
+        headers={"Authorization": "Bearer cl-partner-key-123"},
+        json=_VALID_BODY,
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+
+    order = db.added[0]
+    ref = order.invoice_id
+    # SNAP-compliant ref, and the exact ref the PNG route serves.
+    assert re.fullmatch(r"q-[A-Za-z0-9]{1,30}", ref)
+    assert order.invoice_provider == "dipay"
+    assert order.qris_content == _QRIS_RESPONSE["qrContent"]
+    assert order.expires_at is not None
+    assert order.payment_url.endswith(f"/pay/{order.id}")
+    # Request shape sent to Dipay.
+    assert captured["partner_reference_no"] == ref
+    assert captured["amount_idr"] == 1_500_000
+    assert len(captured["validity_period"]) == 25  # ISO-8601, seconds precision
+    # Response shape.
+    assert data["status"] == "pending"
+    assert "/pay/" in data["payment_url"]
+    assert data["expires_at"] is not None
+    assert db.committed and not db.rolled_back
+
+
+def test_register_order_dipay_failure_returns_502_and_rolls_back(monkeypatch):
+    from services import dipay_client as dipay_client_mod
+
+    brand = stub_partner_brand(payment_provider="dipay")
+    db = FakeSession([None])
+    client = _build_partner_app(db, brand)
+
+    async def fake_create_qris(**_kwargs):
+        raise DipayError(502, {"responseCode": "5004700", "responseMessage": "Upstream"})
+
+    monkeypatch.setattr(dipay_client_mod, "settings", _dipay_settings())
+    monkeypatch.setattr(dipay_client_mod, "create_qris", fake_create_qris)
+
+    resp = client.post(
+        "/api/v1/partner/orders",
+        headers={"Authorization": "Bearer cl-partner-key-123"},
+        json=_VALID_BODY,
+    )
+    assert resp.status_code == 502
+    assert db.rolled_back and not db.committed
+
+
+def test_pay_page_dipay_renders_inline_qris(monkeypatch):
+    import routers.pay_page as pay_page_mod
+
+    order = stub_partner_order(
+        invoice_id="q-0f0e8a2e00000000000000000000",
+        invoice_provider="dipay",
+        qris_content=_QRIS_RESPONSE["qrContent"],
+        expires_at=datetime(2026, 10, 9, 9, 0, tzinfo=timezone.utc),
+    )
+    db = FakeSession([order])
+    client = _build_pay_app(db)
+    monkeypatch.setattr(
+        pay_page_mod, "settings",
+        SimpleNamespace(qr_public_base="https://api.beli-aman.metatech.id"),
+    )
+
+    resp = client.get("/pay/po-123")
+    assert resp.status_code == 200
+    assert "Scan QRIS" in resp.text
+    assert "/api/v1/qris/q-0f0e8a2e00000000000000000000.png" in resp.text
+    # Dipay orders never show the Xendit redirect button.
+    assert "Bayar Sekarang" not in resp.text
+
+
+def test_qris_png_resolver_resolves_pending_partner_order():
+    from routers.qris import _resolve_qr_content
+
+    po = stub_partner_order(
+        invoice_id="q-abc123",
+        invoice_provider="dipay",
+        qris_content=_QRIS_RESPONSE["qrContent"],
+    )
+    # Resolver probes orders, then carts, then partner orders.
+    db = FakeSession([[], [], [po]])
+    content = asyncio.run(_resolve_qr_content(db, "q-abc123"))
+    assert content == _QRIS_RESPONSE["qrContent"]
+
+
+def test_qris_png_resolver_hides_paid_partner_order():
+    from routers.qris import _resolve_qr_content
+
+    po = stub_partner_order(
+        status="paid", invoice_id="q-abc123", invoice_provider="dipay",
+        qris_content=_QRIS_RESPONSE["qrContent"],
+    )
+    db = FakeSession([[], [], [po]])
+    assert asyncio.run(_resolve_qr_content(db, "q-abc123")) is None

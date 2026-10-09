@@ -9,8 +9,10 @@ All ``/orders`` endpoints require ``Authorization: Bearer <partner_api_key>``
 (see ``auth/partner_auth.py``). The public status endpoint is deliberately
 minimal (status + amount only) so the pay page can poll it without auth.
 
-Invoice creation reuses ``services.xendit_client.create_invoice`` — the
-same raw call ``services/xendit_invoices.py`` makes for carts/orders, with
+Invoice creation is per ``Brand.payment_provider``: ``"dipay"`` mints a
+Dipay QRIS (SNAP v2.1 ``qr-mpm-generate`` — the PNG is served from
+``qris_content`` at ``/api/v1/qris/{ref}.png``); everything else reuses
+``services.xendit_client.create_invoice`` with
 ``external_id = "partner-<uuid>"`` so ``routers/webhooks_xendit.py`` can
 route the ``invoice.paid`` callback back here. Brands without a Xendit
 sub-account fall back to mock mode (same rule as ``xendit_invoices._is_mock_mode``)
@@ -33,7 +35,9 @@ from database import get_db
 from models.brand import Brand
 from models.partner_order import PartnerOrder
 from services import xendit_client
+from services.dipay_client import DipayError
 from services.partner_orders import create_partner_order, get_partner_order
+from services.release_clock import JAKARTA
 from services.xendit_client import XenditError
 
 _LOG = logging.getLogger("beli_aman_bap.partner")
@@ -130,10 +134,57 @@ def _is_mock_mode(brand: Brand) -> bool:
     )
 
 
+def _validity_period(expires_in: int) -> tuple[str, datetime]:
+    """Dipay ``validityPeriod`` (ISO-8601, Jakarta) + the tz-aware expiry.
+
+    Same shape as ``dipay_invoices._validity_period`` but derived from the
+    partner's ``expires_in_seconds`` instead of the global 1800.
+    """
+    exp = datetime.now(JAKARTA) + timedelta(seconds=expires_in)
+    return exp.isoformat(timespec="seconds"), exp
+
+
+async def _create_dipay_invoice(
+    brand: Brand, order: PartnerOrder, expires_in: int
+) -> None:
+    """Mint a Dipay QRIS for a partner order (SNAP v2.1 ``qr-mpm-generate``).
+
+    ``invoice_id`` holds the SNAP ``partnerReferenceNo`` (``q-…``); the PNG
+    renderer (``routers/qris.py``) resolves it back to ``qris_content``.
+    Mirrors ``dipay_invoices.create_invoice_for_cart`` minus the reservation
+    dance — the 409 idempotency check in ``create_partner_order`` already
+    serializes this single-row insert.
+    """
+    from services import dipay_client, dipay_invoices
+
+    config = dipay_client.resolve_config(brand)
+    partner_ref = dipay_client.snap_ref("q", str(order.id))
+    validity_period, expires_at = _validity_period(expires_in)
+    response = await dipay_client.create_qris(
+        config=config,
+        partner_reference_no=partner_ref,
+        amount_idr=order.amount_idr,
+        validity_period=validity_period,
+    )
+    order.invoice_id = partner_ref
+    order.invoice_provider = "dipay"
+    order.qris_content = dipay_invoices._validate_qris_response(response)
+    order.expires_at = expires_at.astimezone(timezone.utc)
+    order.payment_url = _pay_page_url(order)
+    _LOG.info(
+        "partner invoice: Dipay QRIS %s minted for order=%s brand=%s",
+        partner_ref, order.id, brand.slug,
+    )
+
+
 async def _create_invoice(
     db: AsyncSession, brand: Brand, order: PartnerOrder, expires_in: int
 ) -> None:
-    """Mint the Xendit invoice for a partner order and stamp the row."""
+    """Mint the payment invoice for a partner order and stamp the row."""
+    if (getattr(brand, "payment_provider", None) or "").strip().lower() == "dipay":
+        await _create_dipay_invoice(brand, order, expires_in)
+        return
+
     if _is_mock_mode(brand):
         mock_invoice_id = f"dev-partner-{order.id}"
         order.invoice_id = mock_invoice_id
@@ -192,15 +243,17 @@ async def register_order(
 
     try:
         await _create_invoice(db, brand, order, body.expires_in_seconds)
-    except XenditError as e:
+    except (XenditError, DipayError) as e:
         await db.rollback()
-        _LOG.exception("Xendit invoice creation failed for partner order")
+        _LOG.exception("Payment invoice creation failed for partner order")
         raise HTTPException(502, f"Payment provider error: {e.status_code}")
 
     await db.commit()
     await db.refresh(order)
 
-    expires_at = datetime.now(timezone.utc) + timedelta(seconds=body.expires_in_seconds)
+    expires_at = order.expires_at or (
+        datetime.now(timezone.utc) + timedelta(seconds=body.expires_in_seconds)
+    )
     return PartnerOrderOut(
         order_id=order.id,
         external_order_id=order.external_order_id,

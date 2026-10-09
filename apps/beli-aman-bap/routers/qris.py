@@ -9,8 +9,9 @@ ourselves so buyers get a stable, cacheable URL:
 
 ``partner_ref`` is the SNAP ``partnerReferenceNo`` we minted
 (``q-{…}``, ≤32 chars) — resolved via the order snapshot's
-``partner_ref`` / ``invoice_id`` keys, or the cart's ``invoice_id`` when
-``invoice_provider == "dipay"``.
+``partner_ref`` / ``invoice_id`` keys, the cart's ``invoice_id`` when
+``invoice_provider == "dipay"``, or the partner order's ``invoice_id``
+(external-merchant QRIS, e.g. Consumerland tickets via ``/api/v1/partner``).
 
 Rendering is done on demand with ``qrcode`` (no image storage); responses
 carry a 1-hour ``Cache-Control`` since a QRIS payload never changes for a
@@ -60,7 +61,7 @@ def _render_png(content: str) -> bytes:
 async def _resolve_qr_content(db: AsyncSession, invoice_ref: str) -> str | None:
     """Find the QRIS payload for ``invoice_ref`` — orders first (snapshot
     ``partner_ref`` / ``invoice_id``), then carts (``invoice_id`` +
-    ``invoice_provider == "dipay"``)."""
+    ``invoice_provider == "dipay"``), then partner orders."""
     # 1. Order snapshot lookup: partner_ref (the value we sent to Dipay,
     # echoed back in the callback) or invoice_id for parity with the other
     # providers' receivers.
@@ -97,6 +98,24 @@ async def _resolve_qr_content(db: AsyncSession, invoice_ref: str) -> str | None:
         if cart.payment_state != "pending":
             return None
         return cart.qris_content
+
+    # 3. Partner orders (external merchants, e.g. Consumerland tickets via
+    # /api/v1/partner): invoice_id holds the SNAP ref when provider is dipay.
+    from models.partner_order import PartnerOrder, PartnerOrderStatus
+
+    po_q = await db.execute(
+        select(PartnerOrder).where(
+            PartnerOrder.invoice_id == invoice_ref,
+            PartnerOrder.invoice_provider == "dipay",
+        )
+    )
+    p_order = po_q.scalars().first()
+    if p_order is not None:
+        # Same terminal-state rule as carts: a consumed/expired QR must not
+        # keep resolving to a reusable payload.
+        if p_order.status != PartnerOrderStatus.PENDING:
+            return None
+        return p_order.qris_content
 
     return None
 

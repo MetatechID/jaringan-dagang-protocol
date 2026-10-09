@@ -55,5 +55,12 @@ class PartnerOrder(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     payment_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Where to send the buyer after payment — supplied by the partner.
     success_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Dipay QRIS: raw EMVCo payload rendered on demand at
+    # /api/v1/qris/{invoice_id}.png (invoice_id holds the SNAP ref).
+    qris_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # When the payment window closes (Dipay validityPeriod / partner expiry).
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
 
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
