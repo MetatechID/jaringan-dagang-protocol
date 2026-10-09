@@ -169,6 +169,8 @@ from routers.shipping import router as shipping_router  # noqa: E402
 from routers.analytics import router as analytics_router  # noqa: E402
 from routers.storefront_integrations import router as storefront_integrations_router  # noqa: E402
 from routers.webhooks_xendit import router as webhooks_xendit_router  # noqa: E402
+from routers.partner import router as partner_router  # noqa: E402
+from routers.pay_page import router as pay_page_router  # noqa: E402
 from routers.webhooks_biteship import router as webhooks_biteship_router  # noqa: E402
 from routers.webhooks_jubelio import router as webhooks_jubelio_router  # noqa: E402
 from routers.webhooks_oy import router as webhooks_oy_router  # noqa: E402
@@ -243,6 +245,8 @@ except Exception as _bckr_err:  # noqa: BLE001
     logger.error("Bot checkout router unavailable: %r", _bckr_err)
 
 app.include_router(auth_router)
+app.include_router(partner_router)
+app.include_router(pay_page_router)
 app.include_router(profiles_router)
 app.include_router(brands_router)
 app.include_router(orders_router)

@@ -11,6 +11,7 @@ compare it against ``settings.xendit_webhook_token``.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -21,8 +22,11 @@ from config import settings
 from database import get_db
 from models.bot_rest import Cart, CartStatus
 from models.escrow_ledger import EscrowEntryStatus, EscrowEntryType, EscrowLedger
+from models.brand import Brand
 from models.order import Order
 from services import order_paid
+from services import partner_orders
+from services import partner_webhook
 
 _LOG = logging.getLogger("beli_aman_bap.webhooks_xendit")
 
@@ -80,6 +84,21 @@ async def invoice_callback(
 
 
 async def _handle_paid(db: AsyncSession, invoice_id: str, external_id: str) -> dict:
+    if external_id.startswith("partner-"):
+        partner_order_id = external_id[len("partner-"):]
+        order = await partner_orders.get_partner_order(db, partner_order_id)
+        if order is None:
+            raise HTTPException(404, f"No partner order for external_id={external_id}")
+        order = await partner_orders.mark_partner_order_paid(
+            order=order, invoice_id=invoice_id,
+        )
+        await db.commit()
+        # Notify the partner out-of-band — background task so a slow/unreachable
+        # callback endpoint can't delay the 200 ACK back to Xendit (which would
+        # make Xendit retry). Opens its own DB session for the brand lookup.
+        asyncio.create_task(_notify_partner_bg(order.id))
+        return {"ok": True, "order_id": order.id, "status": order.status}
+
     if external_id.startswith("order-"):
         order_id = external_id[len("order-"):]
         order = await order_paid.mark_order_paid(
@@ -126,7 +145,37 @@ async def _handle_paid(db: AsyncSession, invoice_id: str, external_id: str) -> d
     raise HTTPException(400, f"Unrecognized external_id prefix: {external_id!r}")
 
 
+async def _notify_partner_bg(partner_order_id: str) -> None:
+    """Background task — opens its own session, POSTs the signed payment
+    callback to the partner. Decoupled from the request lifecycle on purpose:
+    the Xendit webhook ACKs 200 as soon as the paid flip is committed."""
+    try:
+        from database import async_session
+
+        async with async_session() as session:
+            order = await partner_orders.get_partner_order(session, partner_order_id)
+            if order is None:
+                return
+            brand = (
+                await session.execute(
+                    select(Brand).where(Brand.id == order.brand_id)
+                )
+            ).scalar_one_or_none()
+            if brand is None:
+                return
+            await partner_webhook.notify_partner_paid(order, brand)
+            await session.commit()
+    except Exception:  # noqa: BLE001
+        _LOG.exception("Partner callback background task failed for %s", partner_order_id)
+
+
 async def _handle_expired(db: AsyncSession, invoice_id: str, external_id: str) -> dict:
+    if external_id.startswith("partner-"):
+        partner_order_id = external_id[len("partner-"):]
+        order = await partner_orders.get_partner_order(db, partner_order_id)
+        if order is not None:
+            order = await partner_orders.mark_partner_order_expired(order)
+            return {"ok": True, "order_id": order.id, "status": order.status}
     if external_id.startswith("cart-"):
         cart_id = external_id[len("cart-"):]
         cart = (

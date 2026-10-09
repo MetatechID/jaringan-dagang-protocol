@@ -76,6 +76,16 @@ class Brand(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     dipay_private_key_b64: Mapped[str | None] = mapped_column(Text, nullable=True)
     dipay_merchant_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
+    # Partner API (external merchants registering transactions via
+    # /api/v1/partner, e.g. Consumerland ticket sales). ``partner_api_key``
+    # is the Bearer token the partner presents; ``partner_callback_url`` +
+    # ``partner_callback_secret`` key the signed payment callback we POST
+    # back when an invoice is paid. Plaintext v1 — encrypt at rest when the
+    # KMS / Vault-of-record lands.
+    partner_api_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    partner_callback_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    partner_callback_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     # (The Dipay disbursement target moved to the unified
     # ``payout_bank_accounts`` table — see models/payout_bank_account.py.)
 
