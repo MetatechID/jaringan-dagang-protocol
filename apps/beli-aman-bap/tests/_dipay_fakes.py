@@ -114,6 +114,32 @@ def StubBrand(
     return SimpleNamespace(**base)
 
 
+def StubPartnerOrder(
+    *,
+    id: str = "po-123",
+    brand_id: str = "brand-id",
+    external_order_id: str = "CL26-ABC123",
+    amount_idr: int = 100_000,
+    status: str = "pending",
+    invoice_id: str = "q-0f0e8a2e",
+    invoice_provider: str = "dipay",
+    **overrides,
+) -> SimpleNamespace:
+    """Minimal PartnerOrder-shape for the Dipay partner-callback tests."""
+    base = dict(
+        id=id,
+        brand_id=brand_id,
+        external_order_id=external_order_id,
+        amount_idr=amount_idr,
+        status=status,
+        invoice_id=invoice_id,
+        invoice_provider=invoice_provider,
+        paid_at=None,
+    )
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
 def StubAccount(
     *,
     bank_code: str = "014",

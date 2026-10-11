@@ -73,11 +73,11 @@ def _patch_db(app, monkeypatch, *results):
     return session
 
 
-def _stub_resolve(monkeypatch, *, brand=None, cart=None, order=None):
+def _stub_resolve(monkeypatch, *, brand=None, cart=None, order=None, partner_order=None):
     """Replace ``_resolve_targets`` so the test controls which surface the
     callback resolves to."""
     async def _resolve(db, ref):
-        return brand, cart, order
+        return brand, cart, order, partner_order
     monkeypatch.setattr("routers.webhooks_dipay._resolve_targets", _resolve)
 
 
@@ -296,6 +296,169 @@ class TestQrisCallbackPendingExpired:
         assert cart.payment_state == "expired"
         from models.bot_rest import CartStatus
         assert cart.status == CartStatus.EXPIRED
+
+
+# ---- QRIS callback — partner-order branch -----------------------------------
+
+
+class TestQrisCallbackPartnerOrder:
+    """External-merchant partner orders (e.g. Consumerland tickets) paid via
+    Dipay QRIS — the ``/api/v1/partner`` surface, resolved by the same
+    ``invoice_id == ref`` lookup the QRIS PNG renderer uses."""
+
+    def _make_order(self, **overrides):
+        from tests._dipay_fakes import StubPartnerOrder
+        return StubPartnerOrder(**overrides)
+
+    def _stub_mark_partner_paid(self, monkeypatch, captured=None):
+        from services import partner_orders as po_mod
+
+        async def fake_mark_paid(*, order, invoice_id, actor, invoice_provider="xendit", **_):
+            if captured is not None:
+                captured.update(
+                    order=order, invoice_id=invoice_id, actor=actor,
+                    invoice_provider=invoice_provider,
+                )
+            # Mirror the real service: mutate and return.
+            order.status = "paid"
+            order.paid_at = "2026-10-11T00:00:00+00:00"
+            return order
+        monkeypatch.setattr(po_mod, "mark_partner_order_paid", fake_mark_paid)
+        # The router imports the module, not the symbol — patch what it uses.
+        monkeypatch.setattr(
+            "routers.webhooks_dipay.partner_orders.mark_partner_order_paid",
+            fake_mark_paid,
+        )
+
+    def _stub_notify_bg(self, monkeypatch, captured=None):
+        async def fake_bg(order_id):
+            if captured is not None:
+                captured.setdefault("bg_order_ids", []).append(order_id)
+        monkeypatch.setattr(
+            "routers.webhooks_dipay.partner_webhook.notify_partner_paid_bg", fake_bg
+        )
+
+    def test_paid_flips_partner_order_and_schedules_callback(self, monkeypatch, client):
+        client_, app = client
+        brand = StubBrand()
+        p_order = self._make_order(id="po-1", amount_idr=100_000)
+        _patch_db(app, monkeypatch)
+        _stub_resolve(monkeypatch, brand=brand, partner_order=p_order)
+        _stub_query_qris(monkeypatch)
+        captured: dict = {}
+        self._stub_mark_partner_paid(monkeypatch, captured)
+        self._stub_notify_bg(monkeypatch, captured)
+
+        resp = client_.post(
+            "/webhooks/dipay/qris",
+            content=_qris_body("q-po-ref-1", "00"),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200, resp.text
+        out = resp.json()
+        assert out["responseCode"] == "2004800"
+        assert out["order_id"] == "po-1"
+        assert out["status"] == "paid"
+        assert captured["order"] is p_order
+        assert captured["invoice_id"] == "q-po-ref-1"
+        assert captured["actor"] == "system:dipay_webhook"
+        assert captured["invoice_provider"] == "dipay"
+        assert captured["bg_order_ids"] == ["po-1"]
+
+    def test_paid_idempotent_when_already_paid(self, monkeypatch, client):
+        """Real service no-ops on an already-paid order; router still ACKs."""
+        from services import partner_orders as po_mod
+
+        client_, app = client
+        brand = StubBrand()
+        p_order = self._make_order(id="po-1", status="paid")
+        _patch_db(app, monkeypatch)
+        _stub_resolve(monkeypatch, brand=brand, partner_order=p_order)
+        _stub_query_qris(monkeypatch)
+
+        called: dict = {}
+        async def fake_mark_paid(*, order, **_):
+            called["hit"] = True
+            return order
+        monkeypatch.setattr(
+            "routers.webhooks_dipay.partner_orders.mark_partner_order_paid",
+            fake_mark_paid,
+        )
+        self._stub_notify_bg(monkeypatch)
+
+        resp = client_.post(
+            "/webhooks/dipay/qris",
+            content=_qris_body("q-po-ref-1", "00"),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "paid"
+        # Router delegates idempotency to the service; it was still called.
+        assert called.get("hit") is True
+
+    def test_amount_mismatch_is_409(self, monkeypatch, client):
+        client_, app = client
+        brand = StubBrand()
+        p_order = self._make_order(id="po-1", amount_idr=250_000)
+        _patch_db(app, monkeypatch)
+        _stub_resolve(monkeypatch, brand=brand, partner_order=p_order)
+        _stub_query_qris(monkeypatch)  # verified amount = 100000.00 IDR
+
+        resp = client_.post(
+            "/webhooks/dipay/qris",
+            content=_qris_body("q-po-ref-1", "00"),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 409, resp.text
+
+    def test_expired_flips_pending_partner_order(self, monkeypatch, client):
+        from services import partner_orders as po_mod
+
+        client_, app = client
+        brand = StubBrand()
+        p_order = self._make_order(id="po-1", status="pending")
+        _patch_db(app, monkeypatch)
+        _stub_resolve(monkeypatch, brand=brand, partner_order=p_order)
+        _stub_query_qris(monkeypatch, returns={"latestTransactionStatus": "05"})
+
+        async def fake_expired(order):
+            order.status = "expired"
+            return order
+        monkeypatch.setattr(
+            "routers.webhooks_dipay.partner_orders.mark_partner_order_expired",
+            fake_expired,
+        )
+
+        resp = client_.post(
+            "/webhooks/dipay/qris",
+            content=_qris_body("q-po-ref-1", "05"),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200, resp.text
+        out = resp.json()
+        assert out["responseCode"] == "2004800"
+        assert out["order_id"] == "po-1"
+        assert out["status"] == "expired"
+
+    def test_pending_status_is_a_noop(self, monkeypatch, client):
+        client_, app = client
+        brand = StubBrand()
+        p_order = self._make_order(id="po-1", status="pending")
+        session = _patch_db(app, monkeypatch)
+        _stub_resolve(monkeypatch, brand=brand, partner_order=p_order)
+        _stub_query_qris(monkeypatch, returns={"latestTransactionStatus": "01"})
+
+        resp = client_.post(
+            "/webhooks/dipay/qris",
+            content=_qris_body("q-po-ref-1", "01"),
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200, resp.text
+        out = resp.json()
+        assert out["responseCode"] == "2004800"
+        assert out["status"] == "pending"
+        assert p_order.status == "pending"
+        assert session.added == []
 
 
 # ---- QRIS callback — error paths -------------------------------------------
