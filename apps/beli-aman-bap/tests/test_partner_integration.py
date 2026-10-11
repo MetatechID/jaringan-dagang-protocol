@@ -616,3 +616,114 @@ def test_qris_png_resolver_hides_paid_partner_order():
     )
     db = FakeSession([[], [], [po]])
     assert asyncio.run(_resolve_qr_content(db, "q-abc123")) is None
+
+
+# ---------- Admin list endpoint (seller dashboard BFF) ----------
+
+
+class _FakeRowsExecute:
+    """execute() shim returning ``.all()`` rows (list of tuples)."""
+
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+    def scalars(self):
+        vals = [r[0] if isinstance(r, tuple) else r for r in self._rows]
+        return SimpleNamespace(first=lambda: vals[0] if vals else None)
+
+
+class _AdminFakeSession:
+    def __init__(self, rows):
+        self._rows = rows
+
+    async def execute(self, *_a, **_k):
+        return _FakeRowsExecute(self._rows)
+
+    async def commit(self):
+        return None
+
+
+def _stub_admin_token(monkeypatch, ok=True):
+    """Point settings.admin_token at a known value (or a wrong one)."""
+    from config import settings
+
+    monkeypatch.setattr(
+        settings, "admin_token", "test-admin-token" if ok else "not-it"
+    )
+
+
+def _partner_row(**overrides):
+    from datetime import datetime as _dt
+
+    base = dict(
+        id="po-1",
+        brand_id="brand-id",
+        external_order_id="CL26-ABC123",
+        status="paid",
+        amount_idr=399_000,
+        description="Consumerland Conference 2026 — 1 x presale",
+        buyer={"name": "Budi", "email": "budi@example.com", "phone": "+62811"},
+        items=[{"name": "presale ticket", "qty": 1, "unit_price_idr": 399_000}],
+        invoice_provider="dipay",
+        invoice_id="q-abc123",
+        payment_url="https://api.beli-aman.metatech.id/pay/po-1",
+        paid_at=_dt(2026, 10, 11, 3, 0, tzinfo=timezone.utc),
+        expires_at=None,
+        created_at=_dt(2026, 10, 11, 2, 0, tzinfo=timezone.utc),
+    )
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
+def test_admin_orders_requires_admin_token(monkeypatch):
+    db = _AdminFakeSession([])
+    app = FastAPI()
+    app.include_router(partner_router)
+
+    async def _override_db():
+        yield db
+
+    app.dependency_overrides[get_db] = _override_db
+    _stub_admin_token(monkeypatch)  # settings.admin_token = "test-admin-token"
+
+    client = TestClient(app, raise_server_exceptions=False)
+    # Wrong / missing token → 403.
+    resp = client.get("/api/v1/partner/admin/orders")
+    assert resp.status_code == 403
+    resp = client.get(
+        "/api/v1/partner/admin/orders",
+        headers={"X-Admin-Token": "wrong-token"},
+    )
+    assert resp.status_code == 403
+
+
+def test_admin_orders_lists_rows_with_brand_slug(monkeypatch):
+    db = _AdminFakeSession([(_partner_row(), "consumerland")])
+    app = FastAPI()
+    app.include_router(partner_router)
+
+    async def _override_db():
+        yield db
+
+    app.dependency_overrides[get_db] = _override_db
+    _stub_admin_token(monkeypatch)
+
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.get(
+        "/api/v1/partner/admin/orders?brand_slug=consumerland",
+        headers={"X-Admin-Token": "test-admin-token"},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert len(data) == 1
+    row = data[0]
+    assert row["external_order_id"] == "CL26-ABC123"
+    assert row["brand_slug"] == "consumerland"
+    assert row["status"] == "paid"
+    assert row["amount_idr"] == 399_000
+    assert row["buyer"]["email"] == "budi@example.com"
+    assert row["paid_at"].startswith("2026-10-11T03")
+    assert row["payment_url"].endswith("/pay/po-1")

@@ -23,6 +23,7 @@ import logging
 import time
 
 import httpx
+from sqlalchemy import select
 
 _LOG = logging.getLogger("beli_aman_bap.partner_webhook")
 
@@ -107,3 +108,31 @@ async def notify_partner_paid(order, brand) -> bool:
         secret=brand.partner_callback_secret,
         payload=payload,
     )
+
+
+async def notify_partner_paid_bg(partner_order_id: str) -> None:
+    """Background task — opens its own DB session, POSTs the signed payment
+    callback to the partner. Decoupled from the request lifecycle on purpose:
+    the webhook handler ACKs 200 (Xendit retries on slow ACKs) as soon as the
+    paid flip is committed. Schedulers/cron should re-drive unpaid partner
+    orders whose callback failed — the money is already taken."""
+    try:
+        from database import async_session
+        from models.brand import Brand
+        from services import partner_orders
+
+        async with async_session() as session:
+            order = await partner_orders.get_partner_order(session, partner_order_id)
+            if order is None:
+                return
+            brand = (
+                await session.execute(
+                    select(Brand).where(Brand.id == order.brand_id)
+                )
+            ).scalar_one_or_none()
+            if brand is None:
+                return
+            await notify_partner_paid(order, brand)
+            await session.commit()
+    except Exception:  # noqa: BLE001
+        _LOG.exception("Partner callback background task failed for %s", partner_order_id)

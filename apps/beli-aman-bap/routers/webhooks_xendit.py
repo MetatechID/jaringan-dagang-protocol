@@ -22,8 +22,6 @@ from config import settings
 from database import get_db
 from models.bot_rest import Cart, CartStatus
 from models.escrow_ledger import EscrowEntryStatus, EscrowEntryType, EscrowLedger
-from models.brand import Brand
-from models.order import Order
 from services import order_paid
 from services import partner_orders
 from services import partner_webhook
@@ -96,7 +94,7 @@ async def _handle_paid(db: AsyncSession, invoice_id: str, external_id: str) -> d
         # Notify the partner out-of-band — background task so a slow/unreachable
         # callback endpoint can't delay the 200 ACK back to Xendit (which would
         # make Xendit retry). Opens its own DB session for the brand lookup.
-        asyncio.create_task(_notify_partner_bg(order.id))
+        asyncio.create_task(partner_webhook.notify_partner_paid_bg(order.id))
         return {"ok": True, "order_id": order.id, "status": order.status}
 
     if external_id.startswith("order-"):
@@ -143,30 +141,6 @@ async def _handle_paid(db: AsyncSession, invoice_id: str, external_id: str) -> d
         return {"ok": True, "cart_id": cart.id, "payment_state": cart.payment_state}
 
     raise HTTPException(400, f"Unrecognized external_id prefix: {external_id!r}")
-
-
-async def _notify_partner_bg(partner_order_id: str) -> None:
-    """Background task — opens its own session, POSTs the signed payment
-    callback to the partner. Decoupled from the request lifecycle on purpose:
-    the Xendit webhook ACKs 200 as soon as the paid flip is committed."""
-    try:
-        from database import async_session
-
-        async with async_session() as session:
-            order = await partner_orders.get_partner_order(session, partner_order_id)
-            if order is None:
-                return
-            brand = (
-                await session.execute(
-                    select(Brand).where(Brand.id == order.brand_id)
-                )
-            ).scalar_one_or_none()
-            if brand is None:
-                return
-            await partner_webhook.notify_partner_paid(order, brand)
-            await session.commit()
-    except Exception:  # noqa: BLE001
-        _LOG.exception("Partner callback background task failed for %s", partner_order_id)
 
 
 async def _handle_expired(db: AsyncSession, invoice_id: str, external_id: str) -> dict:

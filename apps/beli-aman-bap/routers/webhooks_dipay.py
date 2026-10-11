@@ -39,6 +39,7 @@ Reference: https://api-docs.dipay.id/ (QRIS MPM / Disbursement).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -52,8 +53,11 @@ from database import get_db
 from models.bot_rest import Cart, CartStatus
 from models.brand import Brand
 from models.escrow_ledger import EscrowEntryStatus, EscrowEntryType, EscrowLedger
+from models.partner_order import PartnerOrder, PartnerOrderStatus
 from services import dipay_client
 from services import order_paid
+from services import partner_orders
+from services import partner_webhook
 from services.dipay_client import DipayError
 
 _LOG = logging.getLogger("beli_aman_bap.webhooks_dipay")
@@ -78,17 +82,23 @@ _QRIS_QUERY_NOT_FOUND_PREFIX = "40451"
 
 async def _resolve_targets(
     db: AsyncSession, ref: str
-) -> tuple[Brand | None, Cart | None, Any | None]:
-    """Resolve a Dipay ``partnerReferenceNo`` to ``(brand, cart, order)``.
+) -> tuple[Brand | None, Cart | None, Any | None, PartnerOrder | None]:
+    """Resolve a Dipay ``partnerReferenceNo`` to ``(brand, cart, order,
+    partner_order)``.
 
-    Exactly one of ``cart`` / ``order`` will be set when the ref is known
-    (brand still may be ``None`` if the owning brand row vanished):
+    Exactly one of ``cart`` / ``order`` / ``partner_order`` will be set when
+    the ref is known (brand still may be ``None`` if the owning brand row
+    vanished):
 
     1. Bot-flow carts: ``cart.invoice_id`` + ``invoice_provider == "dipay"``
        → brand via ``cart.bpp_id``.
     2. SDK orders: ``payment_method_snapshot.partner_ref`` (the value we
        sent to Dipay, echoed back unchanged) falling back to
        ``invoice_id`` → brand via ``order.brand_id``.
+    3. Partner orders (external merchants via ``/api/v1/partner``):
+       ``partner_order.invoice_id`` (the SNAP ref minted by
+       ``partner.py::_create_dipay_invoice``) + ``invoice_provider ==
+       "dipay"`` → brand via ``order.brand_id``.
     """
     # 1. Direct cart lookup.
     cart_q = await db.execute(
@@ -102,7 +112,7 @@ async def _resolve_targets(
         brand_q = await db.execute(
             select(Brand).where(Brand.bpp_id == cart.bpp_id)
         )
-        return brand_q.scalars().first(), cart, None
+        return brand_q.scalars().first(), cart, None, None
 
     # 2. Order snapshot lookup — partner_ref first, invoice_id for parity
     # with the other providers' receivers.
@@ -121,9 +131,25 @@ async def _resolve_targets(
         brand_q = await db.execute(
             select(Brand).where(Brand.id == order.brand_id)
         )
-        return brand_q.scalars().first(), None, order
+        return brand_q.scalars().first(), None, order, None
 
-    return None, None, None
+    # 3. Partner orders — same lookup the QRIS PNG renderer uses
+    # (routers/qris.py): invoice_id holds the SNAP ref when provider is
+    # dipay.
+    po_q = await db.execute(
+        select(PartnerOrder).where(
+            PartnerOrder.invoice_id == ref,
+            PartnerOrder.invoice_provider == "dipay",
+        )
+    )
+    p_order = po_q.scalars().first()
+    if p_order is not None:
+        brand_q = await db.execute(
+            select(Brand).where(Brand.id == p_order.brand_id)
+        )
+        return brand_q.scalars().first(), None, None, p_order
+
+    return None, None, None, None
 
 
 async def _parse_body(request: Request) -> dict[str, Any]:
@@ -197,11 +223,18 @@ def _verified_amount(response: dict[str, Any]) -> tuple[int, str]:
     return int(value), currency
 
 
-def _expected_amount(cart: Cart | None, order: Any | None, ref: str = "") -> int:
+def _expected_amount(
+    cart: Cart | None,
+    order: Any | None,
+    partner_order: PartnerOrder | None = None,
+    ref: str = "",
+) -> int:
     if order is not None:
         return int(order.total_idr)
     if cart is not None:
         return int((cart.quote_json or {}).get("total_idr") or 0)
+    if partner_order is not None:
+        return int(partner_order.amount_idr)
     if ref.startswith("dipay-dev-"):
         return -1
     raise HTTPException(404, "Unknown Dipay invoice")
@@ -224,8 +257,8 @@ async def qris_callback(
     if not ref or not isinstance(ref, str):
         raise HTTPException(400, "Missing originalPartnerReferenceNo in callback")
 
-    brand, cart, order = await _resolve_targets(db, ref)
-    if brand is None and cart is None and order is None:
+    brand, cart, order, partner_order = await _resolve_targets(db, ref)
+    if brand is None and cart is None and order is None and partner_order is None:
         _LOG.warning(
             "Dipay QRIS callback: no surface for originalPartnerReferenceNo=%s "
             "— refusing",
@@ -264,18 +297,19 @@ async def qris_callback(
     if verified_ref != ref:
         raise HTTPException(502, "Dipay verification reference mismatch")
     amount, currency = _verified_amount(verified)
-    expected = _expected_amount(cart, order, ref=ref)
+    expected = _expected_amount(cart, order, partner_order, ref=ref)
     if expected != -1 and (currency != "IDR" or amount != expected):
         raise HTTPException(409, "Dipay payment amount or currency mismatch")
 
     status = str(verified.get("latestTransactionStatus") or "").strip()
     _LOG.info(
-        "Dipay QRIS callback: brand=%s ref=%s status=%s",
+        "Dipay QRIS callback: brand=%s ref=%s status=%s partner_order=%s",
         getattr(brand, "slug", None), ref, status,
+        partner_order.id if partner_order is not None else None,
     )
 
     if status == _QRIS_PAID:
-        return await _handle_paid(db, ref, cart, order)
+        return await _handle_paid(db, ref, cart, order, partner_order)
     if status == _QRIS_PENDING:
         # Non-final — nothing to do yet; a later callback finalizes.
         return {
@@ -286,7 +320,7 @@ async def qris_callback(
             "status": "pending",
         }
     if status == _QRIS_EXPIRED:
-        return await _handle_expired(db, ref, cart)
+        return await _handle_expired(db, ref, cart, partner_order)
     _LOG.warning(
         "Dipay QRIS callback: unhandled latestTransactionStatus=%s for ref=%s "
         "— no-op", status, ref,
@@ -305,9 +339,29 @@ async def _handle_paid(
     ref: str,
     cart: Cart | None,
     order: Any | None,
+    partner_order: PartnerOrder | None = None,
 ) -> dict:
     """Process a ``00`` (success) callback for the resolved surface."""
     actor = "system:dipay_webhook"
+
+    if partner_order is not None:
+        p_order = await partner_orders.mark_partner_order_paid(
+            order=partner_order,
+            invoice_id=ref,
+            actor=actor,
+            invoice_provider="dipay",
+        )
+        await db.commit()
+        # Notify the partner out-of-band — same pattern as the Xendit
+        # receiver: the callback ACK must not wait on the partner endpoint.
+        asyncio.create_task(partner_webhook.notify_partner_paid_bg(p_order.id))
+        return {
+            "responseCode": "2004800",
+            "responseMessage": "Request has been processed successfully",
+            "ok": True,
+            "order_id": p_order.id,
+            "status": p_order.status,
+        }
 
     if order is not None:
         order = await order_paid.mark_order_paid(
@@ -391,9 +445,24 @@ async def _handle_paid(
     raise HTTPException(404, "Unknown Dipay invoice")
 
 
-async def _handle_expired(db: AsyncSession, ref: str, cart: Cart | None) -> dict:
-    """``05`` (expired) callback — mark the cart expired if matched.
-    Orders aren't touched here; expired orders simply stay unpaid."""
+async def _handle_expired(
+    db: AsyncSession,
+    ref: str,
+    cart: Cart | None,
+    partner_order: PartnerOrder | None = None,
+) -> dict:
+    """``05`` (expired) callback — mark the cart / partner order expired if
+    matched. Orders aren't touched here; expired orders simply stay unpaid."""
+    if partner_order is not None and partner_order.status == PartnerOrderStatus.PENDING:
+        p_order = await partner_orders.mark_partner_order_expired(partner_order)
+        await db.commit()
+        return {
+            "responseCode": "2004800",
+            "responseMessage": "Successful",
+            "ok": True,
+            "order_id": p_order.id,
+            "status": p_order.status,
+        }
     if cart and cart.payment_state == "pending":
         cart.payment_state = "expired"
         cart.status = CartStatus.EXPIRED

@@ -96,6 +96,7 @@ async def mark_partner_order_paid(
     order: PartnerOrder,
     invoice_id: str,
     actor: str = "system:xendit_webhook",
+    invoice_provider: str = "xendit",
 ) -> PartnerOrder:
     """Idempotently flip pending → paid and stamp the invoice id.
 
@@ -119,7 +120,7 @@ async def mark_partner_order_paid(
     if not order.invoice_id:
         order.invoice_id = invoice_id
     if not order.invoice_provider:
-        order.invoice_provider = "xendit"
+        order.invoice_provider = invoice_provider
     return order
 
 

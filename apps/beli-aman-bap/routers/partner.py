@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth.partner_auth import require_partner
 from config import settings
 from database import get_db
+from deps import require_admin_token
 from models.brand import Brand
 from models.partner_order import PartnerOrder
 from services import xendit_client
@@ -115,6 +116,24 @@ class PublicStatusOut(BaseModel):
     amount_idr: int
     paid_at: str | None = None
     success_url: str | None = None
+
+
+class PartnerAdminOrderOut(BaseModel):
+    """One row of the admin partner-orders list (seller dashboard BFF)."""
+    id: str
+    brand_slug: str | None = None
+    external_order_id: str
+    status: str
+    amount_idr: int
+    description: str
+    buyer: dict | list | None = None
+    items: list | dict | None = None
+    invoice_provider: str | None = None
+    invoice_id: str | None = None
+    payment_url: str | None = None
+    paid_at: str | None = None
+    expires_at: str | None = None
+    created_at: str | None = None
 
 
 # ---------- Helpers ----------
@@ -299,3 +318,57 @@ async def get_public_order_status(
         paid_at=order.paid_at.isoformat() if order.paid_at else None,
         success_url=order.success_url,
     )
+
+# ---------- Admin (seller dashboard BFF) ----------
+
+@router.get("/admin/orders", response_model=list[PartnerAdminOrderOut])
+async def list_partner_orders_admin(
+    brand_slug: str | None = None,
+    status: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    _admin: None = Depends(require_admin_token),
+    db: AsyncSession = Depends(get_db),
+) -> list[PartnerAdminOrderOut]:
+    """Partner-orders list for the seller dashboard, keyed by brand slug.
+
+    Auth is the shared ``X-Admin-Token`` (same credential the dashboard's
+    BFF routes already forward for BAP shipping/label lookups) — the seller
+    dashboard lives in a separate Postgres DB, so it can't query
+    ``partner_orders`` directly. Read-only; no partner key required.
+    """
+    from sqlalchemy import select
+
+    limit = max(1, min(limit, 500))
+    stmt = (
+        select(PartnerOrder, Brand.slug)
+        .join(Brand, Brand.id == PartnerOrder.brand_id)
+        .order_by(PartnerOrder.created_at.desc())
+        .offset(max(0, offset))
+        .limit(limit)
+    )
+    if brand_slug:
+        stmt = stmt.where(Brand.slug == brand_slug)
+    if status:
+        stmt = stmt.where(PartnerOrder.status == status)
+
+    rows = (await db.execute(stmt)).all()
+    return [
+        PartnerAdminOrderOut(
+            id=o.id,
+            brand_slug=slug,
+            external_order_id=o.external_order_id,
+            status=o.status,
+            amount_idr=o.amount_idr,
+            description=o.description,
+            buyer=o.buyer,
+            items=o.items,
+            invoice_provider=o.invoice_provider,
+            invoice_id=o.invoice_id,
+            payment_url=o.payment_url,
+            paid_at=o.paid_at.isoformat() if o.paid_at else None,
+            expires_at=o.expires_at.isoformat() if o.expires_at else None,
+            created_at=o.created_at.isoformat() if o.created_at else None,
+        )
+        for o, slug in rows
+    ]
