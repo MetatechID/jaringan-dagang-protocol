@@ -55,7 +55,7 @@ class FakeSession:
         return None
 
     async def rollback(self):
-        self.rolled_back = True
+        return None
 
     def add(self, obj):
         self.added.append(obj)

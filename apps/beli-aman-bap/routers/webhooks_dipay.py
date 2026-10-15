@@ -162,6 +162,8 @@ async def _parse_body(request: Request) -> dict[str, Any]:
             body = await request.json()
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(400, "Invalid JSON body") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Invalid JSON body")
     return body
 
 
@@ -289,8 +291,6 @@ async def _qris_notify(
     body_bytes = await request.body()
     await _verify_inbound_signature(request, body_bytes, x_signature, x_timestamp)
     body = await _parse_body(request)
-    if not isinstance(body, dict):
-        raise HTTPException(400, "Invalid JSON body")
 
     ref = body.get("originalPartnerReferenceNo")
     if not ref or not isinstance(ref, str):

@@ -25,7 +25,6 @@ instead (see ``routers/webhooks_dipay.py``).
 
 from __future__ import annotations
 
-import base64
 import json
 import os
 import sys
@@ -769,7 +768,10 @@ class TestRemitCallback:
 
 
 class TestDipayWebhookSignature:
-    def test_signature_verified_when_key_configured(self, monkeypatch, client):
+    # /v1.0/qr/qr-mpm-notify is Dipay's documented SNAP path; Dipay signs
+    # whichever path it posts to.
+    @pytest.mark.parametrize("path", ["/webhooks/dipay/qris", "/v1.0/qr/qr-mpm-notify"])
+    def test_signature_verified_when_key_configured(self, monkeypatch, client, path):
         from config import settings
         from cryptography.hazmat.primitives import hashes, serialization
         from cryptography.hazmat.primitives.asymmetric import padding, rsa
@@ -796,7 +798,6 @@ class TestDipayWebhookSignature:
         import hashlib
         body_hash = hashlib.sha256(body_str.encode("utf-8")).hexdigest()
         ts = "2026-09-23T10:00:00.000+07:00"
-        path = "/webhooks/dipay/qris"
         method = "POST"
         string_to_sign = f"{method}:{path}:{body_hash}:{ts}"
         sig = private_key.sign(
@@ -816,60 +817,6 @@ class TestDipayWebhookSignature:
         )
         assert resp.status_code == 200, resp.text
         assert resp.json()["responseCode"] == "2004800"
-
-    def test_snap_notify_path_verifies_signature_over_its_own_path(
-        self, monkeypatch, client
-    ):
-        """/v1.0/qr/qr-mpm-notify (Dipay's documented SNAP path) runs the same
-        handler; Dipay signs whichever path it posts to."""
-        import hashlib
-
-        from config import settings
-        from cryptography.hazmat.primitives import hashes, serialization
-        from cryptography.hazmat.primitives.asymmetric import padding, rsa
-
-        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-        pub_pem = private_key.public_key().public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo,
-        ).decode("utf-8")
-        monkeypatch.setattr(settings, "dipay_callback_public_key", pub_pem, raising=False)
-        monkeypatch.setattr(settings, "environment", "production")
-
-        client_, app = client
-        _patch_db(app, monkeypatch)
-        _stub_resolve(monkeypatch, brand=StubBrand(), order=StubOrder(id="ord-1", total_idr=100_000))
-        _stub_query_qris(monkeypatch)
-        _stub_mark_paid(monkeypatch)
-
-        path = "/v1.0/qr/qr-mpm-notify"
-        body_bytes = _qris_body("q0f0e8a2e123", "00")
-        ts = "2026-10-15T14:19:28+07:00"
-
-        def _sign(signed_path):
-            body_hash = hashlib.sha256(body_bytes).hexdigest()
-            return base64.b64encode(private_key.sign(
-                f"POST:{signed_path}:{body_hash}:{ts}".encode(),
-                padding.PKCS1v15(),
-                hashes.SHA256(),
-            )).decode()
-
-        def _post(sig):
-            return client_.post(path, content=body_bytes, headers={
-                "Content-Type": "application/json",
-                "X-SIGNATURE": sig,
-                "X-TIMESTAMP": ts,
-            })
-
-        resp = _post(_sign(path))
-        assert resp.status_code == 200, resp.text
-        assert resp.json()["responseCode"] == "2004800"
-        assert resp.json()["responseMessage"] == "Request has been processed successfully"
-
-        # A signature minted for the legacy path doesn't verify on this one.
-        resp = _post(_sign("/webhooks/dipay/qris"))
-        assert resp.status_code == 401
-        assert resp.json()["responseCode"] == "4014800"
 
     def test_invalid_signature_raises_401(self, monkeypatch, client):
         from config import settings
