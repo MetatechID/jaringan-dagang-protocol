@@ -54,6 +54,9 @@ class FakeSession:
     async def flush(self):
         return None
 
+    async def rollback(self):
+        return None
+
     def add(self, obj):
         self.added.append(obj)
         return None

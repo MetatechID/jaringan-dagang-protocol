@@ -45,6 +45,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -62,7 +63,7 @@ from services.dipay_client import DipayError
 
 _LOG = logging.getLogger("beli_aman_bap.webhooks_dipay")
 
-router = APIRouter(prefix="/webhooks/dipay", tags=["webhooks"])
+router = APIRouter(tags=["webhooks"])
 
 
 # Dipay ``latestTransactionStatus`` vocabulary — shared by the QRIS query and
@@ -161,6 +162,8 @@ async def _parse_body(request: Request) -> dict[str, Any]:
             body = await request.json()
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(400, "Invalid JSON body") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Invalid JSON body")
     return body
 
 
@@ -240,15 +243,51 @@ def _expected_amount(
     raise HTTPException(404, "Unknown Dipay invoice")
 
 
-@router.post("/qris")
+# SNAP error envelope for the QRIS notify (service code 48), keyed by the
+# HTTP status the handler raises. Anything else maps to 500.
+_SNAP_NOTIFY_ERRORS = {
+    400: ("4004802", "Invalid Mandatory Field {originalPartnerReferenceNo}"),
+    401: ("4014800", "Unauthorized. Invalid Signature"),
+    404: ("4044801", "Transaction Not Found"),
+    409: ("4044813", "Invalid Amount"),
+}
+
+
+# ``/v1.0/qr/qr-mpm-notify`` is the SNAP path from Dipay's QRIS MPM Acquirer
+# Notify spec; ``/webhooks/dipay/qris`` stays for callback URLs already
+# configured in the Dipay dashboard.
+@router.post("/v1.0/qr/qr-mpm-notify")
+@router.post("/webhooks/dipay/qris")
 async def qris_callback(
     request: Request,
     x_signature: str | None = Header(default=None, alias="x-signature"),
     x_timestamp: str | None = Header(default=None, alias="x-timestamp"),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+):
     """Receive Dipay QRIS payment-status callbacks and flip the matching
-    cart / order to paid (or expired)."""
+    cart / order to paid (or expired). Errors use the SNAP envelope."""
+    try:
+        return await _qris_notify(request, x_signature, x_timestamp, db)
+    except HTTPException as exc:
+        await db.rollback()
+        _LOG.warning("Dipay QRIS notify rejected: %s %s", exc.status_code, exc.detail)
+        code, message = _SNAP_NOTIFY_ERRORS.get(
+            exc.status_code, ("5004801", "Internal Server Error")
+        )
+        if exc.detail == "Invalid JSON body":
+            code, message = "4004801", "Invalid Field Format"
+        return JSONResponse(
+            status_code=int(code[:3]),
+            content={"responseCode": code, "responseMessage": message},
+        )
+
+
+async def _qris_notify(
+    request: Request,
+    x_signature: str | None,
+    x_timestamp: str | None,
+    db: AsyncSession,
+) -> dict:
     body_bytes = await request.body()
     await _verify_inbound_signature(request, body_bytes, x_signature, x_timestamp)
     body = await _parse_body(request)
@@ -314,7 +353,7 @@ async def qris_callback(
         # Non-final — nothing to do yet; a later callback finalizes.
         return {
             "responseCode": "2004800",
-            "responseMessage": "Successful",
+            "responseMessage": "Request has been processed successfully",
             "ok": True,
             "ref": ref,
             "status": "pending",
@@ -327,7 +366,7 @@ async def qris_callback(
     )
     return {
         "responseCode": "2004800",
-        "responseMessage": "Successful",
+        "responseMessage": "Request has been processed successfully",
         "ok": True,
         "ref": ref,
         "ignored_status": status,
@@ -458,7 +497,7 @@ async def _handle_expired(
         await db.commit()
         return {
             "responseCode": "2004800",
-            "responseMessage": "Successful",
+            "responseMessage": "Request has been processed successfully",
             "ok": True,
             "order_id": p_order.id,
             "status": p_order.status,
@@ -468,14 +507,14 @@ async def _handle_expired(
         cart.status = CartStatus.EXPIRED
         return {
             "responseCode": "2004800",
-            "responseMessage": "Successful",
+            "responseMessage": "Request has been processed successfully",
             "ok": True,
             "cart_id": cart.id,
             "payment_state": cart.payment_state,
         }
     return {
         "responseCode": "2004800",
-        "responseMessage": "Successful",
+        "responseMessage": "Request has been processed successfully",
         "ok": True,
         "expired_ref": ref,
     }
@@ -491,7 +530,7 @@ async def _handle_expired(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/remit")
+@router.post("/webhooks/dipay/remit")
 async def remit_callback(
     request: Request,
     # Accepted for a future Dipay-side signing scheme; v1 verifies via the

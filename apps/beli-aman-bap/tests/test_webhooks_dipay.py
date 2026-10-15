@@ -273,6 +273,7 @@ class TestQrisCallbackPendingExpired:
         assert resp.status_code == 200, resp.text
         out = resp.json()
         assert out["responseCode"] == "2004800"
+        assert out["responseMessage"] == "Request has been processed successfully"
         assert out["ok"] is True
         assert out["status"] == "pending"
         # Nothing was mutated or enqueued.
@@ -396,7 +397,7 @@ class TestQrisCallbackPartnerOrder:
         # Router delegates idempotency to the service; it was still called.
         assert called.get("hit") is True
 
-    def test_amount_mismatch_is_409(self, monkeypatch, client):
+    def test_amount_mismatch_is_snap_invalid_amount(self, monkeypatch, client):
         client_, app = client
         brand = StubBrand()
         p_order = self._make_order(id="po-1", amount_idr=250_000)
@@ -409,7 +410,8 @@ class TestQrisCallbackPartnerOrder:
             content=_qris_body("q-po-ref-1", "00"),
             headers={"Content-Type": "application/json"},
         )
-        assert resp.status_code == 409, resp.text
+        assert resp.status_code == 404, resp.text
+        assert resp.json() == {"responseCode": "4044813", "responseMessage": "Invalid Amount"}
 
     def test_expired_flips_pending_partner_order(self, monkeypatch, client):
         from services import partner_orders as po_mod
@@ -465,6 +467,19 @@ class TestQrisCallbackPartnerOrder:
 
 
 class TestQrisCallbackErrors:
+    @pytest.mark.parametrize("body", [b"not json", b"[1, 2]"])
+    def test_400_invalid_field_format_on_bad_json(self, monkeypatch, client, body):
+        client_, app = client
+        _patch_db(app, monkeypatch)
+
+        resp = client_.post(
+            "/webhooks/dipay/qris",
+            content=body,
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 400
+        assert resp.json() == {"responseCode": "4004801", "responseMessage": "Invalid Field Format"}
+
     def test_400_on_missing_ref(self, monkeypatch, client):
         client_, app = client
         _patch_db(app, monkeypatch)
@@ -478,7 +493,8 @@ class TestQrisCallbackErrors:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 400
-        assert "originalpartnerreferenceno" in resp.json()["detail"].lower()
+        assert resp.json()["responseCode"] == "4004802"
+        assert "originalPartnerReferenceNo" in resp.json()["responseMessage"]
 
     def test_404_when_ref_unknown(self, monkeypatch, client):
         client_, app = client
@@ -492,7 +508,7 @@ class TestQrisCallbackErrors:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 404
-        assert "unknown dipay invoice" in resp.json()["detail"].lower()
+        assert resp.json() == {"responseCode": "4044801", "responseMessage": "Transaction Not Found"}
 
     def test_404_when_query_api_says_not_found(self, monkeypatch, client):
         """HTTP 404 from the QRIS query → refuse the callback."""
@@ -513,7 +529,7 @@ class TestQrisCallbackErrors:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 404
-        assert "not found" in resp.json()["detail"].lower()
+        assert resp.json()["responseCode"] == "4044801"
 
     def test_404_on_snap_business_not_found_code(self, monkeypatch, client):
         """A 4045100-style SNAP responseCode (non-404 HTTP) also refuses."""
@@ -752,7 +768,10 @@ class TestRemitCallback:
 
 
 class TestDipayWebhookSignature:
-    def test_signature_verified_when_key_configured(self, monkeypatch, client):
+    # /v1.0/qr/qr-mpm-notify is Dipay's documented SNAP path; Dipay signs
+    # whichever path it posts to.
+    @pytest.mark.parametrize("path", ["/webhooks/dipay/qris", "/v1.0/qr/qr-mpm-notify"])
+    def test_signature_verified_when_key_configured(self, monkeypatch, client, path):
         from config import settings
         from cryptography.hazmat.primitives import hashes, serialization
         from cryptography.hazmat.primitives.asymmetric import padding, rsa
@@ -779,7 +798,6 @@ class TestDipayWebhookSignature:
         import hashlib
         body_hash = hashlib.sha256(body_str.encode("utf-8")).hexdigest()
         ts = "2026-09-23T10:00:00.000+07:00"
-        path = "/webhooks/dipay/qris"
         method = "POST"
         string_to_sign = f"{method}:{path}:{body_hash}:{ts}"
         sig = private_key.sign(
@@ -827,7 +845,7 @@ class TestDipayWebhookSignature:
             },
         )
         assert resp.status_code == 401
-        assert "invalid dipay callback signature" in resp.json()["detail"].lower()
+        assert resp.json() == {"responseCode": "4014800", "responseMessage": "Unauthorized. Invalid Signature"}
 
     def test_remit_signature_verified_when_key_configured(self, monkeypatch, client):
         from config import settings
@@ -905,4 +923,4 @@ class TestDipayWebhookSignature:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 401
-        assert "invalid dipay callback signature" in resp.json()["detail"].lower()
+        assert resp.json() == {"responseCode": "4014800", "responseMessage": "Unauthorized. Invalid Signature"}
