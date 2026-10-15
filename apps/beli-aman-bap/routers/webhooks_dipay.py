@@ -243,13 +243,14 @@ def _expected_amount(
     raise HTTPException(404, "Unknown Dipay invoice")
 
 
-# SNAP error envelope for the QRIS notify (service code 48), keyed by the
-# HTTP status the handler raises. Anything else maps to 500.
+# SNAP error envelope for the QRIS notify (ASPI service code 52; Dipay's docs
+# say 48, but in SNAP 48 is Decode QR MPM), keyed by the HTTP status the
+# handler raises. Anything else maps to 500.
 _SNAP_NOTIFY_ERRORS = {
-    400: ("4004802", "Invalid Mandatory Field {originalPartnerReferenceNo}"),
-    401: ("4014800", "Unauthorized. Invalid Signature"),
-    404: ("4044801", "Transaction Not Found"),
-    409: ("4044813", "Invalid Amount"),
+    400: ("4005202", "Invalid Mandatory Field {originalPartnerReferenceNo}"),
+    401: ("4015200", "Unauthorized. Invalid Signature"),
+    404: ("4045201", "Transaction Not Found"),
+    409: ("4045213", "Invalid Amount"),
 }
 
 
@@ -272,10 +273,10 @@ async def qris_callback(
         await db.rollback()
         _LOG.warning("Dipay QRIS notify rejected: %s %s", exc.status_code, exc.detail)
         code, message = _SNAP_NOTIFY_ERRORS.get(
-            exc.status_code, ("5004801", "Internal Server Error")
+            exc.status_code, ("5005201", "Internal Server Error")
         )
         if exc.detail == "Invalid JSON body":
-            code, message = "4004801", "Invalid Field Format"
+            code, message = "4005201", "Invalid Field Format"
         return JSONResponse(
             status_code=int(code[:3]),
             content={"responseCode": code, "responseMessage": message},
@@ -352,7 +353,7 @@ async def _qris_notify(
     if status == _QRIS_PENDING:
         # Non-final — nothing to do yet; a later callback finalizes.
         return {
-            "responseCode": "2004800",
+            "responseCode": "2005200",
             "responseMessage": "Request has been processed successfully",
             "ok": True,
             "ref": ref,
@@ -365,7 +366,7 @@ async def _qris_notify(
         "— no-op", status, ref,
     )
     return {
-        "responseCode": "2004800",
+        "responseCode": "2005200",
         "responseMessage": "Request has been processed successfully",
         "ok": True,
         "ref": ref,
@@ -395,7 +396,7 @@ async def _handle_paid(
         # receiver: the callback ACK must not wait on the partner endpoint.
         asyncio.create_task(partner_webhook.notify_partner_paid_bg(p_order.id))
         return {
-            "responseCode": "2004800",
+            "responseCode": "2005200",
             "responseMessage": "Request has been processed successfully",
             "ok": True,
             "order_id": p_order.id,
@@ -410,7 +411,7 @@ async def _handle_paid(
             actor=actor,
         )
         return {
-            "responseCode": "2004800",
+            "responseCode": "2005200",
             "responseMessage": "Request has been processed successfully",
             "ok": True,
             "order_id": order.id,
@@ -445,7 +446,7 @@ async def _handle_paid(
                     status=EscrowEntryStatus.COMPLETED,
                 ))
         return {
-            "responseCode": "2004800",
+            "responseCode": "2005200",
             "responseMessage": "Request has been processed successfully",
             "ok": True,
             "cart_id": cart.id,
@@ -474,7 +475,7 @@ async def _handle_paid(
                 actor=actor,
             )
             return {
-                "responseCode": "2004800",
+                "responseCode": "2005200",
                 "responseMessage": "Request has been processed successfully",
                 "ok": True,
                 "order_id": order.id,
@@ -496,7 +497,7 @@ async def _handle_expired(
         p_order = await partner_orders.mark_partner_order_expired(partner_order)
         await db.commit()
         return {
-            "responseCode": "2004800",
+            "responseCode": "2005200",
             "responseMessage": "Request has been processed successfully",
             "ok": True,
             "order_id": p_order.id,
@@ -506,14 +507,14 @@ async def _handle_expired(
         cart.payment_state = "expired"
         cart.status = CartStatus.EXPIRED
         return {
-            "responseCode": "2004800",
+            "responseCode": "2005200",
             "responseMessage": "Request has been processed successfully",
             "ok": True,
             "cart_id": cart.id,
             "payment_state": cart.payment_state,
         }
     return {
-        "responseCode": "2004800",
+        "responseCode": "2005200",
         "responseMessage": "Request has been processed successfully",
         "ok": True,
         "expired_ref": ref,

@@ -176,7 +176,7 @@ class TestQrisCallbackPaid:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 200, resp.text
-        assert resp.json()["responseCode"] == "2004800"
+        assert resp.json()["responseCode"] == "2005200"
         assert resp.json()["state"] == "ESCROW_HELD"
 
     def test_paid_order_path_captured_args(self, monkeypatch, client):
@@ -196,7 +196,7 @@ class TestQrisCallbackPaid:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 200, resp.text
-        assert resp.json()["responseCode"] == "2004800"
+        assert resp.json()["responseCode"] == "2005200"
         assert captured["order_id"] == "ord-1"
         assert captured["invoice_id"] == "q-ord-ref-1"
         assert captured["actor"] == "system:dipay_webhook"
@@ -217,7 +217,7 @@ class TestQrisCallbackPaid:
         )
         assert resp.status_code == 200, resp.text
         out = resp.json()
-        assert out["responseCode"] == "2004800"
+        assert out["responseCode"] == "2005200"
         assert out["cart_id"] == cart.id
         assert out["payment_state"] == "paid"
         assert cart.payment_state == "paid"
@@ -251,7 +251,7 @@ class TestQrisCallbackPaid:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 200, resp.text
-        assert resp.json()["responseCode"] == "2004800"
+        assert resp.json()["responseCode"] == "2005200"
         assert session.added == []
 
 
@@ -272,7 +272,7 @@ class TestQrisCallbackPendingExpired:
         )
         assert resp.status_code == 200, resp.text
         out = resp.json()
-        assert out["responseCode"] == "2004800"
+        assert out["responseCode"] == "2005200"
         assert out["responseMessage"] == "Request has been processed successfully"
         assert out["ok"] is True
         assert out["status"] == "pending"
@@ -293,7 +293,7 @@ class TestQrisCallbackPendingExpired:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 200, resp.text
-        assert resp.json()["responseCode"] == "2004800"
+        assert resp.json()["responseCode"] == "2005200"
         assert cart.payment_state == "expired"
         from models.bot_rest import CartStatus
         assert cart.status == CartStatus.EXPIRED
@@ -357,7 +357,7 @@ class TestQrisCallbackPartnerOrder:
         )
         assert resp.status_code == 200, resp.text
         out = resp.json()
-        assert out["responseCode"] == "2004800"
+        assert out["responseCode"] == "2005200"
         assert out["order_id"] == "po-1"
         assert out["status"] == "paid"
         assert captured["order"] is p_order
@@ -411,7 +411,7 @@ class TestQrisCallbackPartnerOrder:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 404, resp.text
-        assert resp.json() == {"responseCode": "4044813", "responseMessage": "Invalid Amount"}
+        assert resp.json() == {"responseCode": "4045213", "responseMessage": "Invalid Amount"}
 
     def test_expired_flips_pending_partner_order(self, monkeypatch, client):
         from services import partner_orders as po_mod
@@ -438,7 +438,7 @@ class TestQrisCallbackPartnerOrder:
         )
         assert resp.status_code == 200, resp.text
         out = resp.json()
-        assert out["responseCode"] == "2004800"
+        assert out["responseCode"] == "2005200"
         assert out["order_id"] == "po-1"
         assert out["status"] == "expired"
 
@@ -457,7 +457,7 @@ class TestQrisCallbackPartnerOrder:
         )
         assert resp.status_code == 200, resp.text
         out = resp.json()
-        assert out["responseCode"] == "2004800"
+        assert out["responseCode"] == "2005200"
         assert out["status"] == "pending"
         assert p_order.status == "pending"
         assert session.added == []
@@ -478,7 +478,7 @@ class TestQrisCallbackErrors:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 400
-        assert resp.json() == {"responseCode": "4004801", "responseMessage": "Invalid Field Format"}
+        assert resp.json() == {"responseCode": "4005201", "responseMessage": "Invalid Field Format"}
 
     def test_400_on_missing_ref(self, monkeypatch, client):
         client_, app = client
@@ -493,7 +493,7 @@ class TestQrisCallbackErrors:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 400
-        assert resp.json()["responseCode"] == "4004802"
+        assert resp.json()["responseCode"] == "4005202"
         assert "originalPartnerReferenceNo" in resp.json()["responseMessage"]
 
     def test_404_when_ref_unknown(self, monkeypatch, client):
@@ -508,7 +508,7 @@ class TestQrisCallbackErrors:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 404
-        assert resp.json() == {"responseCode": "4044801", "responseMessage": "Transaction Not Found"}
+        assert resp.json() == {"responseCode": "4045201", "responseMessage": "Transaction Not Found"}
 
     def test_404_when_query_api_says_not_found(self, monkeypatch, client):
         """HTTP 404 from the QRIS query → refuse the callback."""
@@ -529,7 +529,7 @@ class TestQrisCallbackErrors:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 404
-        assert resp.json()["responseCode"] == "4044801"
+        assert resp.json()["responseCode"] == "4045201"
 
     def test_404_on_snap_business_not_found_code(self, monkeypatch, client):
         """A 4045100-style SNAP responseCode (non-404 HTTP) also refuses."""
@@ -597,7 +597,7 @@ class TestMockInvoiceRecovery:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 200, resp.text
-        assert resp.json()["responseCode"] == "2004800"
+        assert resp.json()["responseCode"] == "2005200"
         assert captured["order_id"] == "order-recovered"
         assert captured["actor"] == "system:dipay_webhook"
         assert resp.json()["state"] == "ESCROW_HELD"
@@ -816,7 +816,7 @@ class TestDipayWebhookSignature:
             },
         )
         assert resp.status_code == 200, resp.text
-        assert resp.json()["responseCode"] == "2004800"
+        assert resp.json()["responseCode"] == "2005200"
 
     def test_invalid_signature_raises_401(self, monkeypatch, client):
         from config import settings
@@ -845,7 +845,7 @@ class TestDipayWebhookSignature:
             },
         )
         assert resp.status_code == 401
-        assert resp.json() == {"responseCode": "4014800", "responseMessage": "Unauthorized. Invalid Signature"}
+        assert resp.json() == {"responseCode": "4015200", "responseMessage": "Unauthorized. Invalid Signature"}
 
     def test_remit_signature_verified_when_key_configured(self, monkeypatch, client):
         from config import settings
@@ -923,4 +923,4 @@ class TestDipayWebhookSignature:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 401
-        assert resp.json() == {"responseCode": "4014800", "responseMessage": "Unauthorized. Invalid Signature"}
+        assert resp.json() == {"responseCode": "4015200", "responseMessage": "Unauthorized. Invalid Signature"}
