@@ -1,6 +1,9 @@
 """Models package — importing this registers every Beli Aman ORM model with Base.metadata."""
 
 from .base import Base
+from .coupon import Coupon, BuyerCoupon
+from .loyalty import LoyaltyTransaction
+from .wishlist import WishlistItem
 from .profile import BeliAmanProfile
 from .otp_code import OtpCode
 from .address import Address

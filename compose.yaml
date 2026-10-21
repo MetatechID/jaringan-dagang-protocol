@@ -1,0 +1,104 @@
+name: jaringan-dagang-protocol
+services:
+  registry-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: protocol
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: registry
+    volumes: [registry-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U protocol -d registry"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  bap-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: protocol
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: bap
+    volumes: [bap-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U protocol -d bap"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  registry:
+    image: jaringan-dagang-protocol-registry:local
+    build:
+      context: .
+      dockerfile: apps/registry/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://protocol:${POSTGRES_PASSWORD}@registry-db:5432/registry
+      REDIS_URL: redis://redis:6379/1
+      SKIP_CREATE_ALL: "true"
+    depends_on:
+      registry-db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    ports: ["127.0.0.1:3030:3030"]
+  gateway:
+    image: jaringan-dagang-protocol-gateway:local
+    build:
+      context: .
+      dockerfile: apps/gateway/Dockerfile
+    environment:
+      REGISTRY_URL: http://registry:3030
+      REDIS_URL: redis://redis:6379/2
+    depends_on:
+      registry: {condition: service_healthy}
+    ports: ["127.0.0.1:4030:4030"]
+  bap:
+    image: jaringan-dagang-protocol-bap:local
+    build:
+      context: .
+      dockerfile: apps/beli-aman-bap/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://protocol:${POSTGRES_PASSWORD}@bap-db:5432/bap
+      REGISTRY_URL: http://registry:3030
+      GATEWAY_URL: http://gateway:4030
+      SKIP_CREATE_ALL: "true"
+      DEBUG: "false"
+      ADMIN_TOKEN: ${BAP_ADMIN_TOKEN:?Set BAP_ADMIN_TOKEN}
+      BECKN_WORKERS_ENABLED: "false"
+      SELLER_BRIDGE_ENABLED: "false"
+      SUBSCRIBER_URL: ${BAP_SUBSCRIBER_URL:-http://bap:8003/api/v1/beckn}
+      ALLOWED_ORIGINS: http://localhost:3001
+      PARTNER_PAY_BASE_URL: http://localhost:8003
+      XENDIT_CALLBACK_BASE_URL: http://localhost:8003
+      OY_CALLBACK_BASE_URL: http://localhost:8003
+      SENTO_CALLBACK_BASE_URL: http://localhost:8003
+    depends_on:
+      bap-db: {condition: service_healthy}
+    ports: ["127.0.0.1:8003:8003"]
+  portal:
+    image: jaringan-dagang-protocol-portal:local
+    build:
+      context: .
+      dockerfile: apps/onboarding-portal/Dockerfile
+      args:
+        REGISTRY_URL: http://registry:3030
+        GATEWAY_URL: http://gateway:4030
+        BAP_URL: http://bap:8003
+        BPP_URL: ${BPP_URL:-http://external-bpp.invalid:8001}
+        NEXT_PUBLIC_FIREBASE_API_KEY: ${NEXT_PUBLIC_FIREBASE_API_KEY:-}
+        NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN:-}
+        NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${NEXT_PUBLIC_FIREBASE_PROJECT_ID:-}
+        NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: ${NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET:-}
+        NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID:-}
+        NEXT_PUBLIC_FIREBASE_APP_ID: ${NEXT_PUBLIC_FIREBASE_APP_ID:-}
+    depends_on:
+      registry: {condition: service_healthy}
+      gateway: {condition: service_healthy}
+      bap: {condition: service_healthy}
+    ports: ["127.0.0.1:3001:3001"]
+volumes:
+  registry-data:
+  bap-data:

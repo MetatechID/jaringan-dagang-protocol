@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
@@ -50,11 +51,8 @@ async def lifespan(app: FastAPI):
     global redis_client
 
     logger.info("Starting Beckn Registry service")
-    logger.info("Initializing database tables")
-    try:
-        await init_db()
-    except Exception:
-        logger.warning("Could not connect to database (skipping table creation)", exc_info=True)
+    if os.environ.get("SKIP_CREATE_ALL", "true").lower() == "false":
+        await init_db()  # explicit development opt-in only
 
     logger.info("Connecting to Redis at %s", settings.redis_url)
     try:
@@ -285,3 +283,14 @@ if __name__ == "__main__":
         port=settings.port,
         reload=settings.debug,
     )
+
+
+@app.get("/ready")
+async def ready():
+    from docker_schema import verify_schema
+    try:
+        await verify_schema()
+    except Exception as exc:
+        logger.warning("Registry schema readiness failed", exc_info=True)
+        raise HTTPException(status_code=503, detail="Database/schema not ready") from exc
+    return {"status": "ready"}

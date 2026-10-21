@@ -1,0 +1,44 @@
+name: Docker
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    name: Build ${{ matrix.image }} (no publishing)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [registry, gateway, beli-aman-bap, onboarding-portal]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/${{ matrix.image }}/Dockerfile
+          push: false
+          load: true
+          tags: protocol-${{ matrix.image }}:ci
+      - name: Check non-root image user
+        run: test "$(docker image inspect --format '{{.Config.User}}' protocol-${{ matrix.image }}:ci)" = '10001:10001'
+  wheel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - run: docker buildx build -f infra/docker/protocol-wheel.Dockerfile --target artifact --output type=local,dest=artifacts .
+      - name: Install and import exported canonical wheel
+        run: |
+          docker run --rm -v "$PWD/artifacts:/wheels:ro" python:3.12-slim sh -ec 'pip install /wheels/*.whl; cd /tmp; python -c "import jaringan_dagang_beckn"'
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - run: bash infra/docker/smoke.sh
