@@ -327,3 +327,15 @@ if __name__ == "__main__":
         port=settings.port,
         reload=settings.debug,
     )
+
+
+@app.get("/ready")
+async def ready():
+    try:
+        response = await _get_http_client().get(f"{settings.registry_url.rstrip('/')}/ready", timeout=3.0)
+        response.raise_for_status()
+        if response.json().get("status") != "ready":
+            raise ValueError("Registry not ready")
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="Registry not ready") from exc
+    return {"status": "ready"}

@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 # Make this app's own modules importable as top-level (config, database, etc.)
@@ -86,26 +86,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         settings.service_name, settings.subscriber_id, settings.subscriber_url,
     )
 
-    # SKIP_CREATE_ALL=true in serverless (Vercel) — calling
-    # Base.metadata.create_all here is the wrong pattern for serverless: it
-    # runs on EVERY cold start, holds an engine.begin() transaction while it
-    # iterates every Table, and fails noisily when ANY single FK type drifts
-    # from live (e.g. order_events.order_id VARCHAR vs orders.id UUID). The
-    # exception IS caught here, but Neon's rollback + the 10+ KB traceback
-    # log emitted on EVERY cold start has been blowing the Vercel cold-start
-    # budget and surfacing as FUNCTION_INVOCATION_FAILED on every request.
-    # Prod schema migrations are owned by scripts/add-*.py (idempotent,
-    # dry-run-default, operator runs explicitly). Keep create_all available
-    # for local/CI where SKIP_CREATE_ALL is unset.
-    if os.environ.get("SKIP_CREATE_ALL", "false").lower() != "true":
-        try:
-            async with engine.begin() as conn:
-                await conn.run_sync(Base.metadata.create_all)
-            logger.info("Database tables ensured")
-        except Exception:
-            logger.warning("Could not connect to database (skipping table creation)", exc_info=True)
-    else:
-        logger.info("SKIP_CREATE_ALL=true — relying on migration scripts for schema")
+    # Schema changes are an explicit operator action, never normal startup.
+    if os.environ.get("SKIP_CREATE_ALL", "true").lower() == "false":
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
     # Start background workers (unless explicitly disabled, e.g. on Vercel serverless).
     puller_task = None
@@ -309,3 +293,14 @@ async def debug_config() -> dict:
         "platform_release_fee_pct_bp": settings.platform_release_fee_pct_bp,
         "environment": settings.environment,
     }
+
+
+@app.get("/ready")
+async def ready():
+    from docker_schema import verify_schema
+    try:
+        await verify_schema()
+    except Exception as exc:
+        logger.warning("BAP schema readiness failed", exc_info=True)
+        raise HTTPException(status_code=503, detail="Database/schema not ready") from exc
+    return {"status": "ready"}
