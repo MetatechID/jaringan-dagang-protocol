@@ -222,13 +222,25 @@ class TestAccessToken:
         """X-SIGNATURE on /access-token/b2b must be SHA256withRSA over
         '{client_key}|{x_timestamp}' — verify with the matching public key."""
         key_b64, public_key = _generate_rsa_key_b64()
-        _patch_settings(monkeypatch, dipay_private_key_b64=key_b64)
+        _patch_settings(
+            monkeypatch,
+            dipay_private_key_b64=key_b64,
+            dipay_base_url="https://partner-b2x.dipay.id/snap/v2.1",
+        )
+        timestamp = "2026-10-24T12:22:02+07:00"
+        monkeypatch.setattr(dipay_client, "_x_timestamp", lambda: timestamp)
         captured, transport = _make_transport({})
         _install_transport(monkeypatch, transport)
 
         await dipay_client._get_token(_config(), force=True)
 
         req = _requests_to(captured, "/access-token/b2b")[0]
+        assert req.method == "POST"
+        assert str(req.url) == "https://partner-b2x.dipay.id/snap/v2.1/access-token/b2b"
+        assert req.headers["X-TIMESTAMP"] == timestamp
+        assert len(timestamp) == 25
+        signature = base64.b64decode(req.headers["X-SIGNATURE"], validate=True)
+        assert len(signature) == public_key.key_size // 8
         assert req.headers["X-CLIENT-KEY"] == "client-key"
         assert req.headers["Content-Type"] == "application/json"
         signed_message = f"client-key|{req.headers['X-TIMESTAMP']}".encode("utf-8")
@@ -237,13 +249,124 @@ class TestAccessToken:
         from cryptography.hazmat.primitives.asymmetric import padding
 
         public_key.verify(
-            base64.b64decode(req.headers["X-SIGNATURE"]),
+            signature,
             signed_message,
             padding.PKCS1v15(),
             hashes.SHA256(),
         )
         body = _body_of(req)
         assert body == {"grantType": "client_credentials"}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider_code", ["4007302", "unsafe-response-code"])
+    async def test_signature_rejection_logs_only_safe_metadata(
+        self, monkeypatch, tmp_path, caplog, provider_code
+    ):
+        from cryptography.hazmat.primitives import serialization
+
+        key_b64, public_key = _generate_rsa_key_b64()
+        key_path = tmp_path / "private-key-path-sentinel.pem"
+        key_path.write_text("invalid shadowed key")
+        _patch_settings(
+            monkeypatch,
+            dipay_client_key="client-key-sentinel",
+            dipay_client_secret="client-secret-sentinel",
+            dipay_private_key_b64=key_b64,
+            dipay_private_key_path=str(key_path),
+        )
+        body = {
+            "responseCode": provider_code,
+            "responseMessage": "Invalid Mandatory Field X-SIGNATURE response-secret-sentinel",
+            "accessToken": "token-sentinel",
+        }
+        captured, transport = _make_transport({
+            "/access-token/b2b": [httpx.Response(400, json=body)],
+        })
+        _install_transport(monkeypatch, transport)
+        config = _config()
+        with pytest.raises(dipay_client.DipayError) as error:
+            await dipay_client.create_qris(
+                config=config, partner_reference_no="q-failure", amount_idr=1000
+            )
+        assert error.value.status_code == 400
+        assert error.value.body == body
+        assert len(captured) == 1
+        assert captured[0].url.path.endswith("/access-token/b2b")
+        assert config.token_identity not in dipay_client._token_cache
+        public_der = public_key.public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        assert hashlib.sha256(public_der).hexdigest() in caplog.text
+        assert "'key_source': 'inline'" in caplog.text
+        assert "'inline_shadows_file': True" in caplog.text
+        assert "'rsa_bits': 2048" in caplog.text
+        assert "'signature_chars': 344" in caplog.text
+        assert f"response_code={provider_code if provider_code == '4007302' else 'unknown'}" in caplog.text
+        for secret in (
+            config.client_key, config.client_secret, key_b64, str(key_path),
+            captured[0].headers["X-SIGNATURE"], body["responseMessage"], body["accessToken"],
+        ):
+            assert secret not in caplog.text
+        if provider_code != "4007302":
+            assert provider_code not in caplog.text
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("key_kind", ["non-rsa", "malformed-file"])
+    async def test_invalid_key_fails_before_http(self, monkeypatch, tmp_path, key_kind):
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+
+        if key_kind == "non-rsa":
+            key = ec.generate_private_key(ec.SECP256R1())
+            pem = key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            )
+            _patch_settings(monkeypatch, dipay_private_key_b64=base64.b64encode(pem).decode())
+        else:
+            path = tmp_path / "bad.pem"
+            path.write_bytes(b"not a private key")
+            _patch_settings(monkeypatch, dipay_private_key_path=str(path))
+        captured, transport = _make_transport({})
+        _install_transport(monkeypatch, transport)
+        with pytest.raises(dipay_client.DipayError) as error:
+            await dipay_client._get_token(_config())
+        assert error.value.status_code == 0
+        expected_message = "RSA" if key_kind == "non-rsa" else "invalid"
+        assert expected_message in error.value.body
+        assert captured == []
+
+    @pytest.mark.parametrize("key_format", ["pem", "base64-pem", "base64-der", "file"])
+    def test_public_key_fingerprint_is_serialization_independent(
+        self, monkeypatch, tmp_path, key_format
+    ):
+        from cryptography.hazmat.primitives import serialization
+
+        key_b64, public_key = _generate_rsa_key_b64()
+        pem = base64.b64decode(key_b64)
+        expected = hashlib.sha256(public_key.public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+        )).hexdigest()
+        if key_format == "file":
+            path = tmp_path / "key.pem"
+            path.write_bytes(pem)
+            _patch_settings(monkeypatch, dipay_private_key_path=str(path))
+        else:
+            raw = {"pem": pem.decode(), "base64-pem": key_b64}.get(key_format)
+            if raw is None:
+                key = serialization.load_pem_private_key(pem, password=None)
+                raw = base64.b64encode(key.private_bytes(
+                    serialization.Encoding.DER, serialization.PrivateFormat.PKCS8,
+                    serialization.NoEncryption(),
+                )).decode()
+            _patch_settings(monkeypatch, dipay_private_key_b64=raw)
+        config = _config()
+        metadata = dipay_client._token_failure_metadata(
+            config, dipay_client._load_private_key(config), "signature"
+        )
+        assert metadata["public_key_sha256_spki"] == expected
+        assert metadata["key_source"] == ("file" if key_format == "file" else "inline")
 
     @pytest.mark.asyncio
     async def test_token_cached_across_calls(self, monkeypatch):
