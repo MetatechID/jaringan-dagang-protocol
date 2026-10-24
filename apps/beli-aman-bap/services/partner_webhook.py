@@ -25,6 +25,8 @@ import time
 import httpx
 from sqlalchemy import select
 
+from services.partner_callback_url import CallbackTransport, CallbackURLRejected, callback_destination
+
 _LOG = logging.getLogger("beli_aman_bap.partner_webhook")
 
 _TIMEOUT_SECONDS = 8.0
@@ -70,23 +72,32 @@ async def send_payment_callback(*, url: str, secret: str, payload: dict) -> bool
 
     for attempt in range(1, _RETRIES + 1):
         try:
-            async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
-                resp = await client.post(url, content=body, headers=headers)
-            if 200 <= resp.status_code < 300:
-                _LOG.info(
-                    "partner callback ok %s -> %s (order_id=%s)",
-                    url, resp.status_code, payload.get("order_id"),
-                )
+            callback_destination(url)
+            # Use the transport directly: no redirect/proxy machinery and no
+            # HTTPX client INFO log (which includes credential-bearing queries).
+            async with asyncio.timeout(_TIMEOUT_SECONDS), CallbackTransport() as transport:
+                request = httpx.Request("POST", url, content=body, headers=headers)
+                request.extensions["timeout"] = {
+                    phase: _TIMEOUT_SECONDS for phase in ("connect", "read", "write", "pool")
+                }
+                resp = await transport.handle_async_request(request)
+                try:
+                    # Headers/status only: never buffer arbitrary response bodies.
+                    status = resp.status_code
+                finally:
+                    await resp.aclose()
+            if 200 <= status < 300:
+                _LOG.info("partner callback ok status=%d order_id=%s", status, payload.get("order_id"))
                 return True
             _LOG.warning(
-                "partner callback non-2xx %s -> %s %s (order_id=%s, attempt %d)",
-                url, resp.status_code, resp.text[:200],
-                payload.get("order_id"), attempt,
+                "partner callback failed reason=non_2xx status=%d order_id=%s attempt=%d",
+                status, payload.get("order_id"), attempt,
             )
-        except Exception as e:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — payment is already committed
+            reason = "destination_rejected" if isinstance(exc, CallbackURLRejected) else "transport_error"
             _LOG.warning(
-                "partner callback exception %s (order_id=%s, attempt %d): %s",
-                url, payload.get("order_id"), attempt, e,
+                "partner callback failed reason=%s order_id=%s attempt=%d",
+                reason, payload.get("order_id"), attempt,
             )
         if attempt < _RETRIES:
             await asyncio.sleep(_RETRY_DELAYS[attempt - 1])
@@ -135,4 +146,4 @@ async def notify_partner_paid_bg(partner_order_id: str) -> None:
             await notify_partner_paid(order, brand)
             await session.commit()
     except Exception:  # noqa: BLE001
-        _LOG.exception("Partner callback background task failed for %s", partner_order_id)
+        _LOG.warning("partner callback background failed reason=background_error order_id=%s", partner_order_id)
