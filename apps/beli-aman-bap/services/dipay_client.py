@@ -62,10 +62,11 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from config import settings
 from services.release_clock import JAKARTA
@@ -128,8 +129,8 @@ def resolve_config(brand: Brand | Any | None = None) -> DipayConfig:
 
     A brand override is selected when *any* brand credential field is present;
     all four brand fields must then be present.  Brand and environment fields
-    are deliberately never mixed.  The environment fallback may use exactly
-    one private-key source: inline base64 or a filesystem path.
+    are deliberately never mixed.  For environment credentials, inline key
+    material takes precedence over a configured filesystem path.
     """
     brand_values = {
         field: _clean(getattr(brand, field, None))
@@ -234,9 +235,28 @@ def _load_private_key(config: DipayConfig):
                 return serialization.load_pem_private_key(data, password=None)
             except (ValueError, TypeError):
                 return serialization.load_der_private_key(data, password=None)
-        except OSError:
+        except (OSError, ValueError, TypeError):
             return None
     return None
+
+
+def _token_failure_metadata(config: DipayConfig, private_key: rsa.RSAPrivateKey, signature: str) -> dict:
+    """Allowlisted diagnostics; fingerprint uses SHA-256 of DER SubjectPublicKeyInfo."""
+    endpoint = urlsplit(config.base_url)
+    public_der = private_key.public_key().public_bytes(
+        serialization.Encoding.DER,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    inline = bool(config.private_key_b64.strip())
+    return {
+        "endpoint_host": endpoint.hostname,
+        "endpoint_path": f"{endpoint.path.rstrip('/')}/access-token/b2b",
+        "key_source": "inline" if inline else "file",
+        "inline_shadows_file": inline and bool(config.private_key_path),
+        "rsa_bits": private_key.key_size,
+        "signature_chars": len(signature),
+        "public_key_sha256_spki": hashlib.sha256(public_der).hexdigest(),
+    }
 
 
 def _rsa_sha256(message: str, private_key) -> str:
@@ -312,7 +332,9 @@ async def _fetch_token(config: DipayConfig) -> tuple[str, int]:
     url = f"{config.base_url}/access-token/b2b"
     private_key = _load_private_key(config)
     if private_key is None:
-        raise DipayError(0, "Dipay private key not configured")
+        raise DipayError(0, "Dipay private key not configured or invalid")
+    if not isinstance(private_key, rsa.RSAPrivateKey):
+        raise DipayError(0, "Dipay private key must be RSA")
     x_timestamp = _x_timestamp()
     signature = _rsa_sha256(f"{config.client_key}|{x_timestamp}", private_key)
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -331,7 +353,15 @@ async def _fetch_token(config: DipayConfig) -> tuple[str, int]:
             body = resp.json()
         except Exception:  # noqa: BLE001
             body = resp.text
-        _LOG.warning("Dipay POST /access-token/b2b -> %s: %s", resp.status_code, body)
+        code = body.get("responseCode") if isinstance(body, dict) else None
+        if not (isinstance(code, str) and len(code) == 7 and code.isascii() and code.isdigit()):
+            code = "unknown"
+        _LOG.warning(
+            "Dipay POST /access-token/b2b -> %s response_code=%s signing=%s",
+            resp.status_code,
+            code,
+            _token_failure_metadata(config, private_key, signature),
+        )
         raise DipayError(resp.status_code, body)
     payload = resp.json()
     return payload["accessToken"], int(payload.get("expiresIn") or _DEFAULT_TOKEN_TTL_SECONDS)
