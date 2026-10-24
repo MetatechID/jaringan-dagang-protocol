@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from typing import Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import settings
 from database import get_db
-from deps import get_current_profile
+from deps import get_current_profile, require_admin_token
 from models.brand import Brand
 from models.payout_bank_account import PayoutBankAccount
 from models.profile import BeliAmanProfile
@@ -18,6 +23,101 @@ from services import bank_codes
 from services import catalog as catalog_service
 
 router = APIRouter(prefix="/api/v1/brands", tags=["brands"])
+
+
+class _NoStoreRoute(APIRoute):
+    """Keep credentials and internal metadata out of HTTP caches, even on errors."""
+
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def no_store_handler(request: Request):
+            try:
+                response = await handler(request)
+            except HTTPException as exc:
+                exc.headers = {**(exc.headers or {}), "Cache-Control": "no-store"}
+                raise
+            except RequestValidationError:
+                # Validation details can echo submitted credentials or payloads.
+                response = JSONResponse(status_code=422, content={"detail": "Invalid request"})
+            response.headers["Cache-Control"] = "no-store"
+            return response
+
+        return no_store_handler
+
+
+_internal_router = APIRouter(
+    prefix="/internal/partner-integration",
+    route_class=_NoStoreRoute,
+    dependencies=[Depends(require_admin_token)],
+)
+
+
+class PartnerIntegrationRevealIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    bpp_id: str = Field(strict=True, min_length=1)
+    fields: list[Literal["api_key", "webhook_secret"]] = Field(min_length=1, max_length=2)
+
+    @field_validator("fields")
+    @classmethod
+    def unique_fields(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("fields must be unique")
+        return value
+
+
+async def _partner_brand(db: AsyncSession, bpp_id: str) -> Brand:
+    # bpp_id is not unique in the schema. Never guess a tenant or fall back
+    # to a slug, prefix, case-insensitive match, or the first database row.
+    brands = (
+        await db.execute(select(Brand).where(Brand.bpp_id == bpp_id).limit(2))
+    ).scalars().all()
+    if not brands:
+        raise HTTPException(404, "Partner integration not found")
+    if len(brands) != 1:
+        raise HTTPException(409, "Ambiguous BPP mapping")
+    return brands[0]
+
+
+def _partner_integration_metadata(brand: Brand) -> dict:
+    return {
+        "brand_id": brand.id,
+        "brand_slug": brand.slug,
+        "bpp_id": brand.bpp_id,
+        "payment_provider": brand.payment_provider,
+        "callback_url": brand.partner_callback_url,
+        "api_key_configured": bool(brand.partner_api_key),
+        "webhook_secret_configured": bool(brand.partner_callback_secret),
+    }
+
+
+@_internal_router.get("")
+async def get_partner_integration(
+    bpp_id: str = Query(..., min_length=1),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return _partner_integration_metadata(await _partner_brand(db, bpp_id))
+
+
+@_internal_router.post("/reveal")
+async def reveal_partner_integration(
+    body: PartnerIntegrationRevealIn,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    brand = await _partner_brand(db, body.bpp_id)
+    result = _partner_integration_metadata(brand)
+    secret_columns = {
+        "api_key": "partner_api_key",
+        "webhook_secret": "partner_callback_secret",
+    }
+    for field in body.fields:
+        result[field] = getattr(brand, secret_columns[field]) or None
+    return result
+
+
+# Register internal paths before the public dynamic brand routes.
+router.include_router(_internal_router)
 
 
 @router.get("")

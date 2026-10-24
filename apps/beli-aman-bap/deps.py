@@ -16,6 +16,7 @@ OTP). Each Firebase ID token resolves to exactly one ``BeliAmanProfile``:
 
 from __future__ import annotations
 
+import hmac
 from datetime import datetime, timezone
 
 from fastapi import Depends, Header, HTTPException, status
@@ -207,7 +208,9 @@ async def get_current_profile(
 
 def require_admin_token(x_admin_token: str | None = Header(None)) -> None:
     """Guard for admin / internal-mock endpoints. 403 if header doesn't match."""
-    if not x_admin_token or x_admin_token != settings.admin_token:
+    if not x_admin_token or not settings.admin_token or not hmac.compare_digest(
+        x_admin_token.encode("utf-8"), settings.admin_token.encode("utf-8")
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid or missing X-Admin-Token header",
