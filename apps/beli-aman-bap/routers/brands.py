@@ -116,6 +116,31 @@ async def reveal_partner_integration(
     return result
 
 
+class PartnerIntegrationCallbackIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    bpp_id: str = Field(min_length=1)
+    callback_url: str | None
+
+
+@_internal_router.patch("/callback")
+async def update_partner_callback(
+    body: PartnerIntegrationCallbackIn,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    from services.partner_callback_url import CallbackURLRejected, validate_callback_url
+
+    brand = await _partner_brand(db, body.bpp_id)
+    if body.callback_url is not None:
+        try:
+            await validate_callback_url(body.callback_url)
+        except CallbackURLRejected:
+            raise HTTPException(422, "Invalid callback URL") from None
+    brand.partner_callback_url = body.callback_url
+    await db.flush()
+    return _partner_integration_metadata(brand)
+
+
 # Register internal paths before the public dynamic brand routes.
 router.include_router(_internal_router)
 

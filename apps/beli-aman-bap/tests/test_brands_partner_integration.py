@@ -52,6 +52,10 @@ class FakeDB:
     def __init__(self, brands):
         self.brands = brands
         self.statements = []
+        self.flushes = 0
+
+    async def flush(self):
+        self.flushes += 1
 
     async def execute(self, statement):
         self.statements.append(statement)
@@ -87,12 +91,16 @@ def client_factory(monkeypatch):
 def request(client, method, *, bpp_id=BPP_ID, fields=None, headers=HEADERS):
     if method == "GET":
         return client.get(PATH, params={"bpp_id": bpp_id}, headers=headers)
+    if method == "PATCH":
+        return client.patch(PATH + "/callback", json={
+            "bpp_id": bpp_id, "callback_url": None,
+        }, headers=headers)
     return client.post(PATH + "/reveal", json={
         "bpp_id": bpp_id, "fields": fields or ["api_key"],
     }, headers=headers)
 
 
-@pytest.mark.parametrize("method", ["GET", "POST"])
+@pytest.mark.parametrize("method", ["GET", "POST", "PATCH"])
 @pytest.mark.parametrize("headers", [{}, {"X-Admin-Token": "wrong-placeholder"}])
 def test_auth_rejects_before_lookup(client_factory, method, headers):
     client, db = client_factory()
@@ -110,7 +118,7 @@ def test_guard_uses_constant_time_comparison(client_factory, monkeypatch):
     compare.assert_called_once_with(TOKEN.encode(), TOKEN.encode())
 
 
-@pytest.mark.parametrize("method", ["GET", "POST"])
+@pytest.mark.parametrize("method", ["GET", "POST", "PATCH"])
 def test_unconfigured_admin_token_fails_closed(client_factory, monkeypatch, method):
     client, db = client_factory()
     monkeypatch.setattr(deps.settings, "admin_token", "")
@@ -155,7 +163,7 @@ def test_missing_secrets_are_null_and_unconfigured(client_factory, absent):
     }
 
 
-@pytest.mark.parametrize("method", ["GET", "POST"])
+@pytest.mark.parametrize("method", ["GET", "POST", "PATCH"])
 @pytest.mark.parametrize("bpp_id", ["missing.example", "placeholder-brand",
                                     BPP_ID.upper(), BPP_ID + " ", "placeholder"])
 def test_mapping_requires_exact_bpp_id(client_factory, method, bpp_id):
@@ -169,7 +177,7 @@ def test_mapping_requires_exact_bpp_id(client_factory, method, bpp_id):
     assert "LIMIT" in str(statement)
 
 
-@pytest.mark.parametrize("method", ["GET", "POST"])
+@pytest.mark.parametrize("method", ["GET", "POST", "PATCH"])
 def test_ambiguous_mapping_fails_closed(client_factory, method):
     client, _ = client_factory([brand(), brand(id="other-placeholder-id")])
     response = request(client, method)
@@ -232,3 +240,47 @@ def test_public_brand_serialization_does_not_expose_secrets(client_factory, path
         assert set(row) <= {"id", "slug", "name", "bpp_id", "default_warehouse_address"}
     assert "placeholder-partner-key" not in response.text
     assert "placeholder-webhook-secret" not in response.text
+
+
+@pytest.mark.parametrize("value", [None, "https://public.example/hook?token=keep%2Fme"])
+def test_patch_only_changes_callback(client_factory, monkeypatch, value):
+    from services import partner_callback_url
+
+    async def resolve(host, port):
+        return ["8.8.8.8"]
+
+    monkeypatch.setattr(partner_callback_url, "resolve_public_addresses", resolve)
+    target = brand()
+    before = vars(target).copy()
+    client, db = client_factory([target, brand(id="other", bpp_id="other.example")])
+    response = client.patch(PATH + "/callback", json={
+        "bpp_id": BPP_ID, "callback_url": value,
+    }, headers=HEADERS)
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {**METADATA, "callback_url": value}
+    assert vars(target) == {**before, "partner_callback_url": value}
+    assert db.brands[1].partner_callback_url == METADATA["callback_url"]
+    assert db.flushes == 1
+
+
+@pytest.mark.parametrize("body", [
+    {}, {"bpp_id": BPP_ID}, {"callback_url": None},
+    {"bpp_id": 1, "callback_url": None},
+    {"bpp_id": "", "callback_url": None},
+    *[{"bpp_id": BPP_ID, "callback_url": value} for value in [
+        1, False, [], {}, "", " ", "http://public.example", "https://127.0.0.1",
+    ]],
+    *[{"bpp_id": BPP_ID, "callback_url": None, key: "sensitive"} for key in [
+        "brand_id", "partner_api_key", "webhook_secret", "payment_provider", "fields",
+    ]],
+])
+def test_patch_invalid_body_is_sanitized(client_factory, body):
+    target = brand()
+    client, db = client_factory([target])
+    response = client.patch(PATH + "/callback", json=body, headers=HEADERS)
+    assert response.status_code == 422
+    assert response.headers["cache-control"] == "no-store"
+    assert "sensitive" not in response.text
+    assert db.flushes == 0
+    assert target.partner_callback_url == METADATA["callback_url"]

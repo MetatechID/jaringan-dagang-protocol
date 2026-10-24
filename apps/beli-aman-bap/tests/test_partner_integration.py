@@ -374,6 +374,9 @@ def test_send_payment_callback_success(monkeypatch):
     class FakeResp:
         status_code = 200
 
+        async def aclose(self):
+            pass
+
     class FakeClient:
         def __init__(self, *a, **k):
             pass
@@ -384,13 +387,13 @@ def test_send_payment_callback_success(monkeypatch):
         async def __aexit__(self, *a):
             return False
 
-        async def post(self, url, content=None, headers=None):
-            posted["url"] = url
-            posted["headers"] = headers
-            posted["body"] = content
+        async def handle_async_request(self, request):
+            posted["url"] = str(request.url)
+            posted["headers"] = request.headers
+            posted["body"] = request.content
             return FakeResp()
 
-    monkeypatch.setattr(partner_webhook.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(partner_webhook, "CallbackTransport", FakeClient)
 
     ok = partner_webhook.send_payment_callback(
         url="https://consumerland.id/api/tickets/webhooks/oito",
