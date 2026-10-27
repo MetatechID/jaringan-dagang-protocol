@@ -977,6 +977,78 @@ class TestVerifyNotificationSignature:
         )["valid"] is True
 
 
+    @pytest.mark.parametrize(
+        "label, serialize",
+        [
+            ("sorted-keys", lambda b: json.dumps(b, separators=(",", ":"), sort_keys=True, ensure_ascii=False)),
+            ("ascii-escaped", lambda b: json.dumps(b, separators=(",", ":"), ensure_ascii=True)),
+            ("stripped-strings", lambda b: json.dumps(
+                {**b, "additionalInfo": {"issuer": b["additionalInfo"]["issuer"].strip()}},
+                separators=(",", ":"), ensure_ascii=False,
+            )),
+            ("empty-body", lambda b: "{}"),
+        ],
+    )
+    def test_diagnostic_accepts_alternate_body_serializations(self, label, serialize):
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding, rsa
+
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        pub_pem = key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("utf-8")
+        body = {
+            "originalPartnerReferenceNo": "q-123",
+            "latestTransactionStatus": "00",
+            "additionalInfo": {"issuer": "BANK Ä   "},
+        }
+        raw_body = json.dumps(body, separators=(",", ":"), ensure_ascii=False).encode()
+        ts = "2026-09-23T14:30:00+07:00"
+        path = "/v1.0/qr/qr-mpm-notify"
+        signed = f"POST:{path}:{hashlib.sha256(serialize(body).encode()).hexdigest()}:{ts}"
+        sig = base64.b64encode(
+            key.sign(signed.encode(), padding.PKCS1v15(), hashes.SHA256())
+        ).decode()
+
+        result = dipay_client.verify_notification_signature_diagnostic(
+            method="POST", path=path, body=raw_body, timestamp=ts,
+            signature=sig, public_key=pub_pem,
+        )
+        assert result["valid"] is True
+        assert result["body_candidate"] == label
+        assert result["url_candidate"] == "path"
+
+    def test_diagnostic_accepts_full_url_candidate(self):
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding, rsa
+
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        pub_pem = key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("utf-8")
+        raw_body = b'{"originalPartnerReferenceNo":"q-123"}'
+        ts = "2026-09-23T14:30:00+07:00"
+        path = "/v1.0/qr/qr-mpm-notify"
+        url = f"https://api.example.test{path}"
+        signed = f"POST:{url}:{hashlib.sha256(raw_body).hexdigest()}:{ts}"
+        sig = base64.b64encode(
+            key.sign(signed.encode(), padding.PKCS1v15(), hashes.SHA256())
+        ).decode()
+
+        kwargs = dict(method="POST", path=path, body=raw_body, timestamp=ts,
+                      signature=sig, public_key=pub_pem)
+        mismatch = dipay_client.verify_notification_signature_diagnostic(**kwargs)
+        assert mismatch["valid"] is False
+        assert mismatch["candidates_tried"] >= 1
+        result = dipay_client.verify_notification_signature_diagnostic(
+            **kwargs, urls=[("path", path), ("full-url", url)],
+        )
+        assert result["valid"] is True
+        assert result["url_candidate"] == "full-url"
+
+
 class TestLoadPrivateKey:
     def test_load_private_key_raw_pem_and_b64(self):
         from cryptography.hazmat.primitives import serialization

@@ -818,6 +818,54 @@ class TestDipayWebhookSignature:
         assert resp.status_code == 200, resp.text
         assert resp.json()["responseCode"] == "2005200"
 
+    def test_signature_over_forwarded_full_url_is_accepted(self, monkeypatch, client):
+        """Dipay may sign the public callback URL rather than the path; the
+        proxy's x-forwarded-proto/host reconstruct it."""
+        import base64
+        import hashlib
+        from config import settings
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding, rsa
+
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        pub_pem = private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("utf-8")
+        monkeypatch.setattr(settings, "dipay_callback_public_key", pub_pem, raising=False)
+        monkeypatch.setattr(settings, "environment", "production")
+
+        client_, app = client
+        _patch_db(app, monkeypatch)
+        _stub_resolve(monkeypatch, brand=StubBrand(), order=StubOrder(id="ord-1", total_idr=100_000))
+        _stub_query_qris(monkeypatch)
+        _stub_mark_paid(monkeypatch)
+
+        path = "/v1.0/qr/qr-mpm-notify"
+        body_bytes = _qris_body("q0f0e8a2e123", "00")
+        ts = "2026-10-28T06:08:09+07:00"
+        signed = (
+            f"POST:https://api.example.test{path}:"
+            f"{hashlib.sha256(body_bytes).hexdigest()}:{ts}"
+        )
+        sig = base64.b64encode(
+            private_key.sign(signed.encode(), padding.PKCS1v15(), hashes.SHA256())
+        ).decode()
+
+        resp = client_.post(
+            path,
+            content=body_bytes,
+            headers={
+                "Content-Type": "application/json",
+                "x-signature": sig,
+                "x-timestamp": ts,
+                "x-forwarded-proto": "https",
+                "x-forwarded-host": "api.example.test",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["responseCode"] == "2005200"
+
     def test_invalid_signature_raises_401(self, monkeypatch, client):
         from config import settings
         from cryptography.hazmat.primitives import serialization
