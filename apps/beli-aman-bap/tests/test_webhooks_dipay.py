@@ -884,6 +884,58 @@ class TestDipayWebhookSignature:
         assert body.decode() not in text
         assert "q-sensitive-ref" not in text
 
+    def test_full_callback_debug_log_redacts_sensitive_fields(self, monkeypatch, client, caplog):
+        from config import settings
+
+        monkeypatch.setattr(settings, "dipay_callback_public_key", "invalid", raising=False)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "dipay_debug_log_full_callback", True, raising=False)
+
+        client_, app = client
+        _patch_db(app, monkeypatch)
+        body = json.dumps({
+            "originalPartnerReferenceNo": "q-debug-1",
+            "customerPan": "4111111111111111",
+            "merchantName": "Debug Merchant",
+            "additionalInfo": {"customerPAN": "4111111111111111", "issuer": "BCA"},
+        }).encode()
+        with caplog.at_level("WARNING", logger="beli_aman_bap.webhooks_dipay"):
+            resp = client_.post(
+                "/v1.0/qr/qr-mpm-notify",
+                content=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "x-signature": "c2ln",
+                    "x-timestamp": "2026-09-23T10:00:00+07:00",
+                    "x-customer-pan": "4111111111111111",
+                },
+            )
+        assert resp.status_code == 401
+        text = " ".join(caplog.messages)
+        assert "TEMPORARY FULL DIPAY QRIS CALLBACK" in text
+        assert "q-debug-1" in text
+        assert "c2ln" in text
+        assert "4111111111111111" not in text
+        assert "Debug Merchant" in text
+        assert "BCA" in text
+
+    def test_full_callback_debug_log_disabled_by_default(self, monkeypatch, client, caplog):
+        from config import settings
+
+        monkeypatch.setattr(settings, "dipay_callback_public_key", "invalid", raising=False)
+        monkeypatch.setattr(settings, "environment", "production")
+        monkeypatch.setattr(settings, "dipay_debug_log_full_callback", False, raising=False)
+
+        client_, app = client
+        _patch_db(app, monkeypatch)
+        with caplog.at_level("WARNING", logger="beli_aman_bap.webhooks_dipay"):
+            client_.post(
+                "/v1.0/qr/qr-mpm-notify",
+                content=_qris_body("q-debug-2", "00"),
+                headers={"x-signature": "c2ln", "x-timestamp": "2026-09-23T10:00:00+07:00"},
+            )
+        assert "TEMPORARY FULL DIPAY QRIS CALLBACK" not in " ".join(caplog.messages)
+
     def test_remit_signature_verified_when_key_configured(self, monkeypatch, client):
         from config import settings
         from cryptography.hazmat.primitives import hashes, serialization

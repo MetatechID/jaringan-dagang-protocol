@@ -178,6 +178,11 @@ class Settings(BaseSettings):
     # Dipay callback public key used to verify incoming webhook signatures
     # (SHA256withRSA). Supply either inline PEM or base64 PEM.
     dipay_callback_public_key: str = ""
+    # TEMPORARY diagnostic switch: log the complete inbound QRIS callback
+    # (headers + raw body, with card-data fields redacted), including
+    # X-SIGNATURE and payment references. Off by default; enable only for a
+    # controlled capture and disable immediately afterwards.
+    dipay_debug_log_full_callback: bool = False
     # How long a Dipay QRIS code remains valid before Dipay expires it.
     # Default is 1800s (30 minutes).
     dipay_qris_duration_seconds: int = 1800

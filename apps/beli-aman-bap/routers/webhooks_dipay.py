@@ -229,7 +229,6 @@ async def _verify_inbound_signature(
         canonical_body = dipay_client._minify(parsed_body)
     except Exception:
         canonical_body = None
-    raw_body = body_bytes.decode("utf-8", errors="replace")
     channel_id = request.headers.get("channel-id")
     diagnostic = {
         "reason": reason,
@@ -253,7 +252,54 @@ async def _verify_inbound_signature(
         "public_key_sha256_spki": _public_key_fingerprint(public_key),
     }
     _LOG.warning("Dipay callback signature rejected: %s", diagnostic)
+    _log_full_callback_for_debug(request, body_bytes)
     raise HTTPException(401, "Invalid Dipay callback signature")
+
+
+# Temporary diagnostics: substring test against lowercased header names and
+# JSON keys, so nested PAN/customer fields are redacted regardless of casing.
+_REDACTED = "<redacted>"
+_SENSITIVE_FIELD_MARKERS = ("pan", "cvv", "card", "customer", "email", "phone")
+
+
+def _redact_headers(headers: Any) -> dict[str, str]:
+    return {
+        name: _REDACTED
+        if any(marker in name.lower() for marker in _SENSITIVE_FIELD_MARKERS)
+        else value
+        for name, value in headers.items()
+    }
+
+
+def _redact_json(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _REDACTED
+            if any(marker in str(key).lower() for marker in _SENSITIVE_FIELD_MARKERS)
+            else _redact_json(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_json(item) for item in value]
+    return value
+
+
+def _log_full_callback_for_debug(request: Request, body_bytes: bytes) -> None:
+    """Log the full rejected callback when explicitly enabled (temporary)."""
+    if not getattr(settings, "dipay_debug_log_full_callback", False):
+        return
+    raw = body_bytes.decode("utf-8", errors="replace")
+    try:
+        body: Any = _redact_json(json.loads(raw))
+    except Exception:
+        body = raw
+    _LOG.warning(
+        "TEMPORARY FULL DIPAY QRIS CALLBACK method=%r path=%r headers=%r body=%r",
+        request.method,
+        request.url.path,
+        _redact_headers(request.headers),
+        body,
+    )
 
 
 def _provider_error(exc: DipayError) -> HTTPException:
