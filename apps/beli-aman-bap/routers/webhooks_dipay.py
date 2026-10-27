@@ -40,12 +40,9 @@ Reference: https://api-docs.dipay.id/ (QRIS MPM / Disbursement).
 from __future__ import annotations
 
 import asyncio
-import base64
 import hashlib
 import json
 import logging
-import os
-import time
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -283,7 +280,6 @@ async def _verify_inbound_signature(
     }
     _LOG.warning("Dipay callback signature rejected: %s", diagnostic)
     _log_full_callback_for_debug(request, body_bytes)
-    _capture_raw_callback(request, body_bytes)
     raise HTTPException(401, "Invalid Dipay callback signature")
 
 
@@ -331,39 +327,6 @@ def _log_full_callback_for_debug(request: Request, body_bytes: bytes) -> None:
         _redact_headers(request.headers),
         body,
     )
-
-
-def _capture_raw_callback(request: Request, body_bytes: bytes) -> None:
-    """Write the exact rejected callback to a private file (temporary).
-
-    Unlike the log above nothing is redacted — the raw bytes are needed to
-    reproduce Dipay's signed body — so it goes to a 0600 file, never logs.
-    """
-    capture_dir = str(getattr(settings, "dipay_debug_capture_dir", "") or "").strip()
-    if not capture_dir:
-        return
-    try:
-        external_id = "".join(
-            c for c in (request.headers.get("x-external-id") or "none") if c.isalnum()
-        )[:36] or "none"
-        os.makedirs(capture_dir, mode=0o700, exist_ok=True)
-        name = f"dipay-callback-{external_id}-{time.time_ns()}.json"
-        payload = json.dumps({
-            "method": request.method,
-            "path": request.url.path,
-            "headers": dict(request.headers.items()),
-            "body_b64": base64.b64encode(body_bytes).decode("ascii"),
-        })
-        fd = os.open(
-            os.path.join(capture_dir, name),
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-            0o600,
-        )
-        with os.fdopen(fd, "w") as fh:
-            fh.write(payload)
-        _LOG.warning("TEMPORARY Dipay callback captured to %s", name)
-    except Exception:  # noqa: BLE001 — capture must never affect the response
-        _LOG.warning("TEMPORARY Dipay callback capture failed", exc_info=True)
 
 
 def _provider_error(exc: DipayError) -> HTTPException:

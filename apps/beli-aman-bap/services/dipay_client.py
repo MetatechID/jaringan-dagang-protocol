@@ -57,6 +57,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -673,26 +674,22 @@ def _load_public_key(key_material: str | Any | None):
             return None
 
 
-def _strip_strings(value: Any) -> Any:
-    """Recursively trim string values (Dipay pads some fields, e.g. ``issuer``)."""
-    if isinstance(value, dict):
-        return {key: _strip_strings(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_strip_strings(item) for item in value]
-    if isinstance(value, str):
-        return value.strip()
-    return value
+def _strip_whitespace(text: str) -> str:
+    """Dipay production's ``minify``: delete EVERY whitespace character,
+    including spaces inside string values ("JAKARTA SELATAN" ->
+    "JAKARTASELATAN"). Confirmed against captured production QRIS
+    callbacks 2026-10-28; the demo env signs the plain minified JSON."""
+    return re.sub(r"\s", "", text)
 
 
 def _notification_body_candidates(
     body: dict | str | bytes | None,
 ) -> list[tuple[str, str]]:
-    """Labelled body serializations Dipay may have hashed, documented form first.
+    """Labelled body forms Dipay may have hashed for the callback signature.
 
-    Dipay's production callbacks don't verify against the documented
-    ``minify(body)`` alone, so a few deterministic re-serializations of the
-    received JSON are tried too. Each is still checked against Dipay's RSA
-    signature, so accepting more forms does not weaken authentication.
+    ``whitespace-stripped`` is what Dipay production signs; ``minified-body``
+    is the documented form the demo env signs; ``raw-body`` covers a gateway
+    that signs the wire bytes verbatim.
     """
     raw_body: str | None = None
     parsed: Any = None
@@ -713,20 +710,11 @@ def _notification_body_candidates(
 
     candidates: list[tuple[str, str]] = []
     if parsed is not None:
-        candidates.append(("minified-body", _minify(parsed)))
+        minified = _minify(parsed)
+        candidates.append(("whitespace-stripped", _strip_whitespace(minified)))
+        candidates.append(("minified-body", minified))
     if raw_body is not None:
         candidates.append(("raw-body", raw_body))
-    if parsed:
-        candidates.append((
-            "sorted-keys",
-            json.dumps(parsed, separators=(",", ":"), sort_keys=True, ensure_ascii=False),
-        ))
-        candidates.append((
-            "ascii-escaped",
-            json.dumps(parsed, separators=(",", ":"), ensure_ascii=True),
-        ))
-        candidates.append(("stripped-strings", _minify(_strip_strings(parsed))))
-    candidates.append(("empty-body", "{}"))
 
     seen: set[str] = set()
     unique: list[tuple[str, str]] = []

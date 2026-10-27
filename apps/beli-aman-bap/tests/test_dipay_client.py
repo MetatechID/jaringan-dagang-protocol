@@ -977,19 +977,9 @@ class TestVerifyNotificationSignature:
         )["valid"] is True
 
 
-    @pytest.mark.parametrize(
-        "label, serialize",
-        [
-            ("sorted-keys", lambda b: json.dumps(b, separators=(",", ":"), sort_keys=True, ensure_ascii=False)),
-            ("ascii-escaped", lambda b: json.dumps(b, separators=(",", ":"), ensure_ascii=True)),
-            ("stripped-strings", lambda b: json.dumps(
-                {**b, "additionalInfo": {"issuer": b["additionalInfo"]["issuer"].strip()}},
-                separators=(",", ":"), ensure_ascii=False,
-            )),
-            ("empty-body", lambda b: "{}"),
-        ],
-    )
-    def test_diagnostic_accepts_alternate_body_serializations(self, label, serialize):
+    def test_diagnostic_accepts_dipay_production_whitespace_stripped_body(self):
+        """Dipay production's minify deletes every whitespace character, even
+        inside string values — verified against captured QRIS callbacks."""
         from cryptography.hazmat.primitives import hashes, serialization
         from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
@@ -998,15 +988,16 @@ class TestVerifyNotificationSignature:
             encoding=serialization.Encoding.PEM,
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
         ).decode("utf-8")
-        body = {
-            "originalPartnerReferenceNo": "q-123",
-            "latestTransactionStatus": "00",
-            "additionalInfo": {"issuer": "BANK Ä   "},
-        }
-        raw_body = json.dumps(body, separators=(",", ":"), ensure_ascii=False).encode()
-        ts = "2026-09-23T14:30:00+07:00"
+        raw_body = (
+            b'{"originalPartnerReferenceNo":"q-123","latestTransactionStatus":"00",'
+            b'"transactionStatusDesc":"SUCCESS","amount":{"currency":"IDR","value":"39900.00"},'
+            b'"additionalInfo":{"merchantLocation":"JAKARTA SELATAN","issuer":"BANK ABC      "}}'
+        )
+        signed_body = raw_body.replace(b" ", b"")
+        assert b"JAKARTASELATAN" in signed_body
+        ts = "2026-10-28T06:36:27+07:00"
         path = "/v1.0/qr/qr-mpm-notify"
-        signed = f"POST:{path}:{hashlib.sha256(serialize(body).encode()).hexdigest()}:{ts}"
+        signed = f"POST:{path}:{hashlib.sha256(signed_body).hexdigest()}:{ts}"
         sig = base64.b64encode(
             key.sign(signed.encode(), padding.PKCS1v15(), hashes.SHA256())
         ).decode()
@@ -1016,7 +1007,7 @@ class TestVerifyNotificationSignature:
             signature=sig, public_key=pub_pem,
         )
         assert result["valid"] is True
-        assert result["body_candidate"] == label
+        assert result["body_candidate"] == "whitespace-stripped"
         assert result["url_candidate"] == "path"
 
     def test_diagnostic_accepts_full_url_candidate(self):
