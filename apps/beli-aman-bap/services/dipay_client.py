@@ -673,26 +673,15 @@ def _load_public_key(key_material: str | Any | None):
             return None
 
 
-def verify_notification_signature(
+def verify_notification_signature_diagnostic(
     method: str,
     path: str,
     body: dict | str | bytes | None,
     timestamp: str,
     signature: str,
     public_key: str | Any | None = None,
-) -> bool:
-    """Verify Dipay's incoming webhook notification signature.
-
-    Uses SHA256withRSA over
-    ``'{HTTPMethod}:{HTTPPath}:{sha256hex(minifiedBody)}:{X-TIMESTAMP}'``
-    with Dipay's callback public key — the same shape Midtrans' SNAP-BI
-    reference client (``isWebhookNotificationVerified``) verifies.
-
-    Two body encodings are tried, canonical first: the re-minified
-    ``separators=(",", ":")`` form, then the raw received bytes (in case
-    Dipay ever signs the wire bytes verbatim).  Which one matched is
-    logged so a future form change is diagnosable from the logs.
-    """
+) -> dict[str, Any]:
+    """Verify an inbound notification and return non-sensitive diagnostics."""
     key_material = (
         public_key
         if public_key is not None
@@ -700,23 +689,21 @@ def verify_notification_signature(
     )
     pub_key_obj = _load_public_key(key_material)
     if pub_key_obj is None:
-        _LOG.warning("Dipay callback public key not configured or invalid")
-        return False
+        return {"valid": False, "reason": "missing_or_invalid_public_key"}
 
-    # Canonical body form (re-minified JSON) first; raw wire form second.
     canonical_body: str | None = None
     raw_body: str | None = None
     if isinstance(body, dict):
         canonical_body = _minify(body)
+        raw_body = canonical_body
     elif isinstance(body, (bytes, bytearray)):
-        raw_body = body.decode("utf-8")
+        raw_body = bytes(body).decode("utf-8", errors="replace")
     elif isinstance(body, str):
         raw_body = body
     else:
         canonical_body = "{}"
+        raw_body = "{}"
 
-    # Re-minify the raw form too, so a wire body that differs only in
-    # whitespace still matches the canonical candidate.
     if raw_body is not None and canonical_body is None:
         try:
             canonical_body = _minify(json.loads(raw_body))
@@ -731,18 +718,31 @@ def verify_notification_signature(
 
     sig_str = (signature or "").strip()
     if not sig_str:
-        return False
+        return {"valid": False, "reason": "missing_signature"}
 
+    encoding = "hex" if len(sig_str) == 512 and all(
+        c in "0123456789abcdefABCDEF" for c in sig_str
+    ) else "base64"
     try:
-        if len(sig_str) == 512 and all(c in "0123456789abcdefABCDEF" for c in sig_str):
+        if encoding == "hex":
             sig_bytes = bytes.fromhex(sig_str)
         else:
-            try:
-                sig_bytes = base64.b64decode(sig_str)
-            except Exception:
-                sig_bytes = bytes.fromhex(sig_str)
+            sig_bytes = base64.b64decode(sig_str, validate=True)
     except Exception:
-        return False
+        return {
+            "valid": False,
+            "reason": "unsupported_signature_encoding",
+            "signature_encoding": encoding,
+            "signature_length": len(sig_str),
+        }
+
+    if not timestamp:
+        return {
+            "valid": False,
+            "reason": "missing_timestamp",
+            "signature_encoding": encoding,
+            "signature_length": len(sig_str),
+        }
 
     for label, body_str in candidates:
         string_to_verify = (
@@ -755,10 +755,38 @@ def verify_notification_signature(
                 padding.PKCS1v15(),
                 hashes.SHA256(),
             )
-            _LOG.debug("Dipay callback signature verified via %s candidate", label)
-            return True
+            return {
+                "valid": True,
+                "reason": "verified",
+                "body_candidate": label,
+                "signature_encoding": encoding,
+                "signature_length": len(sig_str),
+            }
         except Exception:
             continue
 
-    _LOG.debug("Dipay callback signature did not match any candidate form")
-    return False
+    return {
+        "valid": False,
+        "reason": "signature_verification_mismatch",
+        "signature_encoding": encoding,
+        "signature_length": len(sig_str),
+    }
+
+
+def verify_notification_signature(
+    method: str,
+    path: str,
+    body: dict | str | bytes | None,
+    timestamp: str,
+    signature: str,
+    public_key: str | Any | None = None,
+) -> bool:
+    """Backward-compatible boolean wrapper for inbound signature verification."""
+    return verify_notification_signature_diagnostic(
+        method=method,
+        path=path,
+        body=body,
+        timestamp=timestamp,
+        signature=signature,
+        public_key=public_key,
+    )["valid"]

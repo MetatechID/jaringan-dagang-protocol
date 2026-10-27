@@ -847,6 +847,43 @@ class TestDipayWebhookSignature:
         assert resp.status_code == 401
         assert resp.json() == {"responseCode": "4015200", "responseMessage": "Unauthorized. Invalid Signature"}
 
+    def test_invalid_signature_logs_reason_without_sensitive_data(self, monkeypatch, client, caplog):
+        from config import settings
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        pub_pem = private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("utf-8")
+        monkeypatch.setattr(settings, "dipay_callback_public_key", pub_pem, raising=False)
+        monkeypatch.setattr(settings, "environment", "production")
+
+        client_, app = client
+        _patch_db(app, monkeypatch)
+        body = _qris_body("q-sensitive-ref", "00")
+        signature = "deadbeef" * 8
+        with caplog.at_level("WARNING", logger="beli_aman_bap.webhooks_dipay"):
+            resp = client_.post(
+                "/v1.0/qr/qr-mpm-notify",
+                content=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "x-signature": signature,
+                    "x-timestamp": "2026-09-23T10:00:00.000+07:00",
+                    "x-partner-id": "partner-id",
+                    "x-external-id": "external-id",
+                    "channel-id": "DPAPI",
+                },
+            )
+        assert resp.status_code == 401
+        text = " ".join(caplog.messages)
+        assert "signature_verification_mismatch" in text
+        assert signature not in text
+        assert body.decode() not in text
+        assert "q-sensitive-ref" not in text
+
     def test_remit_signature_verified_when_key_configured(self, monkeypatch, client):
         from config import settings
         from cryptography.hazmat.primitives import hashes, serialization

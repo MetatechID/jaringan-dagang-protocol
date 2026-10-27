@@ -40,10 +40,13 @@ Reference: https://api-docs.dipay.id/ (QRIS MPM / Disbursement).
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from cryptography.hazmat.primitives import serialization
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import or_, select
@@ -167,6 +170,21 @@ async def _parse_body(request: Request) -> dict[str, Any]:
     return body
 
 
+def _public_key_fingerprint(public_key: str | None) -> str | None:
+    """Return a non-secret SPKI fingerprint for callback diagnostics."""
+    try:
+        key = dipay_client._load_public_key(public_key)
+        if key is None:
+            return None
+        der = key.public_bytes(
+            serialization.Encoding.DER,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        return hashlib.sha256(der).hexdigest()
+    except Exception:
+        return None
+
+
 async def _verify_inbound_signature(
     request: Request,
     body_bytes: bytes,
@@ -184,22 +202,58 @@ async def _verify_inbound_signature(
         return
 
     if not x_signature:
-        raise HTTPException(401, "Invalid Dipay callback signature")
+        reason = "missing_signature"
+        result: dict[str, Any] = {"valid": False, "reason": reason}
+    elif not x_timestamp:
+        reason = "missing_timestamp"
+        result = {"valid": False, "reason": reason}
+    else:
+        try:
+            result = dipay_client.verify_notification_signature_diagnostic(
+                method=request.method,
+                path=request.url.path,
+                body=body_bytes,
+                timestamp=x_timestamp,
+                signature=x_signature,
+                public_key=public_key,
+            )
+        except Exception:  # noqa: BLE001 — never leak verifier internals
+            result = {"valid": False, "reason": "signature_verifier_error"}
 
+    if result.get("valid") is True:
+        return
+
+    reason = str(result.get("reason") or "signature_verifier_error")
     try:
-        valid = dipay_client.verify_notification_signature(
-            method=request.method,
-            path=request.url.path,
-            body=body_bytes,
-            timestamp=x_timestamp or "",
-            signature=x_signature,
-            public_key=public_key,
-        )
-    except Exception as exc:  # noqa: BLE001 — never leak verifier internals
-        raise HTTPException(401, "Invalid Dipay callback signature") from exc
-
-    if not valid:
-        raise HTTPException(401, "Invalid Dipay callback signature")
+        parsed_body = json.loads(body_bytes) if body_bytes else {}
+        canonical_body = dipay_client._minify(parsed_body)
+    except Exception:
+        canonical_body = None
+    raw_body = body_bytes.decode("utf-8", errors="replace")
+    channel_id = request.headers.get("channel-id")
+    diagnostic = {
+        "reason": reason,
+        "method": request.method,
+        "path": request.url.path,
+        "signature_present": bool(x_signature),
+        "signature_length": len(x_signature or ""),
+        "signature_encoding": result.get("signature_encoding"),
+        "timestamp_present": bool(x_timestamp),
+        "timestamp_length": len(x_timestamp or ""),
+        "body_bytes": len(body_bytes),
+        "raw_body_sha256": hashlib.sha256(body_bytes).hexdigest(),
+        "canonical_body_sha256": (
+            hashlib.sha256(canonical_body.encode("utf-8")).hexdigest()
+            if canonical_body is not None
+            else None
+        ),
+        "partner_id_present": bool(request.headers.get("x-partner-id")),
+        "external_id_present": bool(request.headers.get("x-external-id")),
+        "channel_id": channel_id if channel_id == "DPAPI" else None,
+        "public_key_sha256_spki": _public_key_fingerprint(public_key),
+    }
+    _LOG.warning("Dipay callback signature rejected: %s", diagnostic)
+    raise HTTPException(401, "Invalid Dipay callback signature")
 
 
 def _provider_error(exc: DipayError) -> HTTPException:
