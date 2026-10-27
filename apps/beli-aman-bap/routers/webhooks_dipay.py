@@ -185,6 +185,26 @@ def _public_key_fingerprint(public_key: str | None) -> str | None:
         return None
 
 
+def _endpoint_url_candidates(request: Request) -> list[tuple[str, str]]:
+    """``EndpointUrl`` forms for the callback stringToSign — the path first
+    (documented / what Dipay demo signs), then the public URL Dipay posted to
+    (reconstructed from the proxy's forwarded headers)."""
+    path = request.url.path
+    host = (
+        request.headers.get("x-forwarded-host")
+        or request.headers.get("host")
+        or request.url.netloc
+    ).split(",")[0].strip()
+    proto = (
+        request.headers.get("x-forwarded-proto") or request.url.scheme
+    ).split(",")[0].strip()
+    candidates = [("path", path)]
+    if host:
+        candidates.append(("full-url", f"{proto}://{host}{path}"))
+        candidates.append(("host-path", f"{host}{path}"))
+    return candidates
+
+
 async def _verify_inbound_signature(
     request: Request,
     body_bytes: bytes,
@@ -216,11 +236,17 @@ async def _verify_inbound_signature(
                 timestamp=x_timestamp,
                 signature=x_signature,
                 public_key=public_key,
+                urls=_endpoint_url_candidates(request),
             )
         except Exception:  # noqa: BLE001 — never leak verifier internals
             result = {"valid": False, "reason": "signature_verifier_error"}
 
     if result.get("valid") is True:
+        _LOG.info(
+            "Dipay callback signature verified via body=%s url=%s",
+            result.get("body_candidate"),
+            result.get("url_candidate"),
+        )
         return
 
     reason = str(result.get("reason") or "signature_verifier_error")
@@ -250,6 +276,7 @@ async def _verify_inbound_signature(
         "external_id_present": bool(request.headers.get("x-external-id")),
         "channel_id": channel_id if channel_id == "DPAPI" else None,
         "public_key_sha256_spki": _public_key_fingerprint(public_key),
+        "candidates_tried": result.get("candidates_tried"),
     }
     _LOG.warning("Dipay callback signature rejected: %s", diagnostic)
     _log_full_callback_for_debug(request, body_bytes)

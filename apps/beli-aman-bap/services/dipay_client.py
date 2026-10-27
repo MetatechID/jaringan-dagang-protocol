@@ -673,6 +673,70 @@ def _load_public_key(key_material: str | Any | None):
             return None
 
 
+def _strip_strings(value: Any) -> Any:
+    """Recursively trim string values (Dipay pads some fields, e.g. ``issuer``)."""
+    if isinstance(value, dict):
+        return {key: _strip_strings(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_strip_strings(item) for item in value]
+    if isinstance(value, str):
+        return value.strip()
+    return value
+
+
+def _notification_body_candidates(
+    body: dict | str | bytes | None,
+) -> list[tuple[str, str]]:
+    """Labelled body serializations Dipay may have hashed, documented form first.
+
+    Dipay's production callbacks don't verify against the documented
+    ``minify(body)`` alone, so a few deterministic re-serializations of the
+    received JSON are tried too. Each is still checked against Dipay's RSA
+    signature, so accepting more forms does not weaken authentication.
+    """
+    raw_body: str | None = None
+    parsed: Any = None
+    if isinstance(body, dict):
+        parsed = body
+    elif isinstance(body, (bytes, bytearray)):
+        raw_body = bytes(body).decode("utf-8", errors="replace")
+    elif isinstance(body, str):
+        raw_body = body
+    else:
+        parsed = {}
+
+    if parsed is None and raw_body is not None:
+        try:
+            parsed = json.loads(raw_body)
+        except Exception:
+            parsed = None
+
+    candidates: list[tuple[str, str]] = []
+    if parsed is not None:
+        candidates.append(("minified-body", _minify(parsed)))
+    if raw_body is not None:
+        candidates.append(("raw-body", raw_body))
+    if parsed:
+        candidates.append((
+            "sorted-keys",
+            json.dumps(parsed, separators=(",", ":"), sort_keys=True, ensure_ascii=False),
+        ))
+        candidates.append((
+            "ascii-escaped",
+            json.dumps(parsed, separators=(",", ":"), ensure_ascii=True),
+        ))
+        candidates.append(("stripped-strings", _minify(_strip_strings(parsed))))
+    candidates.append(("empty-body", "{}"))
+
+    seen: set[str] = set()
+    unique: list[tuple[str, str]] = []
+    for label, text in candidates:
+        if text not in seen:
+            seen.add(text)
+            unique.append((label, text))
+    return unique
+
+
 def verify_notification_signature_diagnostic(
     method: str,
     path: str,
@@ -680,8 +744,14 @@ def verify_notification_signature_diagnostic(
     timestamp: str,
     signature: str,
     public_key: str | Any | None = None,
+    urls: list[tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
-    """Verify an inbound notification and return non-sensitive diagnostics."""
+    """Verify an inbound notification and return non-sensitive diagnostics.
+
+    ``urls`` is an ordered list of ``(label, endpoint_url)`` forms for the
+    ``EndpointUrl`` leg (Dipay's docs don't say path vs full URL); it
+    defaults to the request path alone.
+    """
     key_material = (
         public_key
         if public_key is not None
@@ -690,31 +760,6 @@ def verify_notification_signature_diagnostic(
     pub_key_obj = _load_public_key(key_material)
     if pub_key_obj is None:
         return {"valid": False, "reason": "missing_or_invalid_public_key"}
-
-    canonical_body: str | None = None
-    raw_body: str | None = None
-    if isinstance(body, dict):
-        canonical_body = _minify(body)
-        raw_body = canonical_body
-    elif isinstance(body, (bytes, bytearray)):
-        raw_body = bytes(body).decode("utf-8", errors="replace")
-    elif isinstance(body, str):
-        raw_body = body
-    else:
-        canonical_body = "{}"
-        raw_body = "{}"
-
-    if raw_body is not None and canonical_body is None:
-        try:
-            canonical_body = _minify(json.loads(raw_body))
-        except Exception:
-            canonical_body = None
-
-    candidates: list[tuple[str, str]] = []
-    if canonical_body is not None:
-        candidates.append(("minified-body", canonical_body))
-    if raw_body is not None and raw_body != canonical_body:
-        candidates.append(("raw-body", raw_body))
 
     sig_str = (signature or "").strip()
     if not sig_str:
@@ -744,32 +789,43 @@ def verify_notification_signature_diagnostic(
             "signature_length": len(sig_str),
         }
 
-    for label, body_str in candidates:
-        string_to_verify = (
-            f"{method.upper()}:{path}:{_sha256_hex(body_str)}:{timestamp}"
-        )
-        try:
-            pub_key_obj.verify(
-                sig_bytes,
-                string_to_verify.encode("utf-8"),
-                padding.PKCS1v15(),
-                hashes.SHA256(),
+    url_candidates: list[tuple[str, str]] = []
+    for label, url in urls or [("path", path)]:
+        if url and url not in {u for _, u in url_candidates}:
+            url_candidates.append((label, url))
+    body_candidates = _notification_body_candidates(body)
+
+    tried = 0
+    for url_label, url in url_candidates:
+        for body_label, body_str in body_candidates:
+            tried += 1
+            string_to_verify = (
+                f"{method.upper()}:{url}:{_sha256_hex(body_str)}:{timestamp}"
             )
+            try:
+                pub_key_obj.verify(
+                    sig_bytes,
+                    string_to_verify.encode("utf-8"),
+                    padding.PKCS1v15(),
+                    hashes.SHA256(),
+                )
+            except Exception:
+                continue
             return {
                 "valid": True,
                 "reason": "verified",
-                "body_candidate": label,
+                "body_candidate": body_label,
+                "url_candidate": url_label,
                 "signature_encoding": encoding,
                 "signature_length": len(sig_str),
             }
-        except Exception:
-            continue
 
     return {
         "valid": False,
         "reason": "signature_verification_mismatch",
         "signature_encoding": encoding,
         "signature_length": len(sig_str),
+        "candidates_tried": tried,
     }
 
 
@@ -780,6 +836,7 @@ def verify_notification_signature(
     timestamp: str,
     signature: str,
     public_key: str | Any | None = None,
+    urls: list[tuple[str, str]] | None = None,
 ) -> bool:
     """Backward-compatible boolean wrapper for inbound signature verification."""
     return verify_notification_signature_diagnostic(
@@ -789,4 +846,5 @@ def verify_notification_signature(
         timestamp=timestamp,
         signature=signature,
         public_key=public_key,
+        urls=urls,
     )["valid"]
