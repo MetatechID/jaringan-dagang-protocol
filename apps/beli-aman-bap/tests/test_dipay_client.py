@@ -929,6 +929,53 @@ class TestVerifyNotificationSignature:
             public_key=None,
         ) is False
 
+    def test_diagnostic_distinguishes_signature_failure_causes(self):
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding, rsa
+
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        pub_pem = key.public_key().public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode("utf-8")
+        body = {"originalPartnerReferenceNo": "q-123", "latestTransactionStatus": "00"}
+        raw_body = json.dumps(body, separators=(",", ":")).encode()
+        ts = "2026-09-23T14:30:00+07:00"
+        path = "/v1.0/qr/qr-mpm-notify"
+        string_to_sign = (
+            f"POST:{path}:{hashlib.sha256(raw_body).hexdigest()}:{ts}"
+        )
+        valid_sig = key.sign(
+            string_to_sign.encode(), padding.PKCS1v15(), hashes.SHA256()
+        )
+        valid_b64 = base64.b64encode(valid_sig).decode()
+
+        kwargs = dict(
+            method="POST", path=path, body=raw_body, timestamp=ts,
+        )
+        assert dipay_client.verify_notification_signature_diagnostic(
+            **kwargs, signature="", public_key=pub_pem,
+        )["reason"] == "missing_signature"
+        assert dipay_client.verify_notification_signature_diagnostic(
+            **kwargs, signature=valid_b64, public_key="",
+        )["reason"] == "missing_or_invalid_public_key"
+        assert dipay_client.verify_notification_signature_diagnostic(
+            **kwargs, signature="not-base64!", public_key=pub_pem,
+        )["reason"] == "unsupported_signature_encoding"
+        assert dipay_client.verify_notification_signature_diagnostic(
+            **{**kwargs, "timestamp": ""}, signature=valid_b64, public_key=pub_pem,
+        )["reason"] == "missing_timestamp"
+        mismatch = dipay_client.verify_notification_signature_diagnostic(
+            **{**kwargs, "path": "/wrong-path"},
+            signature=valid_b64,
+            public_key=pub_pem,
+        )
+        assert mismatch["reason"] == "signature_verification_mismatch"
+        assert mismatch["signature_encoding"] == "base64"
+        assert dipay_client.verify_notification_signature_diagnostic(
+            **kwargs, signature=valid_b64, public_key=pub_pem,
+        )["valid"] is True
+
 
 class TestLoadPrivateKey:
     def test_load_private_key_raw_pem_and_b64(self):
