@@ -183,12 +183,6 @@ class Settings(BaseSettings):
     # X-SIGNATURE and payment references. Off by default; enable only for a
     # controlled capture and disable immediately afterwards.
     dipay_debug_log_full_callback: bool = False
-    # TEMPORARY diagnostic: when set, each rejected QRIS callback is written
-    # unredacted (headers + exact raw body, base64) to a 0600 JSON file in
-    # this directory so the signed body form can be analysed offline. Holds
-    # card PANs — never point it at shared/persistent storage, and unset it
-    # (and delete the files) right after the capture.
-    dipay_debug_capture_dir: str = ""
     # How long a Dipay QRIS code remains valid before Dipay expires it.
     # Default is 1800s (30 minutes).
     dipay_qris_duration_seconds: int = 1800

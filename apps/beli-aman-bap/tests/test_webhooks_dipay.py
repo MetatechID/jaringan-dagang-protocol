@@ -967,54 +967,6 @@ class TestDipayWebhookSignature:
         assert "Debug Merchant" in text
         assert "BCA" in text
 
-    def test_raw_capture_writes_exact_body_to_private_file(self, monkeypatch, client, tmp_path):
-        import base64
-        from config import settings
-
-        monkeypatch.setattr(settings, "dipay_callback_public_key", "invalid", raising=False)
-        monkeypatch.setattr(settings, "environment", "production")
-        monkeypatch.setattr(settings, "dipay_debug_capture_dir", str(tmp_path), raising=False)
-
-        client_, app = client
-        _patch_db(app, monkeypatch)
-        body = b'{"originalPartnerReferenceNo":"q-cap-1","additionalInfo":{"customerPan":"4111"}}'
-        resp = client_.post(
-            "/v1.0/qr/qr-mpm-notify",
-            content=body,
-            headers={
-                "Content-Type": "application/json",
-                "x-signature": "c2ln",
-                "x-timestamp": "2026-10-28T06:08:09+07:00",
-                "x-external-id": "587499378",
-            },
-        )
-        assert resp.status_code == 401
-        files = list(tmp_path.iterdir())
-        assert len(files) == 1
-        assert files[0].name.startswith("dipay-callback-587499378-")
-        assert files[0].stat().st_mode & 0o777 == 0o600
-        captured = json.loads(files[0].read_text())
-        assert base64.b64decode(captured["body_b64"]) == body
-        assert captured["headers"]["x-signature"] == "c2ln"
-
-    def test_raw_capture_disabled_by_default(self, monkeypatch, client, tmp_path):
-        from config import settings
-
-        monkeypatch.setattr(settings, "dipay_callback_public_key", "invalid", raising=False)
-        monkeypatch.setattr(settings, "environment", "production")
-        monkeypatch.setattr(settings, "dipay_debug_capture_dir", "", raising=False)
-        monkeypatch.chdir(tmp_path)
-
-        client_, app = client
-        _patch_db(app, monkeypatch)
-        resp = client_.post(
-            "/v1.0/qr/qr-mpm-notify",
-            content=_qris_body("q-cap-2", "00"),
-            headers={"x-signature": "c2ln", "x-timestamp": "2026-10-28T06:08:09+07:00"},
-        )
-        assert resp.status_code == 401
-        assert list(tmp_path.iterdir()) == []
-
     def test_full_callback_debug_log_disabled_by_default(self, monkeypatch, client, caplog):
         from config import settings
 
