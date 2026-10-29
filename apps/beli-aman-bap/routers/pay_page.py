@@ -23,9 +23,10 @@ from __future__ import annotations
 
 import html
 import json
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,6 +35,7 @@ from database import get_db
 from models.brand import Brand
 from services import xendit_client
 from services.partner_orders import get_partner_order
+from services.partner_return_url import stored_return_url
 
 router = APIRouter(prefix="/pay", tags=["partner-pay-page"])
 
@@ -106,7 +108,7 @@ async def pay_page(order_id: str, db: AsyncSession = Depends(get_db)) -> HTMLRes
     order = await _load_order(db, order_id)
     safe_desc = html.escape(order.description[:120])
     safe_amount = html.escape(_idr(order.amount_idr))
-    order_js = json.dumps(order.id)
+    order_js = json.dumps(quote(order.id, safe="")).replace("<", "\\u003c")
     paid = order.status == "paid"
 
     if paid:
@@ -116,8 +118,7 @@ async def pay_page(order_id: str, db: AsyncSession = Depends(get_db)) -> HTMLRes
   <div class="row"><span class="label">Total</span><span class="total paid">{safe_amount} &#10003;</span></div>
   <p class="note">Bila Anda tidak dialihkan otomatis, silakan kembali ke halaman merchant.</p>
   <script>
-    var su = sessionStorage.getItem('oito_success_url_' + {order_js});
-    if (su) setTimeout(function () {{ window.location.href = su; }}, 1500);
+    if ({json.dumps(bool(stored_return_url(order)))}) setTimeout(function () {{ window.location.href = '/pay/' + {order_js} + '/done'; }}, 1500);
   </script>"""
     elif (
         order.status == "pending"
@@ -163,7 +164,7 @@ async def pay_page(order_id: str, db: AsyncSession = Depends(get_db)) -> HTMLRes
           if (!d) return;
           if (d.status === 'paid') {{
             state.innerHTML = '<span class="paid">&#10003; Pembayaran diterima.</span>';
-            if (d.success_url) setTimeout(function () {{ window.location.href = d.success_url; }}, 1500);
+            if (d.success_url) setTimeout(function () {{ window.location.href = '/pay/' + orderId + '/done'; }}, 1500);
           }} else if (d.status === 'expired') {{
             state.textContent = 'Pesanan ini telah kedaluwarsa. Silakan buat pesanan baru.';
           }}
@@ -210,7 +211,7 @@ async def pay_page(order_id: str, db: AsyncSession = Depends(get_db)) -> HTMLRes
           if (d.status === 'paid') {{
             state.innerHTML = '<span class="paid">&#10003; Pembayaran diterima.</span>';
             payBtn.style.display = 'none';
-            if (d.success_url) setTimeout(function () {{ window.location.href = d.success_url; }}, 1500);
+            if (d.success_url) setTimeout(function () {{ window.location.href = '/pay/' + orderId + '/done'; }}, 1500);
           }} else if (d.status === 'expired') {{
             state.textContent = 'Pesanan ini telah kedaluwarsa. Silakan buat pesanan baru.';
             payBtn.style.display = 'none';
@@ -271,20 +272,16 @@ async def pay_page_status(order_id: str, db: AsyncSession = Depends(get_db)) -> 
         "status": order.status,
         "amount_idr": order.amount_idr,
         "paid_at": order.paid_at.isoformat() if order.paid_at else None,
-        "success_url": order.success_url,
+        "success_url": stored_return_url(order) if order.status == "paid" else None,
     }
 
 
 @router.get("/{order_id}/done", response_class=HTMLResponse, include_in_schema=False)
-async def pay_done(order_id: str, db: AsyncSession = Depends(get_db)) -> HTMLResponse:
+async def pay_done(order_id: str, db: AsyncSession = Depends(get_db)):
     order = await _load_order(db, order_id)
-    if order.status == "paid" and order.success_url:
-        return HTMLResponse(content=_render_shell(
-            "Pembayaran berhasil",
-            f"""<h1>Pembayaran berhasil</h1>
-  <p class="desc">Mengalihkan kembali&hellip;</p>
-  <script>window.location.href = {json.dumps(order.success_url)};</script>""",
-        ))
+    destination = stored_return_url(order)
+    if order.status == "paid" and destination:
+        return RedirectResponse(destination, status_code=303)
     return await pay_page(order_id, db)
 
 

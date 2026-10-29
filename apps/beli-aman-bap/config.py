@@ -92,6 +92,9 @@ class Settings(BaseSettings):
     # hosted payment surface). Returned by POST /api/v1/partner/orders as
     # ``payment_url``.
     partner_pay_base_url: str = "https://api.beli-aman.metatech.id"
+    # JSON object of immutable Brand IDs to exact browser return origins.
+    # Empty by default: no partner-controlled external navigation.
+    partner_return_origins: dict[str, list[str]] = {}
     # Public BAP base URL Xendit posts callbacks to. Used to construct
     # invoice success/failure redirect URLs.
     xendit_callback_base_url: str = "https://api.beli-aman.metatech.id"
