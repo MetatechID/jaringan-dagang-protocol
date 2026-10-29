@@ -29,6 +29,7 @@ import json
 import os
 import sys
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 _BAP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _BAP_DIR not in sys.path:
@@ -550,11 +551,8 @@ class TestQrisCallbackErrors:
         )
         assert resp.status_code == 404
 
-    def test_proceeds_with_body_status_on_transient_query_error(
-        self, monkeypatch, client,
-    ):
-        """Non-404 DipayError from the query → proceed with the body
-        status (defensive: webhooks are advisory, the query may be down)."""
+    def test_rejects_transient_query_error(self, monkeypatch, client):
+        """An advisory callback cannot replace unavailable verification."""
         client_, app = client
         brand = StubBrand()
         cart = StubCart(payment_state="pending", order_id="order-abc")
@@ -570,8 +568,85 @@ class TestQrisCallbackErrors:
             content=_qris_body("q-cart-ref-1", "00"),
             headers={"Content-Type": "application/json"},
         )
-        assert resp.status_code == 200, resp.text
-        assert cart.payment_state == "paid"
+        assert resp.status_code == 500, resp.text
+        assert cart.payment_state == "pending"
+
+
+@pytest.mark.parametrize("path", [
+    "/webhooks/dipay/qris", "/v1.0/qr/qr-mpm-notify", "/webhooks/dipay/remit",
+])
+@pytest.mark.parametrize("failure", ["500", "429", "timeout", "malformed", "mismatched"])
+def test_verification_failure_has_no_effects(monkeypatch, client, path, failure):
+    """Even a valid signed success callback cannot replace provider verification."""
+    import hashlib
+    from config import settings
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding, rsa
+    from models.escrow_ledger import EscrowEntryStatus
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    monkeypatch.setattr(settings, "environment", "production")
+    monkeypatch.setattr(settings, "dipay_callback_public_key", key.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode())
+    client_, app = client
+    cart = StubCart(payment_state="pending")
+    row = _stub_ledger_row(partner_ref="verified-ref")
+    order = StubOrder(id="order-1", brand_id="brand-1")
+    brand = StubBrand(id="brand-1")
+    session = _patch_db(app, monkeypatch, row, order, brand)
+    session.rollback = AsyncMock()
+    session.commit = AsyncMock()
+
+    # Exercise the real transactional dependency with the fake session: remit
+    # raises through it, whereas QRIS catches errors and explicitly rolls back.
+    import database
+    class SessionContext:
+        async def __aenter__(self):
+            return session
+        async def __aexit__(self, *args):
+            pass
+    monkeypatch.setattr(database, "async_session", SessionContext)
+    app.dependency_overrides.clear()
+    _stub_resolve(monkeypatch, brand=brand, cart=cart)
+
+    async def query(**kwargs):
+        if failure in {"500", "429"}:
+            raise DipayError(int(failure), {"responseMessage": "synthetic failure"})
+        if failure == "timeout":
+            raise TimeoutError("synthetic provider timeout")
+        if failure == "malformed":
+            return []
+        return {"originalPartnerReferenceNo": "wrong-ref", "latestTransactionStatus": "00"}
+    monkeypatch.setattr(dipay_client, "query_qris", query)
+    monkeypatch.setattr(dipay_client, "get_disbursement_status", query)
+    paid = AsyncMock(side_effect=AssertionError("must not mark paid"))
+    notify = AsyncMock(side_effect=AssertionError("must not notify"))
+    monkeypatch.setattr("routers.webhooks_dipay.order_paid.mark_order_paid", paid)
+    monkeypatch.setattr("routers.webhooks_dipay.partner_orders.mark_partner_order_paid", paid)
+    monkeypatch.setattr("routers.webhooks_dipay.partner_webhook.notify_partner_paid_bg", notify)
+    body = _qris_body("verified-ref", "00")
+    timestamp = "2026-10-29T10:00:00+07:00"
+    signed = f"POST:{path}:{hashlib.sha256(body).hexdigest()}:{timestamp}"
+    signature = key.sign(signed.encode(), padding.PKCS1v15(), hashes.SHA256()).hex()
+    response = client_.post(path, content=body, headers={
+        "Content-Type": "application/json", "x-signature": signature,
+        "x-timestamp": timestamp,
+    })
+    assert response.status_code == (502 if path.endswith("remit") else 500)
+    session.rollback.assert_awaited_once()
+    # get_db's current QRIS envelope path commits only after explicit rollback;
+    # no mutations remain to commit. Remit propagates and never commits.
+    if path.endswith("remit"):
+        session.commit.assert_not_awaited()
+    assert session.added == []
+    assert cart.payment_state == "pending"
+    assert cart.invoice_id is None
+    assert row.status == EscrowEntryStatus.PENDING
+    assert row.external_ref is None
+    assert row.description == "Funds released to seller after delivery confirmed"
+    paid.assert_not_awaited()
+    notify.assert_not_awaited()
 
 
 # ---- QRIS callback — mock-invoice recovery ----------------------------------
@@ -707,7 +782,7 @@ class TestRemitCallback:
         assert row.status == EscrowEntryStatus.PENDING
         assert row.external_ref == "DIPAY-REF-2"
 
-    def test_body_status_used_when_status_api_transiently_fails(
+    def test_status_api_failure_does_not_mark_payout_failed(
         self, monkeypatch, client,
     ):
         client_, app = client
@@ -730,11 +805,11 @@ class TestRemitCallback:
             }).encode(),
             headers={"Content-Type": "application/json"},
         )
-        assert resp.status_code == 200, resp.text
-        out = resp.json()
-        assert out["responseCode"] == "2003600"
-        assert out["status"] == "FAILED"
-        assert "failed: Insufficient balance" in (row.description or "")
+        assert resp.status_code == 502, resp.text
+        from models.escrow_ledger import EscrowEntryStatus
+        assert row.status == EscrowEntryStatus.PENDING
+        assert row.external_ref is None
+        assert "failed:" not in (row.description or "")
 
     def test_400_on_missing_partner_ref(self, monkeypatch, client):
         client_, app = client
