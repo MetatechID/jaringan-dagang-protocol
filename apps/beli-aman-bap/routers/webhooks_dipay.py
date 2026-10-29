@@ -4,9 +4,9 @@ Mirror of ``routers/webhooks_sento.py`` — same advisory-callback pattern:
 
 - Auth: inbound ``X-SIGNATURE`` is RSA-verified (SHA256withRSA, base64) against
   ``DIPAY_CALLBACK_PUBLIC_KEY`` — see ``services.dipay_client.
-  verify_notification_signature``.  In non-production environments with no key
-  configured the check is skipped with a warning; in production a missing or
-  invalid signature is a 401.  Independently of that, the callback is treated
+  verify_notification_signature``. Only explicit development/test fixtures
+  with no key skip verification with a warning; all other modes reject a
+  missing or invalid signature with 401.  Independently of that, the callback is treated
   as **advisory**: state is re-verified via the status APIs before mutating —
   ``POST /qr/qr-mpm-query`` for payments, ``POST /transfer/status`` for
   disbursements. A forged POST can at worst make us ask Dipay what's true.
@@ -212,9 +212,7 @@ async def _verify_inbound_signature(
     x_timestamp: str | None,
 ) -> None:
     public_key = getattr(settings, "dipay_callback_public_key", None)
-    is_prod = getattr(settings, "environment", "development") == "production"
-
-    if not public_key and not is_prod:
+    if not public_key and dipay_client.local_fixtures_allowed():
         _LOG.warning(
             "Dipay callback signature verification skipped in %s mode (no dipay_callback_public_key configured)",
             getattr(settings, "environment", "development"),

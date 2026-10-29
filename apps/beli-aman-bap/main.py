@@ -86,6 +86,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         settings.service_name, settings.subscriber_id, settings.subscriber_url,
     )
 
+    # Environment-enabled Dipay must be able to verify callbacks before any
+    # startup effects. Brand-only enablement is checked at invoice runtime.
+    from services.dipay_client import require_callback_public_key
+    if settings.dipay_client_key.strip():
+        require_callback_public_key()
+
     # Schema changes are an explicit operator action, never normal startup.
     if os.environ.get("SKIP_CREATE_ALL", "true").lower() == "false":
         async with engine.begin() as conn:
