@@ -7,6 +7,23 @@ on:
     branches: [main]
 
 jobs:
+  partner-return-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          python -m venv apps/beli-aman-bap/.venv
+          apps/beli-aman-bap/.venv/bin/pip install -r apps/beli-aman-bap/requirements.txt 'pytest>=8,<9' 'pytest-asyncio>=0.24,<0.25' build
+          apps/beli-aman-bap/.venv/bin/python -m build --wheel --outdir /tmp/beckn-wheels packages/beckn-protocol-py
+          apps/beli-aman-bap/.venv/bin/pip install /tmp/beckn-wheels/*.whl
+      - run: env -i PATH=/usr/bin:/bin apps/beli-aman-bap/.venv/bin/python -I apps/beli-aman-bap/scripts/test_partner_returns_offline.py
+
   js:
     name: JS — build · lint · test
     runs-on: ubuntu-latest
