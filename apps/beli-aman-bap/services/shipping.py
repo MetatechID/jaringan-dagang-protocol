@@ -52,7 +52,7 @@ def _headers() -> dict[str, str]:
 
 
 def _require_key() -> None:
-    if not settings.biteship_api_key:
+    if not settings.biteship_api_key.strip():
         if settings.environment in ("test", "development"):
             return
         raise ShippingError(
@@ -87,13 +87,11 @@ async def get_rates(
 ) -> list[dict[str, Any]]:
     """Fetch courier rate quotes for the buyer's destination + cart items.
 
-    Falls back to mock rates in development/test when no API key is set.
-    In production, no API key raises; a Biteship 5xx or network error
-    still falls back to mock so a transient outage doesn't block checkout
-    (the booking call will revalidate).
+    Mock rates are permitted only in explicit development/test environments.
+    Nonlocal configuration, transport and empty-result failures fail closed.
     """
     _require_key()
-    if not settings.biteship_api_key:
+    if not settings.biteship_api_key.strip():
         logger.info("BITESHIP_API_KEY not set (non-prod); returning mock rates")
         return _mock_rates(items)
 
@@ -115,19 +113,25 @@ async def get_rates(
             resp.raise_for_status()
             data = resp.json()
     except Exception as e:  # noqa: BLE001
-        logger.warning("Biteship rates call failed (%s); falling back to mock", e)
-        return _mock_rates(items)
+        if settings.environment.strip().lower() in {"development", "test"}:
+            return _mock_rates(items)
+        raise ShippingError("Biteship rates unavailable") from e
 
-    out: list[dict[str, Any]] = []
-    for rate in data.get("pricing", []):
-        out.append({
+    try:
+        out = [{
             "courier_code": rate.get("courier_code"),
             "courier_service_code": rate.get("courier_service_code"),
             "courier_service_name": rate.get("courier_service_name"),
             "duration": rate.get("duration"),
             "price": rate.get("price"),
-        })
-    return out or _mock_rates(items)
+        } for rate in data.get("pricing", [])]
+    except (AttributeError, TypeError) as e:
+        raise ShippingError("Biteship returned malformed shipping rates") from e
+    if not out:
+        if settings.environment.strip().lower() in {"development", "test"}:
+            return _mock_rates(items)
+        raise ShippingError("Biteship returned no shipping rates")
+    return out
 
 
 async def create_shipment(
@@ -148,7 +152,7 @@ async def create_shipment(
     AWB), and ``courier.tracking_url``.
     """
     _require_key()
-    if not settings.biteship_api_key:
+    if not settings.biteship_api_key.strip():
         # Non-prod stub so local demos don't 500
         return {
             "id": f"mock-{reference_id}",

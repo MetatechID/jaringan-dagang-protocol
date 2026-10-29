@@ -116,10 +116,13 @@ async def get_rates(
         )
         return rates
 
-    # Biteship default — origin is implied by the Biteship account.
+    # Use this tenant's persisted origin, never an unrelated account default.
+    if not _biteship_origin_zip(brand):
+        raise ShippingError("Brand shipping origin is not configured")
     bs = await biteship_service.get_rates(
         destination_postal_code=str(destination_postal_code),
         items=[biteship_service.ShippingItem(i) for i in items],
+        origin_postal_code=_biteship_origin_zip(brand),
     )
     for r in bs:
         r.setdefault("carrier", BITESHIP)
