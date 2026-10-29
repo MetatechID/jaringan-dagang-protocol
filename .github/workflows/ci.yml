@@ -7,6 +7,22 @@ on:
     branches: [main]
 
 jobs:
+  jd-012-dipay-verification:
+    name: Dipay — fail-closed callback verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install app requirements and canonical protocol wheel
+        run: |
+          python -m pip install -r apps/beli-aman-bap/requirements.txt ./packages/beckn-protocol-py pytest
+          python -m pip check
+      - name: Run offline webhook regressions with pre-import isolation
+        run: python apps/beli-aman-bap/scripts/test_dipay_webhooks.py
+
   js:
     name: JS — build · lint · test
     runs-on: ubuntu-latest
