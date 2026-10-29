@@ -56,14 +56,13 @@ def _seed_catalog(monkeypatch):
 def app():
     a = FastAPI()
     a.include_router(shipping_router)
-    # Stub get_db with a session that returns None for the brand SELECT
-    # (POST /rates only needs the row to forward ``jubelio_enabled`` and
-    # the origin zip; both routes fall back to Biteship defaults on None).
+    # Quote requests must resolve a persisted tenant before carrier work.
     from database import get_db as real_get_db
     from tests._jubelio_fakes import FakeSession
 
     async def _stub_db():
-        yield FakeSession([None])  # brand SELECT → None
+        from types import SimpleNamespace
+        yield FakeSession([SimpleNamespace(id="brand", slug="store", bpp_id="store.example.test")])
 
     a.dependency_overrides[real_get_db] = _stub_db
     return a
@@ -213,7 +212,7 @@ class TestRatesPassthrough:
             total_value=None, service_category_id=None,
         ):
             captured["service_category_id"] = service_category_id
-            return []
+            return [{"courier_name": "JNE", "price": 12000}]
 
         monkeypatch.setattr(carriers_module, "get_rates", _fake_get_rates)
 

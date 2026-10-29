@@ -17,7 +17,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from models.brand import Brand
-from services import carriers as carrier_service
 from services import catalog as catalog_service
 from services import jubelio as jubelio_service
 
@@ -31,7 +30,7 @@ class RateItem(BaseModel):
 
 class RateRequest(BaseModel):
     brand_slug: str
-    destination_postal_code: str
+    destination_postal_code: str = Field(pattern=r"^[0-9]{5}$")
     items: list[RateItem]
     # Optional category filter (Jubelio only; Biteship returns all). Per
     # contract v1.8 §6.1 service_category_id: 1=REGULER, 2=EKONOMI,
@@ -50,46 +49,16 @@ async def list_rates(
     weight & value are trusted, not client-supplied. Dispatches to the brand's
     active carrier (Jubelio or Biteship).
     """
-    products = await catalog_service.list_products(body.brand_slug)
     brand = (
         await db.execute(select(Brand).where(Brand.slug == body.brand_slug))
     ).scalar_one_or_none()
 
-    # Build a SKU → (name, weight_grams, price_idr) index that covers parent
-    # SKUs and variant SKUs.
-    sku_index: dict[str, dict[str, Any]] = {}
-    for p in products:
-        sku_index[p["sku"]] = {
-            "name": p["name"],
-            "weight": int(p.get("weight_grams") or 500),
-            "value": int(p.get("price_idr") or 0),
-        }
-        for v in p.get("variants", []) or []:
-            sku_index[v["sku"]] = {
-                "name": f'{p["name"]} - {v.get("label", "")}',
-                "weight": int(v.get("weight_grams") or 500),
-                "value": int(v.get("price_idr") or p.get("price_idr") or 0),
-            }
-
-    line_items: list[dict[str, Any]] = []
-    total_value = 0
-    for item in body.items:
-        info = sku_index.get(item.sku)
-        if not info:
-            raise HTTPException(400, f"Unknown SKU '{item.sku}' for brand {body.brand_slug}")
-        line_items.append({
-            "name": info["name"],
-            "value": info["value"],
-            "weight": info["weight"],
-            "quantity": item.qty,
-        })
-        total_value += int(info["value"]) * int(item.qty)
-
-    rates = await carrier_service.get_rates(
-        brand=brand,
-        destination_postal_code=body.destination_postal_code,
-        items=line_items,
-        total_value=total_value,
+    if brand is None:
+        raise HTTPException(404, "Brand not found")
+    products = await catalog_service.list_products(brand.slug)
+    from services import shipping_quotes
+    _, rates = await shipping_quotes.rates_for_cart(
+        brand, body.destination_postal_code, body.items, products,
         service_category_id=body.service_category_id,
     )
     return {"data": rates}

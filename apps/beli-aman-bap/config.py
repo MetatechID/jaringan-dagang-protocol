@@ -76,6 +76,9 @@ class Settings(BaseSettings):
     port: int = 8003
     debug: bool = True
 
+    # Explicit operator-managed exemption; omitted shipping never implies free.
+    shipping_free_brand_slugs: str = ""
+
     # --- Auto-release window for escrow (days after delivered) ---
     auto_release_days: int = 3
 
