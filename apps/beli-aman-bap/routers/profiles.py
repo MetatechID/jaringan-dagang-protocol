@@ -12,6 +12,7 @@ from deps import get_current_profile
 from models.address import Address
 from models.payment_method import PaymentMethod, PaymentMethodType
 from models.profile import BeliAmanProfile
+from services.payment_policy import is_demo_payment_method, local_payment_mocks_allowed
 
 router = APIRouter(prefix="/api/v1/me", tags=["profiles"])
 
@@ -116,7 +117,9 @@ async def list_payment_methods(
         select(PaymentMethod).where(PaymentMethod.profile_id == profile.id)
     )
     pms = list(result.scalars().all())
-    if not pms:
+    if not local_payment_mocks_allowed():
+        pms = [pm for pm in pms if not is_demo_payment_method(pm)]
+    if not pms and local_payment_mocks_allowed():
         # Auto-seed the v1 default mock PM so the demo flow always has something.
         seed = PaymentMethod(
             profile_id=profile.id,

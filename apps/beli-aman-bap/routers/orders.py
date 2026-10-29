@@ -18,6 +18,11 @@ from models.escrow_ledger import EscrowLedger
 from models.order import Order, OrderState
 from models.order_event import OrderEvent
 from models.profile import BeliAmanProfile
+from models.payment_method import PaymentMethod
+from services.payment_policy import (
+    DEMO_PAYMENT_LABEL, is_demo_payment_method, local_payment_mocks_allowed,
+    reject_nonlocal_demo_invoice,
+)
 from pydantic import BaseModel, Field
 from services import catalog as catalog_service
 from services import escrow as escrow_service
@@ -408,6 +413,19 @@ async def advance_to_authed(
     else:
         raise HTTPException(400, "Must provide address_id or address_inline")
 
+    # Resolve and authorize the selected method before mutating the order.
+    payment_snapshot = None
+    if body.payment_method_id:
+        pm = (await db.execute(select(PaymentMethod).where(
+            PaymentMethod.id == body.payment_method_id,
+            PaymentMethod.profile_id == profile.id,
+        ))).scalar_one_or_none()
+        if pm is None or (is_demo_payment_method(pm) and not local_payment_mocks_allowed()):
+            raise HTTPException(400, "Payment method unavailable")
+        payment_snapshot = {"type": pm.type.value, "display_label": pm.display_label}
+    elif local_payment_mocks_allowed():
+        payment_snapshot = {"type": "virtual_account", "display_label": DEMO_PAYMENT_LABEL}
+
     # Merge, don't replace: order creation stashes the buyer's courier choice
     # under shipping_address["courier"] (see create_order above), and this PATCH
     # lands milliseconds later in the same checkout flow. A wholesale assignment
@@ -420,10 +438,8 @@ async def advance_to_authed(
         **addr_snapshot,
         **({"courier": existing_courier} if existing_courier else {}),
     }
-    order.payment_method_snapshot = {
-        "type": "virtual_account",
-        "display_label": "BCA Virtual Account — Demo",
-    }
+    # Hosted invoice creation chooses the real rail when no saved method is supplied.
+    order.payment_method_snapshot = payment_snapshot
 
     try:
         await transition(db, order, OrderState.AUTHED, actor=f"buyer:{profile.id}")
@@ -932,6 +948,7 @@ async def create_invoice(
 
     # Idempotent return if invoice already minted for this order
     snap = order.payment_method_snapshot or {}
+    reject_nonlocal_demo_invoice(snap.get("invoice_id"), snap.get("invoice_url"))
     if _is_invoice_ready(snap):
         return _serialize_invoice_snapshot(order, snap)
 
