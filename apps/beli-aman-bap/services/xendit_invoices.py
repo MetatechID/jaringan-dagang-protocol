@@ -35,15 +35,9 @@ async def _resolve_brand_for_cart(db: AsyncSession, cart: Cart) -> Brand | None:
 
 
 def _is_mock_mode(brand: Brand | None) -> bool:
-    """True when local dev can't reach real Xendit. Both create_invoice_for_cart
-    and create_invoice_for_order must short-circuit here — otherwise the SDK
-    flow returns 500 ("no xendit_sub_account_id") while the cart flow happily
-    returns a mock-checkout URL."""
-    return (
-        brand is None
-        or not brand.xendit_sub_account_id
-        or not getattr(settings, "xendit_secret_key", "")
-    )
+    from services.payment_policy import invoice_mock_mode
+
+    return invoice_mock_mode("xendit", brand)
 
 
 def _cart_amount_idr(cart: Cart) -> int:
@@ -89,12 +83,7 @@ async def create_invoice_for_cart(db: AsyncSession, cart: Cart) -> dict:
 
     amount_idr = _cart_amount_idr(cart)
 
-    # Mock fallback: real Xendit needs (a) a brand row matched on bpp_id,
-    # (b) brand.xendit_sub_account_id, (c) XENDIT_SECRET_KEY in env. While
-    # the Xendit account is pending business verification, fall back to the
-    # seller's /api/mock-checkout/{id} page so the bot still surfaces a
-    # clickable checkout URL and the demo flow works end-to-end. Drop this
-    # branch once Xendit verifies and XENDIT_SECRET_KEY is populated.
+    # Incomplete provider configuration is only mockable in explicit local modes.
     mock_mode = _is_mock_mode(brand)
 
     if not mock_mode and amount_idr <= 0:
@@ -158,12 +147,7 @@ async def create_invoice_for_order(db: AsyncSession, order: Order) -> dict:
     brand_q = await db.execute(select(Brand).where(Brand.id == order.brand_id))
     brand = brand_q.scalar_one_or_none()
 
-    # ponytail: same mock-mode short-circuit as create_invoice_for_cart.
-    # Without this, SDK orders for Xendit brands without a configured
-    # sub_account_id 500 here. Mirror the cart path exactly: vend a
-    # stable id, point invoice_url at the local seller-bpp mock-checkout
-    # page, log the fallback for ops. Delete when Xendit onboarding
-    # completes and XENDIT_SECRET_KEY is populated.
+    # Share cart policy: local fixtures only; other modes fail before mutation.
     if _is_mock_mode(brand):
         mock_base = (
             getattr(settings, "mock_checkout_public_base", None)

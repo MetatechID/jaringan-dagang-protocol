@@ -145,12 +145,9 @@ def _pay_page_url(order: PartnerOrder) -> str:
 
 
 def _is_mock_mode(brand: Brand) -> bool:
-    """Same rule as ``services/xendit_invoices._is_mock_mode`` — brands not
-    yet onboarded to Xendit still get a working (sandbox) payment flow."""
-    return (
-        not brand.xendit_sub_account_id
-        or not getattr(settings, "xendit_secret_key", "")
-    )
+    from services.payment_policy import invoice_mock_mode
+
+    return invoice_mock_mode("xendit", brand)
 
 
 def _validity_period(expires_in: int) -> tuple[str, datetime]:
@@ -249,6 +246,9 @@ async def register_order(
     db: AsyncSession = Depends(get_db),
 ) -> PartnerOrderOut:
     """Register a payment and get the pay-page URL to redirect the buyer to."""
+    # Reject incomplete hosted-provider configuration before inserting an order.
+    if (getattr(brand, "payment_provider", None) or "").strip().lower() != "dipay":
+        _is_mock_mode(brand)
     order = await create_partner_order(
         db,
         brand=brand,

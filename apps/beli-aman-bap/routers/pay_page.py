@@ -233,6 +233,9 @@ async def pay_target(order_id: str, db: AsyncSession = Depends(get_db)) -> dict:
     if order.status == "expired":
         raise HTTPException(410, "Order expired")
 
+    from services.payment_policy import reject_nonlocal_demo_invoice
+
+    reject_nonlocal_demo_invoice(order.invoice_id)
     if (order.invoice_id or "").startswith("dev-partner-"):
         base = (
             getattr(settings, "mock_checkout_public_base", None)
