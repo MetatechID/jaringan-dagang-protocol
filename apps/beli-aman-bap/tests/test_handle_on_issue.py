@@ -12,7 +12,7 @@ Coverage:
 * action=REJECTED   -> Dispute.status = RESOLVED, resolution = "denied".
 * Idempotent: re-applying the same /on_issue is a no-op (the
   BecknInboundLog dedupe also covers retries upstream).
-* Unknown issue_id -> ignored (logged, no error).
+* Unknown issue_id -> rejected without a success receipt.
 """
 
 from __future__ import annotations
@@ -30,6 +30,9 @@ if _BAP_DIR not in sys.path:
 from models.dispute import DisputeReason, DisputeStatus  # noqa: E402
 from models.order import OrderState  # noqa: E402
 from routers.beckn_handlers import handle_on_issue  # noqa: E402
+from routers.beckn_ownership import VerifiedContext
+from fastapi import HTTPException
+import pytest
 
 
 def _dispute(*, status=DisputeStatus.OPEN, issue_id="issue-1"):
@@ -49,7 +52,7 @@ def _dispute(*, status=DisputeStatus.OPEN, issue_id="issue-1"):
 
 
 def _order(state=OrderState.FULFILLING):
-    return types.SimpleNamespace(id="order-1", state=state)
+    return types.SimpleNamespace(id="order-1", bpp_id="owner.example.test", state=state)
 
 
 class _DisputeResult:
@@ -74,7 +77,8 @@ class _FakeDB:
         return self.order
 
 
-_CTX = {"action": "on_issue", "transaction_id": "t1"}
+def _context():
+    return VerifiedContext({"action": "on_issue", "transaction_id": "order-1", "bpp_id": "owner.example.test"}, "owner.example.test")
 
 
 def _on_issue_msg(*, action: str, issue_id="issue-1", refund_amount=None,
@@ -115,7 +119,7 @@ class TestActions:
         d = _dispute()
         db = _FakeDB(d, _order())
         asyncio.run(
-            handle_on_issue(_CTX, _on_issue_msg(action="PROCESSING"), db)
+            handle_on_issue(_context(), _on_issue_msg(action="PROCESSING"), db)
         )
         assert d.status is DisputeStatus.BRAND_RESPONDING
 
@@ -125,7 +129,7 @@ class TestActions:
         db = _FakeDB(d, order)
         asyncio.run(
             handle_on_issue(
-                _CTX,
+                _context(),
                 _on_issue_msg(action="RESOLVED", short="refund issued"),
                 db,
             )
@@ -142,7 +146,7 @@ class TestActions:
         db = _FakeDB(d, order)
         asyncio.run(
             handle_on_issue(
-                _CTX,
+                _context(),
                 _on_issue_msg(action="RESOLVED", refund_amount=35000),
                 db,
             )
@@ -155,7 +159,7 @@ class TestActions:
         db = _FakeDB(d, _order())
         asyncio.run(
             handle_on_issue(
-                _CTX,
+                _context(),
                 _on_issue_msg(action="REJECTED", short="claim invalid"),
                 db,
             )
@@ -169,7 +173,7 @@ class TestActions:
         db = _FakeDB(d, _order())
         asyncio.run(
             handle_on_issue(
-                _CTX,
+                _context(),
                 _on_issue_msg(
                     action="RESOLVED",
                     short="refund issued",
@@ -192,7 +196,7 @@ class TestIdempotencyAndUnknownIssue:
         # First /on_issue: RESOLVED.
         asyncio.run(
             handle_on_issue(
-                _CTX,
+                _context(),
                 _on_issue_msg(action="RESOLVED", refund_amount=10000),
                 db,
             )
@@ -203,7 +207,7 @@ class TestIdempotencyAndUnknownIssue:
         # the dispute must remain in RESOLVED with the same resolution.
         asyncio.run(
             handle_on_issue(
-                _CTX,
+                _context(),
                 _on_issue_msg(action="RESOLVED", refund_amount=10000),
                 db,
             )
@@ -212,15 +216,11 @@ class TestIdempotencyAndUnknownIssue:
         assert d.resolution == "resolved"
         assert d.resolved_at is not None
 
-    def test_unknown_issue_id_is_ignored(self):
+    def test_unknown_issue_id_is_rejected(self):
         db = _FakeDB(None)  # no Dispute matches issue_id
-        # Must not raise.
-        asyncio.run(
-            handle_on_issue(
-                _CTX,
-                _on_issue_msg(
-                    action="RESOLVED", issue_id="never-seen"
-                ),
-                db,
-            )
-        )
+        # Unknown work must not be acknowledged and cached as successful.
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(handle_on_issue(
+                _context(), _on_issue_msg(action="RESOLVED", issue_id="never-seen"), db,
+            ))
+        assert exc.value.status_code == 404

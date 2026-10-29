@@ -61,6 +61,37 @@ docker run -p 3030:3030 ghcr.io/metatechid/jaringan-dagang-registry:latest
 See [`examples/`](examples/) for end-to-end scenarios:
 quote-a-product, confirm-an-order, dispute-a-fulfillment.
 
+## BAP callback authorization
+
+BAP callbacks require a verified subscriber signature, even when the legacy
+`BECKN_REQUIRE_SIGNATURE` switch is false. The signer must match `context.bpp_id`,
+`context.bap_id` must address this BAP, and the context action must match the
+callback route. Include nonempty transaction and message IDs.
+
+Order callbacks use the local order ID as the transaction ID and must reference
+that order's local ID or persisted seller reference. Cart confirmations must
+match the persisted cart transaction, BPP and confirmed order reference. Issue
+and rating callbacks resolve their parent order before changing records. A QR or
+invoice URL is not evidence of payment on any payment rail.
+
+Catalog callbacks may publish only the signing subscriber's provider. Emit
+separate per-provider signed envelopes; a shared process signature is not
+implicit delegation. Subscriber rotation or colliding storefront slugs require
+an explicit trusted migration, not a callback-driven ownership change. Catalog
+pushes may use fresh transaction IDs without an outbound search request.
+
+Completed retries are scoped by verified signer, action, transaction and message
+ID. Stored inbound message keys are hashes of that tuple, retaining the existing
+schema. Legacy unscoped receipts are not reused. Authorization is rechecked before
+returning a cached success, and failures roll back without a success receipt.
+
+Run the focused offline regression job with Python 3.12 and the canonical protocol
+wheel installed in the BAP environment:
+
+```sh
+apps/beli-aman-bap/.venv/bin/python -I apps/beli-aman-bap/scripts/test-beckn-ownership-security.py
+```
+
 ## Who this is for
 
 - **DTC brands**: skip building Beckn plumbing — install the SDK,
