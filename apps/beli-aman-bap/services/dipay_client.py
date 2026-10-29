@@ -674,6 +674,29 @@ def _load_public_key(key_material: str | Any | None):
             return None
 
 
+def local_fixtures_allowed() -> bool:
+    """Only explicitly named local modes may omit callback verification config."""
+    return _clean(getattr(settings, "environment", "")).lower() in {"development", "test"}
+
+
+def require_callback_public_key() -> None:
+    """Fail closed without exposing material or loader errors.
+
+    The callback key is platform-wide, independent of merchant signing keys.
+    Parse using the receiver's existing format contract, but require RSA for
+    SHA256withRSA verification. Do not cache: operators may rotate file keys.
+    """
+    if local_fixtures_allowed():
+        return
+    try:
+        key = _load_public_key(getattr(settings, "dipay_callback_public_key", ""))
+        usable = isinstance(key, rsa.RSAPublicKey)
+    except Exception:
+        usable = False
+    if not usable:
+        raise DipayError(0, "DIPAY_CALLBACK_PUBLIC_KEY must contain a usable RSA public key")
+
+
 def _strip_whitespace(text: str) -> str:
     """Dipay production's ``minify``: delete EVERY whitespace character,
     including spaces inside string values ("JAKARTA SELATAN" ->
