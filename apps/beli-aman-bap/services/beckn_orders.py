@@ -39,7 +39,7 @@ async def confirm_order(*, order_dict: dict[str, Any]) -> bool:
             action="confirm",
             bpp_id=bpp_id,
             bpp_uri=bpp_uri,
-            transaction_id=order_dict.get("transaction_id"),
+            transaction_id=order_dict.get("transaction_id") or order_dict.get("order_id"),
         ),
         "message": {
             "order": {
