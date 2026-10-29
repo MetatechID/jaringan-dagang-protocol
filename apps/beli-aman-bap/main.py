@@ -239,7 +239,9 @@ app.include_router(escrow_router)
 app.include_router(disputes_router)
 app.include_router(igm_router)
 app.include_router(rsp_rating_router)
-app.include_router(internal_mock_router)
+# Mock state transitions are local tools, never deployed API surfaces.
+if settings.environment.strip().lower() in {"development", "test"}:
+    app.include_router(internal_mock_router)
 app.include_router(shipping_router)
 app.include_router(analytics_router)
 app.include_router(storefront_integrations_router)
