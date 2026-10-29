@@ -7,6 +7,37 @@ on:
     branches: [main]
 
 jobs:
+  bap-startup-guards:
+    name: BAP — production startup guards (Python 3.12)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ENVIRONMENT: test
+      DEBUG: "false"
+      BAP_PRODUCTION_DEPLOYMENT: "false"
+      ADMIN_TOKEN: synthetic-ci-admin-token
+      SELLER_BRIDGE_TOKEN: synthetic-ci-seller-bridge-token
+      DATABASE_URL: postgresql+asyncpg://test:test@127.0.0.1:1/test
+      BECKN_WORKERS_ENABLED: "false"
+      SKIP_CREATE_ALL: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Match the app image: requirements wheels plus the canonical local wheel,
+      # not the bootstrap workspace or a source-tree PYTHONPATH substitute.
+      - name: Build and install application dependencies
+        run: |
+          python -m pip wheel --wheel-dir "$RUNNER_TEMP/bap-wheels" -r apps/beli-aman-bap/requirements.txt
+          python -m pip wheel --no-deps --wheel-dir "$RUNNER_TEMP/bap-wheels" ./packages/beckn-protocol-py
+          python -m pip install --no-index "$RUNNER_TEMP"/bap-wheels/*.whl
+          python -m pip install pytest
+          python -m pip check
+      - name: Run isolated startup guards (no services or real dotenv)
+        working-directory: ${{ runner.temp }}
+        run: python -m pytest "$GITHUB_WORKSPACE/apps/beli-aman-bap/tests/test_production_startup_guards.py" -q
+
   js:
     name: JS — build · lint · test
     runs-on: ubuntu-latest

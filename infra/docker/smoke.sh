@@ -4,6 +4,7 @@ set -euo pipefail
 export COMPOSE_PROJECT_NAME=protocol-docker-smoke
 export POSTGRES_PASSWORD=local-smoke-password
 export BAP_ADMIN_TOKEN=local-smoke-admin-token
+export BAP_SELLER_BRIDGE_TOKEN=local-smoke-seller-bridge-token
 cleanup() {
   docker compose logs --no-color
   docker compose down --volumes --remove-orphans
