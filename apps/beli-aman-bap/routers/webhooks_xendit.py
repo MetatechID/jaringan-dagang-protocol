@@ -12,6 +12,7 @@ compare it against ``settings.xendit_webhook_token``.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -33,10 +34,12 @@ router = APIRouter(prefix="/webhooks/xendit", tags=["webhooks"])
 
 def _verify_callback_token(x_callback_token: str | None) -> None:
     expected = settings.xendit_webhook_token
-    if not expected:
+    if not expected or not expected.strip():
         # Mis-configured BAP — refuse rather than silently accept anything.
         raise HTTPException(503, "XENDIT_WEBHOOK_TOKEN not configured")
-    if x_callback_token != expected:
+    if not x_callback_token or not hmac.compare_digest(
+        x_callback_token.encode("utf-8"), expected.encode("utf-8")
+    ):
         raise HTTPException(401, "Invalid Xendit callback token")
 
 
