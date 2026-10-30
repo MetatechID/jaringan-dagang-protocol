@@ -25,6 +25,7 @@ from models.mirror import (
     MirrorStore,
 )
 from models.order import Order
+from routers.beckn_ownership import authorize_resources, verified_signer
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,8 @@ async def handle_on_search(
     Strategy for v1: full-replace per (bpp_id, provider). Catalogs are small
     (<200 SKUs/toko); delta optimization comes later.
     """
-    bpp_id = context.get("bpp_id") or ""
+    await authorize_resources("on_search", context, message, db)
+    bpp_id = verified_signer(context)
     catalog = message.get("catalog") or {}
     providers = catalog.get("bpp/providers") or catalog.get("providers") or []
 
@@ -109,23 +111,13 @@ async def handle_on_search(
         if imgs:
             logo = imgs[0] if isinstance(imgs[0], str) else imgs[0].get("url")
 
-        # Look up by bpp_id first (preferred), then by slug (so a toko that
-        # rotated/updated its subscriber_id keeps the same mirror row).
+        # Subscriber rotation requires an explicit trusted migration; a
+        # display-name/slug collision never delegates another store's data.
         store = (
             await db.execute(
                 select(MirrorStore).where(MirrorStore.bpp_id == provider_id)
             )
         ).scalar_one_or_none()
-        if store is None:
-            store = (
-                await db.execute(
-                    select(MirrorStore).where(MirrorStore.slug == slug)
-                )
-            ).scalar_one_or_none()
-            if store is not None and store.bpp_id != provider_id:
-                logger.info("MirrorStore slug=%s: bpp_id %s -> %s (rotation/rename)",
-                            slug, store.bpp_id, provider_id)
-                store.bpp_id = provider_id
         if store is None:
             store = MirrorStore(
                 bpp_id=provider_id,
@@ -253,23 +245,11 @@ async def handle_on_status(
     db: AsyncSession,
 ) -> dict | None:
     """Update local Order with fulfillment state from /on_status."""
-    order_msg = message.get("order") or {}
-    bpp_order_id = order_msg.get("id")
-    if not bpp_order_id:
-        return None
-
-    # Match either by seller_order_ref or our local id (UUID string).
-    candidate = (await db.execute(
-        select(Order).where(Order.seller_order_ref == bpp_order_id)
-    )).scalar_one_or_none()
-    if candidate is None and len(bpp_order_id) == 36:
-        # bpp_order_id might be our local id in some flows
-        candidate = (await db.execute(
-            select(Order).where(Order.id == bpp_order_id)
-        )).scalar_one_or_none()
+    resources = await authorize_resources("on_status", context, message, db)
+    candidate = resources.get("order")
     if candidate is None:
-        logger.info("on_status for unknown order %s — ignoring", bpp_order_id)
-        return None
+        return None  # Authorized cart status is advisory, not a payment event.
+    order_msg = message.get("order") or {}
 
     fulfillments = order_msg.get("fulfillments") or []
     if not fulfillments:
@@ -294,53 +274,26 @@ async def handle_on_confirm(
     message: dict[str, Any],
     db: AsyncSession,
 ) -> dict | None:
-    """Record the seller-assigned order id when /confirm completes.
+    """Accept a correlated order confirmation and surface advisory cart QR data.
 
-    Also surfaces the Xendit QR image URL back onto the bot-side ``Cart``
-    row (B3a). The MCP bot polls ``GET /api/v1/checkout/{cart_id}/status``
-    waiting for ``payment_state="paid"`` + a ``qr_image_url`` to show the
-    customer; without this linkage the cart stays ``pending`` forever.
-
-    Both updates are idempotent: Beckn may retry /on_confirm for the same
-    transaction_id, and we MUST NOT flip a ``cancelled``/``expired`` cart
-    back to ``paid``.
+    Only an authoritative payment event may change payment_state; a signed
+    seller confirmation or QR URL does not prove payment on any provider.
     """
+    resources = await authorize_resources("on_confirm", context, message, db)
     order_msg = message.get("order") or {}
-    bpp_order_id = order_msg.get("id")
-    txn_id = context.get("transaction_id")
-    if not bpp_order_id or not txn_id:
-        return None
-
-    # 1. Storefront Order update (existing behaviour).
-    candidate = (await db.execute(
-        select(Order).where(Order.seller_order_ref == bpp_order_id)
-    )).scalar_one_or_none()
+    candidate = resources.get("order")
     if candidate is not None:
-        candidate.seller_order_ref = bpp_order_id
+        candidate.seller_order_ref = order_msg["id"]
 
-    # 2. Bot-REST Cart update — only fires when this confirm came from a
-    #    bot-driven /checkout/{cart_id}/confirm (matched by transaction_id).
-    #    Customers checking out through the Firebase storefront have no Cart
-    #    row, so a miss is normal — don't error.
-    from models.bot_rest import Cart, CartStatus
+    from models.bot_rest import CartStatus
     from services.order_flow import extract_qr_image_url
 
-    cart = (await db.execute(
-        select(Cart).where(Cart.transaction_id == txn_id)
-    )).scalar_one_or_none()
-    if cart is not None and cart.status not in (CartStatus.EXPIRED,):
-        # A Beckn /on_confirm QR is an advisory payment surface. Preserve the
-        # authoritative Dipay renderer/content and never infer payment from a
-        # mere URL; only the verified provider webhook may mark paid.
-        provider = (cart.invoice_provider or "").lower()
+    cart = resources.get("cart")
+    if cart is not None and cart.status != CartStatus.EXPIRED:
+        # Payment surfaces are advisory, never proof of payment for ANY rail.
         qr = extract_qr_image_url({"message": {"order": order_msg}})
-        if provider != "dipay" and qr is not None:
+        if (cart.invoice_provider or "").lower() != "dipay" and qr is not None:
             cart.qr_image_url = qr
-        if provider != "dipay" and cart.payment_state not in ("cancelled", "expired"):
-            # Existing non-Dipay behaviour remains, but URL presence alone is
-            # not treated as proof for Dipay carts.
-            if qr is not None:
-                cart.payment_state = "paid"
         cart.updated_at = datetime.now(timezone.utc)
     return None
 
@@ -361,21 +314,9 @@ async def handle_on_update(
     from models.dispute import Dispute, DisputeStatus
     from models.order import OrderState
 
+    resources = await authorize_resources("on_update", context, message, db)
+    order = resources["order"]
     order_msg = message.get("order") or {}
-    bpp_order_id = order_msg.get("id")
-    if not bpp_order_id:
-        return None
-
-    # Find the local order
-    order = (await db.execute(
-        select(Order).where(Order.seller_order_ref == bpp_order_id)
-    )).scalar_one_or_none()
-    if order is None and len(bpp_order_id) == 36:
-        order = (await db.execute(
-            select(Order).where(Order.id == bpp_order_id)
-        )).scalar_one_or_none()
-    if order is None:
-        return None
 
     dispute = (await db.execute(
         select(Dispute).where(Dispute.order_id == order.id).order_by(Dispute.created_at.desc())
@@ -417,24 +358,9 @@ async def handle_on_settle(
 
     v1 doesn't move money — the persisted state is observability only.
     """
+    resources = await authorize_resources("on_settle", context, message, db)
+    candidate = resources["order"]
     settlement = message.get("settlement") or {}
-    bpp_order_id = settlement.get("order_id")
-    if not bpp_order_id:
-        return None
-
-    # Find the local order (same patterns as handle_on_status).
-    candidate = (await db.execute(
-        select(Order).where(Order.seller_order_ref == bpp_order_id)
-    )).scalar_one_or_none()
-    if candidate is None and len(bpp_order_id) == 36:
-        candidate = (await db.execute(
-            select(Order).where(Order.id == bpp_order_id)
-        )).scalar_one_or_none()
-    if candidate is None:
-        logger.info(
-            "on_settle for unknown order %s — ignoring", bpp_order_id
-        )
-        return None
 
     status = settlement.get("settlement_status")
     if status:
@@ -473,9 +399,8 @@ async def handle_on_rating(
     """
     from models.order_rating import OrderRating
 
-    transaction_id = context.get("transaction_id") or ""
-    if not transaction_id:
-        return None
+    await authorize_resources("on_rating", context, message, db)
+    transaction_id = context["transaction_id"]
 
     # OrderRating.order_id is a VARCHAR(36) FK to orders.id — the
     # transaction_id we sent IS that order id.
@@ -483,11 +408,8 @@ async def handle_on_rating(
         select(OrderRating).where(OrderRating.order_id == transaction_id)
     )).scalar_one_or_none()
     if rating_row is None:
-        logger.info(
-            "on_rating for unknown transaction_id %s — ignoring",
-            transaction_id,
-        )
-        return None
+        from fastapi import HTTPException
+        raise HTTPException(404, "Callback rating not found")
 
     feedback_ack = message.get("feedback_ack")
     # Truthy ack flips acknowledged; explicit False does too (BPP closed
@@ -525,19 +447,10 @@ async def handle_on_issue(
     from models.dispute import Dispute, DisputeStatus
     from models.order import OrderState
 
+    resources = await authorize_resources("on_issue", context, message, db)
+    order = resources["order"]
+    dispute = resources["dispute"]
     issue = message.get("issue") or {}
-    issue_id = issue.get("id")
-    if not issue_id:
-        return None
-
-    dispute = (await db.execute(
-        select(Dispute).where(Dispute.bpp_issue_id == issue_id)
-    )).scalar_one_or_none()
-    if dispute is None:
-        logger.info(
-            "on_issue for unknown issue_id %s — ignoring", issue_id
-        )
-        return None
 
     actions = (issue.get("issue_actions") or {}).get(
         "respondent_actions"
@@ -579,8 +492,7 @@ async def handle_on_issue(
         # BPP says they refunded.
         refund_amt = (resolution.get("refund_amount") or {}).get("value")
         if refund_amt:
-            order = await db.get(Order, dispute.order_id)
-            if order is not None and order.state != OrderState.REFUNDED:
+            if order.state != OrderState.REFUNDED:
                 order.state = OrderState.REFUNDED
     elif last_action_code == "REJECTED":
         dispute.status = DisputeStatus.RESOLVED
@@ -592,3 +504,7 @@ async def handle_on_issue(
     # ESCALATE: explicit no-op in v1 (multi-party IGM is deferred).
 
     return None
+
+
+async def handle_on_issue_status(context, message, db):
+    return await handle_on_issue(context, message, db)
