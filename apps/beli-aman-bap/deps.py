@@ -34,10 +34,12 @@ from models.store_membership import StoreMembership
 # the admin API. Sign-in here only reads the flag — it never grants it.
 
 
-async def _claim_pending_invites(db: AsyncSession, profile: BeliAmanProfile) -> None:
-    """Auto-claim any pending StoreMembership invites that match this profile's email."""
-    email_lc = (profile.email or "").lower()
-    if not email_lc:
+async def _claim_pending_invites(
+    db: AsyncSession, profile: BeliAmanProfile, *, verified_email: str,
+) -> None:
+    """Claim invitations only for the email proved by this sign-in."""
+    email_lc = verified_email.lower()
+    if not email_lc or email_lc != (profile.email or "").lower():
         return
     pending = (
         await db.execute(
@@ -80,10 +82,17 @@ async def _get_or_create_profile(
     if profile is None and email_lc:
         profile = (
             await db.execute(
-                select(BeliAmanProfile).where(BeliAmanProfile.email == email_lc)
+                select(BeliAmanProfile)
+                .where(BeliAmanProfile.email == email_lc)
+                .with_for_update()
             )
         ).scalar_one_or_none()
-        if profile is not None and profile.google_sub is None:
+        if profile is not None:
+            if profile.google_sub is not None and profile.google_sub != google_sub:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Identity linking requires account recovery",
+                )
             profile.google_sub = google_sub
 
     if profile is None:
@@ -106,7 +115,7 @@ async def _get_or_create_profile(
         if photo_url and profile.photo_url != photo_url:
             profile.photo_url = photo_url
 
-    await _claim_pending_invites(db, profile)
+    await _claim_pending_invites(db, profile, verified_email=email_lc)
     return profile
 
 
@@ -152,7 +161,9 @@ async def _get_or_create_profile_by_contact(
         profile = existing
         profile.last_seen_at = datetime.now(timezone.utc)
 
-    await _claim_pending_invites(db, profile)
+    await _claim_pending_invites(
+        db, profile, verified_email=contact_lc if channel == "email" else "",
+    )
     return profile
 
 
