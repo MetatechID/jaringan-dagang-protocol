@@ -38,5 +38,6 @@ raise SystemExit(pytest.main([
     "-p", "pytest_asyncio.plugin", "-p", "no:cacheprovider", "--asyncio-mode=auto",
     "-o", "asyncio_default_fixture_loop_scope=function", "-q",
     *(sys.argv[1:] or ["tests/test_identity_binding_security.py", "tests/test_otp_login.py",
-                        "tests/test_otp_routes_in_process.py"]),
+                        "tests/test_otp_routes_in_process.py",
+                        "tests/test_merchant_authorization_security.py"]),
 ]))

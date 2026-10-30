@@ -32,7 +32,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth.partner_auth import require_partner
 from config import settings
 from database import get_db
-from deps import require_admin_token
+from deps import get_current_profile, store_membership_exists
+from models.profile import BeliAmanProfile
 from models.brand import Brand
 from models.partner_order import PartnerOrder
 from services import xendit_client
@@ -335,15 +336,13 @@ async def list_partner_orders_admin(
     status: str | None = None,
     limit: int = 100,
     offset: int = 0,
-    _admin: None = Depends(require_admin_token),
+    profile: BeliAmanProfile = Depends(get_current_profile),
     db: AsyncSession = Depends(get_db),
 ) -> list[PartnerAdminOrderOut]:
-    """Partner-orders list for the seller dashboard, keyed by brand slug.
+    """Firebase-authenticated list scoped by persisted store memberships.
 
-    Auth is the shared ``X-Admin-Token`` (same credential the dashboard's
-    BFF routes already forward for BAP shipping/label lookups) — the seller
-    dashboard lives in a separate Postgres DB, so it can't query
-    ``partner_orders`` directly. Read-only; no partner key required.
+    An optional brand slug narrows results; it never grants authority.
+    Only persisted super-admins may list across all stores.
     """
     from sqlalchemy import select
 
@@ -355,6 +354,8 @@ async def list_partner_orders_admin(
         .offset(max(0, offset))
         .limit(limit)
     )
+    if not profile.is_super_admin:
+        stmt = stmt.where(store_membership_exists(profile.id, Brand.slug))
     if brand_slug:
         stmt = stmt.where(Brand.slug == brand_slug)
     if status:

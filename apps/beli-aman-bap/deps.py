@@ -217,6 +217,24 @@ async def get_current_profile(
     )
 
 
+def store_membership_exists(profile_id: str, store_slug):
+    """Persisted ACL predicate, also usable in tenant-filtered collections."""
+    return select(StoreMembership.id).where(
+        StoreMembership.profile_id == profile_id,
+        StoreMembership.store_slug == store_slug,
+    ).exists()
+
+
+async def require_store_member(
+    db: AsyncSession, profile: BeliAmanProfile, store_slug: str,
+) -> None:
+    """Owners and staff may operate orders; only persisted super-admins bypass."""
+    if profile.is_super_admin:
+        return
+    if not await db.scalar(select(store_membership_exists(profile.id, store_slug))):
+        raise HTTPException(403, "Not a member of this store")
+
+
 def require_admin_token(x_admin_token: str | None = Header(None)) -> None:
     """Guard for admin / internal-mock endpoints. 403 if header doesn't match."""
     if not x_admin_token or not settings.admin_token or not hmac.compare_digest(
