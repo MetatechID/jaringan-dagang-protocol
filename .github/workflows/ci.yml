@@ -7,6 +7,21 @@ on:
     branches: [main]
 
 jobs:
+  sento-verification:
+    name: Sento authoritative callbacks (offline)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          python -m venv apps/beli-aman-bap/.venv
+          apps/beli-aman-bap/.venv/bin/pip install -r apps/beli-aman-bap/requirements.txt 'pytest>=8,<9' 'pytest-asyncio>=0.24,<0.25' build
+          apps/beli-aman-bap/.venv/bin/python -m build --wheel --outdir /tmp/beckn-wheels packages/beckn-protocol-py
+          apps/beli-aman-bap/.venv/bin/pip install /tmp/beckn-wheels/*.whl
+      - run: env -i PATH=/usr/bin:/bin apps/beli-aman-bap/.venv/bin/python -I apps/beli-aman-bap/scripts/test_sento_offline.py
+
   jd-036-provider-webhook-auth:
     name: Provider webhook authentication
     runs-on: ubuntu-latest

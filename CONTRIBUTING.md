@@ -30,6 +30,33 @@ pnpm test           # JS
 uv run pytest       # Python
 ```
 
+### Offline Sento callback regressions
+
+Use the BAP Python 3.12 `.venv`, install its `requirements.txt`, pytest 8,
+pytest-asyncio 0.24, and a built wheel of `packages/beckn-protocol-py` (not a
+source-path shim). From the repository root run:
+
+```bash
+env -i PATH=/usr/bin:/bin apps/beli-aman-bap/.venv/bin/python -I apps/beli-aman-bap/scripts/test_sento_offline.py
+```
+
+The runner disables dotenv before application imports, clears inherited
+configuration, disables pytest plugin autoload and denies network connections.
+It uses fake sessions and provider queries; it does not test live credentials,
+provider availability, PostgreSQL locking, or callback delivery. The dedicated
+CI job runs this suite without masking failures.
+
+Callbacks supply lookup keys only. Invoice authorization uses the flat queried
+`status` and `partner_tx_id`; remit uses queried `status.code` and
+`partner_trx_id` (the client spelling). Query errors, unrecognized/malformed
+responses and mismatched references return retryable 503; genuine not-found
+responses remain 404. Provider amounts, when returned, must match local IDR
+amounts before settlement. Existing invoice fixtures omit amount, so its
+presence is not made mandatory. No checked-in contract establishes a currency
+field: absence is accepted for these IDR APIs, while explicit non-IDR currency
+is rejected. Do not infer additional response mappings from callback bodies.
+Confirm richer provider response contracts before making new fields mandatory.
+
 ## Making a change
 
 1. Branch from `main`.
