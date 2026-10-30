@@ -174,6 +174,7 @@ async def _create_dipay_invoice(
     """
     from services import dipay_client, dipay_invoices
 
+    dipay_client.require_callback_public_key()
     config = dipay_client.resolve_config(brand)
     partner_ref = dipay_client.snap_ref("q", str(order.id))
     validity_period, expires_at = _validity_period(expires_in)
@@ -247,8 +248,14 @@ async def register_order(
     db: AsyncSession = Depends(get_db),
 ) -> PartnerOrderOut:
     """Register a payment and get the pay-page URL to redirect the buyer to."""
-    # Reject incomplete hosted-provider configuration before inserting an order.
-    if (getattr(brand, "payment_provider", None) or "").strip().lower() != "dipay":
+    # Reject incomplete provider configuration before inserting an order.
+    if (getattr(brand, "payment_provider", None) or "").strip().lower() == "dipay":
+        from services.dipay_client import require_callback_public_key
+        try:
+            require_callback_public_key()
+        except DipayError as exc:
+            raise HTTPException(502, "Dipay callback verification is not configured") from exc
+    else:
         _is_mock_mode(brand)
     order = await create_partner_order(
         db,

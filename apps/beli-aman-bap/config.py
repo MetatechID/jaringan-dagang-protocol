@@ -185,7 +185,10 @@ class Settings(BaseSettings):
     # (fees would eat the release). Matches Sento's Rp10.000 minimum.
     dipay_disbursement_min_amount_idr: int = 10_000
     # Dipay callback public key used to verify incoming webhook signatures
-    # (SHA256withRSA). Supply either inline PEM or base64 PEM.
+    # (SHA256withRSA), separate from the merchant signing private key.
+    # Accepts inline PEM, base64 PEM/DER, or a local file path. Required and
+    # RSA-validated for nonlocal invoice creation; only development/test
+    # fixtures may omit it. No key-size restriction (provider contract).
     dipay_callback_public_key: str = ""
     # TEMPORARY diagnostic switch: log the complete inbound QRIS callback
     # (headers + raw body, with card-data fields redacted), including

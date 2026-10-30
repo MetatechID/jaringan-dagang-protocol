@@ -135,6 +135,26 @@ jobs:
       - run: pnpm run lint || true
       - run: pnpm run test || true
 
+  dipay-callback-key:
+    name: Dipay callback verification completeness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install BAP dependencies and canonical wheel
+        run: |
+          python -m venv apps/beli-aman-bap/.venv
+          apps/beli-aman-bap/.venv/bin/python -m pip wheel --no-deps ./packages/beckn-protocol-py --wheel-dir /tmp/protocol-wheel
+          apps/beli-aman-bap/.venv/bin/python -m pip install /tmp/protocol-wheel/*.whl -r apps/beli-aman-bap/requirements.txt pytest pytest-asyncio
+      - name: Run isolated offline Dipay regressions (blocking)
+        run: >-
+          apps/beli-aman-bap/.venv/bin/python -I
+          apps/beli-aman-bap/scripts/test-dipay-callback-key.py
+          test_dipay_callback_key.py test_dipay_client.py test_dipay_invoices.py
+          test_webhooks_dipay.py test_routes_dipay_invoice.py
+
   python:
     name: Python — lint · test
     runs-on: ubuntu-latest

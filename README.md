@@ -176,6 +176,43 @@ or complete signed commerce flow is provisioned by this stack. Set public
 callback URLs and real integration configuration explicitly before enabling any
 external integration; container localhost is not a callback address.
 
+### Dipay callback verification configuration (JD-004)
+
+Before enabling Dipay outside explicit `ENVIRONMENT=development` or `test`, set
+`DIPAY_CALLBACK_PUBLIC_KEY` to **Dipay's callback-signing RSA public key**, not
+our merchant access-token signing private key. The existing receiver contract
+accepts inline PEM, base64-encoded PEM/DER, or a readable local public-key file
+path. No new RSA bit-size restriction is imposed. Do not put key contents in
+logs or use a production key for tests.
+
+Startup rejects a missing, blank, malformed, unreadable, private, or non-RSA
+callback key when `DIPAY_CLIENT_KEY` enables the environment integration. A
+brand-only integration may start without environment credentials, but cart,
+SDK order, and partner invoice paths validate the platform callback key again
+before invoice mutations, reservation writes, or provider calls. Partner order
+registration also checks before creating its row. Key-file changes are not
+cached; an invalid rotation blocks subsequent invoice creation. Staging,
+unknown, blank and missing runtime modes never opt into local fixtures or
+unsigned callback bypass. Existing explicit development/test fixtures remain
+compatible, including omitted callback keys.
+
+Parsing proves usability for the configured SHA256withRSA verifier, **not key
+provenance**: an unrelated RSA public key cannot be distinguished offline.
+Operators must obtain the callback key through Dipay's trusted channel and
+confirm it with an authentic signed sandbox callback before enabling payments.
+There is no automatic key discovery, outbound lookup, or comparison with the
+merchant signing key (these keys serve different roles). Existing callback
+status-query/fallback behavior is unchanged by this completeness check.
+
+Focused blocking CI installs the canonical protocol wheel and runs offline with
+inherited app settings stripped before import, dotenv and third-party pytest
+plugin autoload disabled, and real socket/DNS access forbidden. Locally, using
+the Python 3.12 BAP virtualenv with that wheel and test dependencies installed:
+
+```sh
+apps/beli-aman-bap/.venv/bin/python -I apps/beli-aman-bap/scripts/test-dipay-callback-key.py
+```
+
 ### Canonical Python wheel and validation
 
 ```sh
