@@ -5,14 +5,20 @@ local development. The Beli Aman BAP runs on port 8003 by default to
 avoid colliding with the JD BAP (8002).
 """
 
-from pydantic import field_validator, model_validator
+import os
+from typing import Literal
+
+from pydantic import TypeAdapter, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
-    model_config = {"env_prefix": "", "env_file": ".env", "extra": "ignore"}
+    model_config = {
+        "env_prefix": "", "env_file": ".env", "extra": "ignore",
+        "hide_input_in_errors": True,
+    }
 
     # --- Service identity ---
     # Canonical Beckn subscriber_id (Task A3): ``*.jaringan-dagang.id`` is
@@ -237,7 +243,45 @@ class Settings(BaseSettings):
     default_carrier: str = "jubelio"
 
     # --- Environment flag (controls test-only fallbacks like shipping mock) ---
-    environment: str = "development"  # production | staging | development | test
+    environment: Literal["production", "staging", "development", "test"] = "development"
+
+    @field_validator("environment", mode="before")
+    @classmethod
+    def _normalize_environment(cls, value):
+        return value.strip().lower() if isinstance(value, str) else value
+
+    def validate_startup(self) -> None:
+        """Check deployment invariants without I/O, before DB/worker startup.
+
+        The independent marker is read ONLY from the process environment, not
+        .env or application settings. Deployment launchers must set it after
+        sourcing mutable app configuration; local direct runs default false.
+        """
+        try:
+            production_deployment = TypeAdapter(bool).validate_python(
+                os.environ.get("BAP_PRODUCTION_DEPLOYMENT", "false")
+            )
+        except ValidationError:
+            raise ValueError("BAP_PRODUCTION_DEPLOYMENT must be a boolean") from None
+        if self.environment not in {"production", "staging", "development", "test"}:
+            raise ValueError("Invalid environment; expected production, staging, development or test")
+        if production_deployment and self.environment != "production":
+            raise ValueError("BAP_PRODUCTION_DEPLOYMENT requires ENVIRONMENT=production")
+        if self.environment in {"production", "staging"}:
+            for field, default in (
+                ("admin_token", "dev-admin-token"),
+                ("seller_bridge_token", "dev-seller-bridge-token"),
+            ):
+                value = getattr(self, field).strip()
+                if not value or value == default:
+                    raise ValueError(f"{field.upper()} must be nonblank and nondefault outside development/test")
+            if self.debug:
+                raise ValueError("DEBUG must be false outside development/test")
+
+    @model_validator(mode="after")
+    def _validate_startup(self) -> "Settings":
+        self.validate_startup()
+        return self
 
     # --- Passwordless OTP login (WA + email) ---
     # whatsmeow sidecar HTTP base URL (jd-wa-whatsmeow). Empty in dev → OTPs

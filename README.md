@@ -125,6 +125,33 @@ not a readiness requirement. Compose starts dependencies using readiness gates.
 BAP catalog workers and seller bridge are disabled for this isolated stack.
 To remove local data intentionally, use `docker compose down --volumes`.
 
+### BAP startup safety (JD-026)
+
+The BAP image defaults to `ENVIRONMENT=production`, `DEBUG=false`, and the
+independent process marker `BAP_PRODUCTION_DEPLOYMENT=true`. `ENVIRONMENT` is
+trimmed and case-normalized; only `production`, `staging`, `development`, and
+`test` are accepted. Production and staging require `DEBUG=false` and nonblank,
+nondefault `ADMIN_TOKEN` and `SELLER_BRIDGE_TOKEN`, even with the bridge disabled.
+Compose requires `BAP_ADMIN_TOKEN` and `BAP_SELLER_BRIDGE_TOKEN` and maps them to
+those application settings. Replace both root example placeholders with distinct,
+random credentials; do not commit actual values or place secrets in build args.
+
+Validation runs when settings load and again before database/worker startup.
+A true deployment marker requires `ENVIRONMENT=production`; malformed marker
+values fail closed. The marker is read only from the process environment, never
+from application dotenv settings. For non-container production launchers, load
+application configuration first, then set/export `BAP_PRODUCTION_DEPLOYMENT=true`
+in the deployment-owned launcher before starting Python. Do not permit mutable
+application configuration to override that signal. This prevents accidental mode
+downgrades, not an operator with control over the launcher/container environment.
+
+Direct local Python runs without the marker retain development/test defaults.
+To run staging with this image, a separate, explicitly non-production deployment
+must override the marker to `false` and set `ENVIRONMENT=staging`; staging still
+requires secure tokens and disabled debug. Never downgrade a production launcher
+to bypass validation: correct its configuration instead. These checks do not
+provision external integrations or replace a complete deployment security review.
+
 ### Portal and external services
 
 Firebase `NEXT_PUBLIC_*` client values are **public build-time configuration**.
@@ -164,7 +191,10 @@ The smoke script owns the dedicated `protocol-docker-smoke` Compose project and
 It checks empty-schema rejection, init twice, schema verification, service/proxy
 readiness, and readiness failure when databases stop. The Docker workflow builds
 all four images and exports/installs the canonical wheel; failures are fatal and
-nothing is published. Existing non-Docker CI bootstrap behavior is unchanged.
+nothing is published. A separate blocking Python 3.12 CI job builds/installs the
+canonical wheel alongside the BAP requirements and runs only the isolated
+startup-guard tests with synthetic configuration and no services or real dotenv.
+The broader non-Docker CI bootstrap behavior is unchanged.
 
 Python requirements retain upstream constraints; transitive dependencies are
 not fully locked yet. The local implementation environment has no Python 3.12
