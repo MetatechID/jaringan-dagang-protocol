@@ -223,6 +223,7 @@ class TestCreateInvoiceForOrder:
 
     @pytest.mark.asyncio
     async def test_refuses_when_brand_provider_mismatch(self, monkeypatch):
+        monkeypatch.setattr(oy_invoices.settings, "environment", "production")
         brand = StubBrand(payment_provider="xendit")
         db = _make_session(brand)
         order = StubOrder()
@@ -234,11 +235,12 @@ class TestCreateInvoiceForOrder:
 
         with pytest.raises(HTTPException) as ei:
             await oy_invoices.create_invoice_for_order(db, order)
-        assert ei.value.status_code == 500
+        assert ei.value.status_code == 503
 
     @pytest.mark.asyncio
-    async def test_raises_http_500_when_brand_missing(self, monkeypatch):
-        """Order's brand row must exist before we attempt to mint an invoice."""
+    async def test_raises_http_503_when_brand_missing(self, monkeypatch):
+        """Production requires a brand before attempting to mint an invoice."""
+        monkeypatch.setattr(oy_invoices.settings, "environment", "production")
         db = _make_session(brand=None)
         order = StubOrder()
 
@@ -249,7 +251,7 @@ class TestCreateInvoiceForOrder:
 
         with pytest.raises(HTTPException) as ei:
             await oy_invoices.create_invoice_for_order(db, order)
-        assert ei.value.status_code == 500
+        assert ei.value.status_code == 503
 
     @pytest.mark.asyncio
     async def test_real_path_collapses_items_into_description(self, monkeypatch):
@@ -345,6 +347,9 @@ class TestMockModeMatrix:
             oy_callback_base_url="http://x",
             mock_checkout_public_base="http://x",
         )
+        from config import settings
+        monkeypatch.setattr(settings, "oy_api_key", fake_settings.oy_api_key)
+        monkeypatch.setattr(settings, "oy_default_username", fake_settings.oy_default_username)
         monkeypatch.setattr(oy_invoices, "settings", fake_settings)
         monkeypatch.setattr(oy_invoices.oy_client, "create_invoice", fake_create_invoice)
         response = await oy_invoices.create_invoice_for_cart(db, cart)
@@ -368,6 +373,9 @@ class TestMockModeMatrix:
             oy_callback_base_url="http://x",
             mock_checkout_public_base="http://x",
         )
+        from config import settings
+        monkeypatch.setattr(settings, "oy_api_key", fake_settings.oy_api_key)
+        monkeypatch.setattr(settings, "oy_default_username", fake_settings.oy_default_username)
         monkeypatch.setattr(oy_invoices, "settings", fake_settings)
         monkeypatch.setattr(oy_invoices.oy_client, "create_invoice", fake_create_invoice)
         response = await oy_invoices.create_invoice_for_cart(db, cart)
