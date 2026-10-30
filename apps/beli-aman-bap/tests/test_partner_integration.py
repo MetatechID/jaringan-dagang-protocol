@@ -493,8 +493,14 @@ def test_pay_target_mock_mode():
 def _dipay_settings() -> SimpleNamespace:
     """Complete env-level Dipay creds — same fallback shape the VM uses
     (brand has no per-brand creds, env bundle is complete)."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    callback_key = rsa.generate_private_key(public_exponent=65537, key_size=2048).public_key()
     return SimpleNamespace(
         environment="production",
+        dipay_callback_public_key=callback_key.public_bytes(
+            serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode(),
         dipay_base_url="https://api-b2x-demo.dipay.id/snap/v2.1",
         dipay_client_key="env-client-key",
         dipay_client_secret="env-client-secret",

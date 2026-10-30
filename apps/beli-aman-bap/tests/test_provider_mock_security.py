@@ -179,6 +179,14 @@ async def test_profile_demo_methods(monkeypatch, mode, existing):
 async def test_order_auth_payment_selection(monkeypatch, selection, mode):
     monkeypatch.setattr(settings, "environment", mode)
     obj = target()
+    obj.state = OrderState.PRE_AUTH
+    # Satisfy the independently enforced shipping contract without provider I/O.
+    from services import shipping_quotes
+    b = brand("xendit")
+    courier = {"server_free_shipping": True}
+    obj.shipping_idr = 0
+    obj.shipping_address = {"shipping_binding": shipping_quotes.binding(b, "12345", obj.items, courier)}
+    monkeypatch.setattr(shipping_quotes, "select_shipping", AsyncMock(return_value=(obj.items, courier, 0)))
     before = deepcopy(vars(obj))
     monkeypatch.setattr(orders, "lock_order_for_update", AsyncMock(return_value=obj))
     monkeypatch.setattr(orders, "_serialize_order", lambda o: {})
@@ -187,7 +195,8 @@ async def test_order_auth_payment_selection(monkeypatch, selection, mode):
     demo = NS(id="demo", display_label="BCA Virtual Account — Demo", type=PaymentMethodType.VIRTUAL_ACCOUNT, xendit_token=None)
     saved = NS(id="saved", display_label="Saved wallet", type=PaymentMethodType.EWALLET)
     db = session(demo if selection == "demo" else saved if selection == "saved" else None)
-    body = orders.AdvanceWithAddressIn(address_inline={"line1": "Test"}, payment_method_id=selection)
+    db.get = AsyncMock(return_value=b)
+    body = orders.AdvanceWithAddressIn(address_inline={"line1": "Test", "postal_code": "12345"}, payment_method_id=selection)
     local = mode in {"development", "test"}
     if selection == "missing" or (selection == "demo" and not local):
         with pytest.raises(HTTPException):

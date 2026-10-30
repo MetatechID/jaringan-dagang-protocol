@@ -27,7 +27,10 @@ def keys():
 
 @pytest.fixture(autouse=True)
 def config(monkeypatch):
-    s = Settings(_env_file=None, environment="production")
+    s = Settings(
+        _env_file=None, environment="production", debug=False,
+        admin_token="synthetic-dipay-admin", seller_bridge_token="synthetic-dipay-bridge",
+    )
     for module in (main, dipay_client, dipay_invoices, webhooks_dipay):
         monkeypatch.setattr(module, "settings", s)
     return s

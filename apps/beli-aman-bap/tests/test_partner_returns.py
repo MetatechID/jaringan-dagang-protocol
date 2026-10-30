@@ -95,9 +95,12 @@ def test_server_redirect_only_after_paid(status, code):
         assert "location" not in response.headers
 
 
-def test_registration_denies_other_origin_before_invoice():
+def test_registration_denies_other_origin_before_invoice(monkeypatch):
+    # Reach URL validation with a configured provider; missing provider config
+    # now independently fails closed before registration.
+    monkeypatch.setattr(settings, "xendit_secret_key", "synthetic-xendit-key")
     db = FakeSession([])
-    response = _build_partner_app(db, stub_partner_brand()).post(
+    response = _build_partner_app(db, stub_partner_brand(xendit_sub_account_id="synthetic-subaccount")).post(
         "/api/v1/partner/orders", json={**_VALID_BODY, "success_url": "https://other.example/"})
     assert response.status_code == 422
     assert not db.added and not db.committed

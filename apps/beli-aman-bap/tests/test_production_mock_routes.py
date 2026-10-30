@@ -40,6 +40,9 @@ def test_mock_routes_are_local_only(monkeypatch, mode):
     from database import get_db
     from routers.internal_mock import router
     monkeypatch.setattr(settings, "environment", mode)
+    monkeypatch.setattr(settings, "debug", False)
+    monkeypatch.setattr(settings, "admin_token", "synthetic-jd005-admin")
+    monkeypatch.setattr(settings, "seller_bridge_token", "synthetic-jd005-bridge")
     main = importlib.import_module("main")
     main = importlib.reload(main)
     monkeypatch.setattr(main, "engine", Mock(dispose=AsyncMock()))
