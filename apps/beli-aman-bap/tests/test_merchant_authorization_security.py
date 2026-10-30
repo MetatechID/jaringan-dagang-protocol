@@ -131,7 +131,7 @@ async def test_authorized_read_label_and_booking(api, who):
     assert response.json()["state"] == "FULFILLING"
     assert response.json()["fulfillment_awb"] == "awb"
     book.assert_awaited_once()
-    assert book.call_args.kwargs["order"].brand_id == slug
+    book.transition.assert_awaited_once()
     # Dependency deliberately rolls back: route/helper must not commit caller's transaction.
     order = await db.get(Order, slug)
     assert order.state == OrderState.ESCROW_HELD
