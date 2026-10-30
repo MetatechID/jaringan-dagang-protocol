@@ -447,10 +447,10 @@ async def _qris_notify(
         if exc.status_code == 404 or code.startswith(_QRIS_QUERY_NOT_FOUND_PREFIX):
             raise HTTPException(404, "Dipay reports transaction not found") from exc
         _LOG.warning(
-            "Dipay QRIS query error %s for ref=%s — proceeding with body status (advisory)",
+            "Dipay QRIS query error %s for ref=%s — refusing unverified callback",
             exc.status_code, ref,
         )
-        verified = body
+        raise HTTPException(502, "Could not verify Dipay callback") from exc
     except Exception as exc:  # noqa: BLE001
         _LOG.exception("Dipay QRIS verification failed for ref=%s", ref)
         raise HTTPException(502, "Could not verify Dipay callback") from exc
@@ -724,10 +724,10 @@ async def remit_callback(
             )
             raise HTTPException(404, "Dipay reports disbursement not found") from exc
         _LOG.warning(
-            "Dipay remit status API error %s for partner_ref=%s — proceeding with body status (advisory)",
+            "Dipay remit status API error %s for partner_ref=%s — refusing unverified callback",
             exc.status_code, partner_ref,
         )
-        verified = body
+        raise HTTPException(502, "Could not verify Dipay callback") from exc
     except Exception as exc:  # noqa: BLE001
         _LOG.exception("Dipay remit verification failed for ref=%s", partner_ref)
         raise HTTPException(502, "Could not verify Dipay callback") from exc
