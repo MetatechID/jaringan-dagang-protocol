@@ -109,6 +109,54 @@ Apache-2.0. See [LICENSE](LICENSE). Contributions welcome — see
 Maintained by [@MetatechID](https://github.com/MetatechID). Our
 production deployment is documented at <https://safiya.beliaman.com>.
 
+## Authoritative checkout shipping
+
+`POST /api/v1/orders` requires `destination_postal_code` (five ASCII digits),
+cart SKUs/quantities and a selected `shipping` courier/service. The submitted
+`shipping.price_idr` is only confirmation of the displayed quote: the server
+resolves the persisted brand's catalog prices and weights, configured origin,
+cart and destination and obtains a fresh provider rate. Client item weights,
+values, courier labels and delivery estimates are not authoritative.
+
+The PRE_AUTH order binds the tenant/BPP, catalog snapshots, destination, origin
+fingerprint, carrier and selected rate. Attaching either an owned saved address
+or an inline address revalidates these inputs and fetches a fresh rate before
+AUTHED. A changed destination/cart/catalog/origin/service/rate (including
+provider labels or estimates) requires refreshing rates and creating a new
+order; stale selections return 409. Legacy PRE_AUTH orders without a binding
+must also be recreated. Missing/invalid input returns 422; unavailable provider
+rates return 503. No database migration is needed for the JSON binding.
+
+Omitting shipping does **not** grant free shipping. Only the operator-managed
+`SHIPPING_FREE_BRAND_SLUGS` comma-separated allowlist permits zero-price shipping
+(default empty); browser input cannot enable it. This exemption still requires
+a valid destination/cart and is checked again when attaching the address.
+Nonlocal environments fail closed on missing credentials, provider errors and
+empty responses. Fabricated rate fallbacks are limited to explicit
+`development`/`test`; malformed rate rows are rejected even there.
+
+**Client rollout order:** merge/release the destination-aware client contract
+([public SDK companion PR #5](https://github.com/MetatechID/beli-aman-sdk/pull/5))
+and update every other checkout client **before** deploying the strict server.
+Clients must submit the destination used for quoting and handle 409 by
+requoting/recreating, not by removing shipping. Older clients that omit the
+destination are intentionally incompatible.
+
+The fatal `Shipping security / authoritative-shipping` workflow runs synthetic
+route/provider regressions with Python 3.12 and the canonical protocol wheel.
+Repository branch protection must require that check to block merging. To run
+locally after installing app/test dependencies and the canonical wheel:
+
+```sh
+python -I apps/beli-aman-bap/scripts/test-shipping-security.py \
+  tests/test_shipping_security.py tests/test_shipping_proxy.py \
+  tests/test_carriers_passthrough.py
+```
+
+The runner clears inherited configuration before app imports, disables dotenv
+and plugin autoload, and rejects unexpected outbound sockets. Tests use fake
+DB/provider boundaries, not live provider or database integration.
+
 ## Docker: standalone protocol stack
 
 All app Dockerfiles use the **repository root** build context. Python images use

@@ -124,6 +124,7 @@ class CreateOrderIn(BaseModel):
     brand_slug: str
     items: list[CartItemIn]
     shipping: ShippingChoiceIn | None = None
+    destination_postal_code: str = Field(pattern=r"^[0-9]{5}$")
 
 
 def _serialize_order(o: Order) -> dict[str, Any]:
@@ -169,42 +170,13 @@ async def create_order(
     if not brand:
         raise HTTPException(404, f"Brand '{body.brand_slug}' not found")
 
-    # Validate items + materialize line snapshots. Resolve SKUs that may be
-    # either a parent SKU or a variant SKU on a parent product.
-    products = await catalog_service.list_products(body.brand_slug)
-    parent_by_sku: dict[str, dict[str, Any]] = {p["sku"]: p for p in products}
-    variant_lookup: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
-    for p in products:
-        for v in p.get("variants", []) or []:
-            variant_lookup[v["sku"]] = (p, v)
-
-    line_snapshots: list[dict[str, Any]] = []
-    for item in body.items:
-        if item.sku in variant_lookup:
-            parent, variant = variant_lookup[item.sku]
-            line_snapshots.append({
-                "sku": item.sku,
-                "name": f'{parent["name"]} - {variant.get("label", "")}',
-                "qty": item.qty,
-                "unit_price_idr": int(variant.get("price_idr") or parent.get("price_idr") or 0),
-                "image": variant.get("image") or parent.get("image"),
-            })
-        elif item.sku in parent_by_sku:
-            product = parent_by_sku[item.sku]
-            line_snapshots.append({
-                "sku": item.sku,
-                "name": product["name"],
-                "qty": item.qty,
-                "unit_price_idr": int(product["price_idr"]),
-                "image": product.get("image"),
-            })
-        else:
-            raise HTTPException(400, f"Unknown SKU '{item.sku}' for brand {body.brand_slug}")
-
-    shipping_idr = int(body.shipping.price_idr) if body.shipping else 0
+    from services import shipping_quotes
+    products = await catalog_service.list_products(brand.slug)
+    line_snapshots, shipping_snapshot, shipping_idr = await shipping_quotes.select_shipping(
+        brand, body.destination_postal_code, body.items, body.shipping, products,
+    )
     breakdown = pricing.compute_breakdown(line_snapshots, shipping_idr=shipping_idr, fee_pct_bp=brand.fee_pct_bp)
-
-    shipping_snapshot = body.shipping.model_dump() if body.shipping else None
+    shipping_binding = shipping_quotes.binding(brand, body.destination_postal_code, line_snapshots, shipping_snapshot)
     order = Order(
         profile_id=profile.id,
         brand_id=brand.id,
@@ -213,7 +185,7 @@ async def create_order(
         shipping_idr=breakdown["shipping_idr"],
         fee_idr=breakdown["fee_idr"],
         total_idr=breakdown["total_idr"],
-        shipping_address={"courier": shipping_snapshot} if shipping_snapshot else None,
+        shipping_address={"courier": shipping_snapshot, "shipping_binding": shipping_binding},
         bap_id=settings.subscriber_id,
         bpp_id=brand.bpp_id,
     )
@@ -388,6 +360,9 @@ async def advance_to_authed(
     if not order or order.profile_id != profile.id:
         raise HTTPException(404, "Order not found")
 
+    if order.state != OrderState.PRE_AUTH:
+        raise HTTPException(409, "Only PRE_AUTH orders can attach an address")
+
     # Resolve address
     addr_snapshot: dict | None = None
     if body.address_id:
@@ -433,10 +408,24 @@ async def advance_to_authed(
     # again — and letting them pick one the buyer never paid for. Address keys
     # stay top-level: carriers.py, sento_invoices.py and oy_invoices.py all read
     # recipient_name/email from that level.
-    existing_courier = (order.shipping_address or {}).get("courier")
+    from services import shipping_quotes
+    stored = (order.shipping_address or {}).get("shipping_binding")
+    brand = await db.get(Brand, order.brand_id)
+    if not brand or not stored or stored.get("brand_id") != str(brand.id) or stored.get("bpp_id") != brand.bpp_id or order.bpp_id != brand.bpp_id:
+        raise HTTPException(409, "Order shipping must be quoted again")
+    destination = shipping_quotes.postal_code(addr_snapshot.get("postal_code"))
+    if (destination != stored.get("destination_postal_code") or order.items != stored.get("items")
+            or stored.get("origin") != shipping_quotes.origin_context(brand)):
+        raise HTTPException(409, "Shipping destination or cart changed; create a new quote")
+    courier = stored.get("courier") or {}
+    choice = None if courier.get("server_free_shipping") else ShippingChoiceIn(**courier)
+    snapshots, refreshed, amount = await shipping_quotes.select_shipping(brand, destination, order.items, choice)
+    if snapshots != stored["items"] or refreshed != courier or amount != order.shipping_idr:
+        raise HTTPException(409, "Shipping quote changed; create a new order")
+    # Only server-generated courier/binding keys survive an inline address.
     order.shipping_address = {
-        **addr_snapshot,
-        **({"courier": existing_courier} if existing_courier else {}),
+        **{k: v for k, v in addr_snapshot.items() if k not in {"courier", "shipping_binding"}},
+        "courier": refreshed, "shipping_binding": stored,
     }
     # Hosted invoice creation chooses the real rail when no saved method is supplied.
     order.payment_method_snapshot = payment_snapshot
