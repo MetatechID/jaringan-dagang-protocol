@@ -39,6 +39,14 @@ from services.partner_orders import (  # noqa: E402
     mark_partner_order_paid,
 )
 
+@pytest.fixture(autouse=True)
+def partner_return_policy(monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "partner_return_origins", {
+        "brand-id": ["https://consumerland.id"],
+    })
+
+
 # ---------------------------------------------------------------------------
 # Fakes (pattern: tests/_dipay_fakes.py)
 

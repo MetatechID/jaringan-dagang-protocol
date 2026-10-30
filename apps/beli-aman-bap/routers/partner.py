@@ -39,6 +39,7 @@ from services import xendit_client
 from services.dipay_client import DipayError
 from services.partner_orders import create_partner_order, get_partner_order
 from services.release_clock import JAKARTA
+from services.partner_return_url import stored_return_url
 from services.xendit_client import XenditError
 
 _LOG = logging.getLogger("beli_aman_bap.partner")
@@ -226,7 +227,7 @@ async def _create_invoice(
         description=order.description[:255],
         customer_email=(order.buyer or {}).get("email"),
         customer_name=(order.buyer or {}).get("name"),
-        success_redirect_url=order.success_url or f"{base}/pay/{order.id}/done",
+        success_redirect_url=f"{base}/pay/{order.id}/done",
         failure_redirect_url=f"{base}/pay/{order.id}/failed",
         duration_seconds=expires_in,
         items=[
@@ -316,7 +317,7 @@ async def get_public_order_status(
         status=order.status,
         amount_idr=order.amount_idr,
         paid_at=order.paid_at.isoformat() if order.paid_at else None,
-        success_url=order.success_url,
+        success_url=stored_return_url(order) if order.status == "paid" else None,
     )
 
 # ---------- Admin (seller dashboard BFF) ----------
