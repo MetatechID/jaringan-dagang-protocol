@@ -2,7 +2,7 @@
 
 Returns the printer-friendly envelope the seller-dashboard needs for
 Jubelio-booked orders only: combined AWB / courier / sender / recipient /
-items / totals. Auth follows the existing admin-token pattern. We do
+items / totals. Auth uses the merchant Firebase identity. We do
 NOT call any carrier APIs here — the envelope is built straight off the
 order row and the brand's jubelio_origin_address.
 """
@@ -25,13 +25,13 @@ from fastapi.testclient import TestClient
 from routers.orders import router as orders_router
 
 
-def _override_admin_token(app, *, allow: bool = True):
-    from deps import require_admin_token as real
+def _override_profile(app, *, allow: bool = True):
+    from deps import get_current_profile as real
 
     async def _stubbed():
         if allow:
-            return "admin"
-        raise HTTPException(401, "admin token required")
+            return SimpleNamespace(id="admin", is_super_admin=True)
+        raise HTTPException(401, "Firebase identity required")
 
     app.dependency_overrides[real] = _stubbed
 
@@ -88,7 +88,7 @@ def _install_db(app, brand):
 def app():
     a = FastAPI()
     a.include_router(orders_router)
-    _override_admin_token(a, allow=True)
+    _override_profile(a, allow=True)
     return a
 
 
@@ -117,15 +117,10 @@ def _brand(*, jubelio_origin=None, slug="safiyafood"):
 
 
 class TestAuth:
-    def test_requires_admin_token(self, app, client):
-        from deps import require_admin_token as real
-
-        async def _deny():
-            raise HTTPException(403, "Invalid or missing X-Admin-Token header")
-
-        app.dependency_overrides[real] = _deny
+    def test_requires_profile(self, app, client):
+        _override_profile(app, allow=False)
         resp = client.get("/api/v1/orders/order-1/label-data")
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
 
 # ---- 4xx error paths -------------------------------------------------------

@@ -23,5 +23,5 @@ jobs:
           python -m pip install /tmp/protocol-wheels/*.whl
       - name: Install app and test dependencies
         run: python -m pip install -r apps/beli-aman-bap/requirements.txt pytest pytest-asyncio aiosqlite
-      - name: Run isolated identity regressions
+      - name: Run isolated identity and merchant authorization regressions
         run: python -I apps/beli-aman-bap/scripts/test-identity-security.py

@@ -9,7 +9,7 @@ from typing import Any
 
 from config import settings
 from database import async_session, get_db
-from deps import get_current_profile, require_admin_token
+from deps import get_current_profile, require_admin_token, require_store_member
 from fastapi import APIRouter, Depends, HTTPException
 from models.address import Address
 from models.brand import Brand
@@ -155,6 +155,19 @@ def _serialize_order(o: Order) -> dict[str, Any]:
     }
 
 
+async def _authorize_order_brand(
+    db: AsyncSession, profile: BeliAmanProfile, order: Order,
+) -> Brand:
+    """Resolve authority from the persisted order, never a caller's slug."""
+    brand = (await db.execute(
+        select(Brand).where(Brand.id == order.brand_id)
+    )).scalar_one_or_none()
+    if brand is None:
+        raise HTTPException(404, "Brand not found for order")
+    await require_store_member(db, profile, brand.slug)
+    return brand
+
+
 # ---------- Endpoints ----------
 
 
@@ -214,9 +227,10 @@ async def list_my_orders(
     return [_serialize_order(o) for o in result.scalars().all()]
 
 
-@router.get("/{order_id}/admin", dependencies=[Depends(require_admin_token)])
+@router.get("/{order_id}/admin")
 async def get_order_admin(
     order_id: str,
+    profile: BeliAmanProfile = Depends(get_current_profile),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Read an order without buyer auth, for the seller dashboard.
@@ -231,11 +245,11 @@ async def get_order_admin(
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(404, "Order not found")
+    brand = await _authorize_order_brand(db, profile, order)
     out = _serialize_order(order)
 
     # Payout/fee breakdown for the seller dashboard (projection while held).
-    brand_result = await db.execute(select(Brand).where(Brand.id == order.brand_id))
-    out["payout"] = _payout_summary(order, brand_result.scalar_one_or_none())
+    out["payout"] = _payout_summary(order, brand)
 
     # Actuals after release: the dashboard reads the fee split from the
     # RELEASE ledger row (projection is None once it exists).
@@ -471,7 +485,7 @@ async def cancel_shipment(
 ) -> dict:
     """Cancel a booked shipment for a FULFILLING order.
 
-    Admin-token-auth (same as ``POST /{order_id}/ship``). Dispatches to
+    Internal admin-token contract (unlike merchant ``/ship``). Dispatches to
     the brand's active carrier via ``services.carriers.cancel``; the
     state-machine then moves the order FULFILLING → ESCROW_HELD so the
     seller can re-book (e.g. with a different courier or service).
@@ -545,14 +559,15 @@ async def cancel_shipment(
     return _serialize_order(order)
 
 
-@router.get("/{order_id}/label-data", dependencies=[Depends(require_admin_token)])
+@router.get("/{order_id}/label-data")
 async def get_label_data(
     order_id: str,
+    profile: BeliAmanProfile = Depends(get_current_profile),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Return printer-friendly AWB label envelope for Jubelio-booked orders.
 
-    Uses the same admin-token guard as the other seller-facets. Builds the
+    Requires the caller's Firebase identity and persisted store ACL. Builds the
     envelope straight from ``Order`` + ``Brand.jubelio_origin_address`` so
     this never round-trips through the Jubelio API itself; that's exactly
     what lets the dashboard render a label without carrier credentials.
@@ -564,6 +579,7 @@ async def get_label_data(
     order = await lock_order_for_update(db, order_id)
     if order is None:
         raise HTTPException(404, "Order not found")
+    brand = await _authorize_order_brand(db, profile, order)
     if not order.fulfillment_awb:
         raise HTTPException(
             409,
@@ -576,8 +592,6 @@ async def get_label_data(
             f"(active carrier: {order.carrier})",
         )
 
-    brand_q = await db.execute(select(Brand).where(Brand.id == order.brand_id))
-    brand = brand_q.scalar_one_or_none()
     origin = (getattr(brand, "jubelio_origin_address", None) or {}) if brand else {}
     if not origin.get("zipcode") or not origin.get("address"):
         raise HTTPException(
@@ -717,7 +731,7 @@ async def refresh_tracking(
     """Forcibly pull the latest tracking state from the carrier.
 
     Poll-fallback for when a webhook delivery was missed. Same auth as
-    ``/ship`` and ``/ship/cancel`` (admin token). The dispatch rule is
+    ``/ship/cancel`` (internal admin token, not merchant bearer). The dispatch rule is
     owned by ``services.shipment_events.apply_shipment_event`` — exactly
     the rule the webhook uses — so this endpoint is interchangeable
     with a delayed webhook delivery.
@@ -762,16 +776,17 @@ async def refresh_tracking(
     return _serialize_order(order)
 
 
-@router.post("/{order_id}/ship", dependencies=[Depends(require_admin_token)])
+@router.post("/{order_id}/ship")
 async def book_shipment(
     order_id: str,
     body: BookShipmentIn,
+    profile: BeliAmanProfile = Depends(get_current_profile),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Book a shipment for an ESCROW_HELD order via the brand's active carrier.
 
-    Admin-token-auth: the seller dashboard calls this from a Next.js API
-    route that holds the BAP admin token server-side. Dispatches to Jubelio
+    The seller dashboard forwards the caller's Firebase bearer token;
+    persisted store membership authorizes the operation. Dispatches to Jubelio
     or Biteship (per ``brand.jubelio_enabled`` / ``settings.default_carrier``),
     transitions the order to FULFILLING, and persists the AWB / tracking URL.
     """
@@ -780,6 +795,7 @@ async def book_shipment(
     order = await lock_order_for_update(db, order_id)
     if order is None:
         raise HTTPException(404, "Order not found")
+    brand = await _authorize_order_brand(db, profile, order)
     if order.state != OrderState.ESCROW_HELD:
         raise HTTPException(
             409, f"Cannot book shipment in state {order.state.value}"
@@ -795,11 +811,6 @@ async def book_shipment(
         raise HTTPException(
             409, f"Order already has AWB {order.fulfillment_awb}"
         )
-
-    brand_q = await db.execute(select(Brand).where(Brand.id == order.brand_id))
-    brand = brand_q.scalar_one_or_none()
-    if brand is None:
-        raise HTTPException(500, "Brand not found for order")
 
     if not order.shipping_address:
         raise HTTPException(409, "Order has no shipping_address")

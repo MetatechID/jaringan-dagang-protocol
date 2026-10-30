@@ -695,7 +695,7 @@ def _partner_row(**overrides):
     return SimpleNamespace(**base)
 
 
-def test_admin_orders_requires_admin_token(monkeypatch):
+def test_admin_orders_requires_caller_identity(monkeypatch):
     db = _AdminFakeSession([])
     app = FastAPI()
     app.include_router(partner_router)
@@ -707,14 +707,14 @@ def test_admin_orders_requires_admin_token(monkeypatch):
     _stub_admin_token(monkeypatch)  # settings.admin_token = "test-admin-token"
 
     client = TestClient(app, raise_server_exceptions=False)
-    # Wrong / missing token → 403.
+    # Machine credentials cannot authorize a merchant collection.
     resp = client.get("/api/v1/partner/admin/orders")
-    assert resp.status_code == 403
+    assert resp.status_code == 401
     resp = client.get(
         "/api/v1/partner/admin/orders",
-        headers={"X-Admin-Token": "wrong-token"},
+        headers={"X-Admin-Token": "test-admin-token"},
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 401
 
 
 def test_admin_orders_lists_rows_with_brand_slug(monkeypatch):
@@ -726,12 +726,16 @@ def test_admin_orders_lists_rows_with_brand_slug(monkeypatch):
         yield db
 
     app.dependency_overrides[get_db] = _override_db
-    _stub_admin_token(monkeypatch)
+    from deps import get_current_profile
 
+    async def _profile():
+        return SimpleNamespace(id="admin", is_super_admin=True)
+
+    app.dependency_overrides[get_current_profile] = _profile
     client = TestClient(app, raise_server_exceptions=False)
     resp = client.get(
         "/api/v1/partner/admin/orders?brand_slug=consumerland",
-        headers={"X-Admin-Token": "test-admin-token"},
+        headers={"Authorization": "Bearer test-firebase-token"},
     )
     assert resp.status_code == 200, resp.text
     data = resp.json()
