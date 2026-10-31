@@ -313,3 +313,8 @@ async def ready():
         logger.warning("BAP schema readiness failed", exc_info=True)
         raise HTTPException(status_code=503, detail="Database/schema not ready") from exc
     return {"status": "ready"}
+
+
+# Outside Starlette's error middleware so generated 500s are captured too.
+from services.webhook_audit import AuditMiddleware
+app = AuditMiddleware(app)

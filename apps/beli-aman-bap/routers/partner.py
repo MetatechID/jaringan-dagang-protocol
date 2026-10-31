@@ -25,7 +25,8 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from services.webhook_audit import attach
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -246,6 +247,7 @@ async def register_order(
     body: PartnerOrderIn,
     brand: Brand = Depends(require_partner),
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ) -> PartnerOrderOut:
     """Register a payment and get the pay-page URL to redirect the buyer to."""
     # Reject incomplete provider configuration before inserting an order.
@@ -268,6 +270,7 @@ async def register_order(
         success_url=body.success_url,
     )
 
+    attach(request, brand=brand, order=order)
     try:
         await _create_invoice(db, brand, order, body.expires_in_seconds)
     except (XenditError, DipayError) as e:
@@ -277,6 +280,7 @@ async def register_order(
 
     await db.commit()
     await db.refresh(order)
+    attach(request, brand=brand, order=order)
 
     expires_at = order.expires_at or (
         datetime.now(timezone.utc) + timedelta(seconds=body.expires_in_seconds)
@@ -293,6 +297,7 @@ async def register_order(
 
 @router.get("/orders/{order_id}", response_model=PartnerStatusOut)
 async def get_order_status(
+    request: Request,
     order_id: str,
     brand: Brand = Depends(require_partner),
     db: AsyncSession = Depends(get_db),
@@ -300,6 +305,7 @@ async def get_order_status(
     order = await get_partner_order(db, order_id)
     if order is None or order.brand_id != brand.id:
         raise HTTPException(404, "Order not found")
+    attach(request, brand=brand, order=order)
     return PartnerStatusOut(
         order_id=order.id,
         external_order_id=order.external_order_id,

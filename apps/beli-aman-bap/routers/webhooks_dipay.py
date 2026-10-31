@@ -281,48 +281,21 @@ async def _verify_inbound_signature(
     raise HTTPException(401, "Invalid Dipay callback signature")
 
 
-# Temporary diagnostics: substring test against lowercased header names and
-# JSON keys, so nested PAN/customer fields are redacted regardless of casing.
-_REDACTED = "<redacted>"
-_SENSITIVE_FIELD_MARKERS = ("pan", "cvv", "card", "customer", "email", "phone")
-
-
-def _redact_headers(headers: Any) -> dict[str, str]:
-    return {
-        name: _REDACTED
-        if any(marker in name.lower() for marker in _SENSITIVE_FIELD_MARKERS)
-        else value
-        for name, value in headers.items()
-    }
-
-
-def _redact_json(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {
-            key: _REDACTED
-            if any(marker in str(key).lower() for marker in _SENSITIVE_FIELD_MARKERS)
-            else _redact_json(item)
-            for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [_redact_json(item) for item in value]
-    return value
-
-
+# Optional diagnostics remain metadata-only; raw audit bytes must never reach logs.
 def _log_full_callback_for_debug(request: Request, body_bytes: bytes) -> None:
     """Log the full rejected callback when explicitly enabled (temporary)."""
     if not getattr(settings, "dipay_debug_log_full_callback", False):
         return
-    raw = body_bytes.decode("utf-8", errors="replace")
-    try:
-        body: Any = _redact_json(json.loads(raw))
-    except Exception:
-        body = raw
+    from services.webhook_audit import Capture
+    capture = Capture()
+    capture.feed(body_bytes)
+    capture.complete = True
+    body = capture.snapshot()
     _LOG.warning(
         "TEMPORARY FULL DIPAY QRIS CALLBACK method=%r path=%r headers=%r body=%r",
         request.method,
         request.url.path,
-        _redact_headers(request.headers),
+        {},  # Never put callback credentials or arbitrary headers in application logs.
         body,
     )
 
@@ -423,6 +396,8 @@ async def _qris_notify(
         raise HTTPException(400, "Missing originalPartnerReferenceNo in callback")
 
     brand, cart, order, partner_order = await _resolve_targets(db, ref)
+    from services.webhook_audit import attach
+    attach(request, brand=brand, order=partner_order, reference=ref)
     if brand is None and cart is None and order is None and partner_order is None:
         _LOG.warning(
             "Dipay QRIS callback: no surface for originalPartnerReferenceNo=%s "
@@ -694,6 +669,8 @@ async def remit_callback(
         )
         raise HTTPException(404, "Unknown Dipay disbursement")
 
+    from services.webhook_audit import attach
+    attach(request, reference=partner_ref)
     order_id = row.order_id
     if row.status != EscrowEntryStatus.PENDING:
         _LOG.warning(
@@ -707,6 +684,7 @@ async def remit_callback(
     if order is None:
         raise HTTPException(404, "Unknown Dipay order")
     brand = (await db.execute(select(Brand).where(Brand.id == order.brand_id))).scalar_one_or_none()
+    attach(request, brand=brand, reference=partner_ref)
     if brand is None:
         raise HTTPException(502, "Dipay callback owner is not configured")
     try:

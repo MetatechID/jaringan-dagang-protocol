@@ -1036,11 +1036,11 @@ class TestDipayWebhookSignature:
         assert resp.status_code == 401
         text = " ".join(caplog.messages)
         assert "TEMPORARY FULL DIPAY QRIS CALLBACK" in text
-        assert "q-debug-1" in text
-        assert "c2ln" in text
+        assert "q-debug-1" not in text  # Raw body evidence belongs only in the audit DB.
+        assert "c2ln" not in text
         assert "4111111111111111" not in text
-        assert "Debug Merchant" in text
-        assert "BCA" in text
+        assert "Debug Merchant" not in text
+        assert "BCA" not in text
 
     def test_full_callback_debug_log_disabled_by_default(self, monkeypatch, client, caplog):
         from config import settings

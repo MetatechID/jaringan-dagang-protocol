@@ -98,6 +98,7 @@ def install_transport(monkeypatch, backend):
     original = policy.CallbackTransport
     monkeypatch.setattr(webhook, "CallbackTransport", lambda: original(backend=backend))
     monkeypatch.setattr(webhook, "_RETRY_DELAYS", (0, 0))
+    monkeypatch.setattr(webhook, "write_audit", AsyncMock())
 
 
 def test_actual_transport_pins_dns_preserves_tls_host_target_and_signed_bytes(monkeypatch):
@@ -116,7 +117,7 @@ def test_actual_transport_pins_dns_preserves_tls_host_target_and_signed_bytes(mo
     assert backend.hosts == [("8.8.8.8", 8443)]
     stream = backend.streams[0]
     assert stream.sni == "public.example"
-    assert stream.closed and stream.reads == 1
+    assert stream.closed and stream.reads == 2
     raw = b"".join(stream.writes)
     assert b"POST /a%2Fb?token=x%2Fy&x=1 HTTP/1.1" in raw
     assert b"Host: public.example:8443" in raw
@@ -150,9 +151,9 @@ def test_redirect_no_body_no_follow_and_sanitized_logs(monkeypatch, caplog):
             url="https://public.example/?password=do-not-log", secret="secret", payload={"order_id": "placeholder"})
     asyncio.run(run())
     assert len(backend.hosts) == 3
-    assert all(stream.closed and stream.reads == 1 for stream in backend.streams)
+    assert all(stream.closed and stream.reads == 2 for stream in backend.streams)
     assert "public.example" not in caplog.text and "do-not-log" not in caplog.text
-    assert "non_2xx" in caplog.text
+    assert "transport_error" in caplog.text  # Broken response stream, known non-2xx still retries.
 
 
 @pytest.mark.parametrize("url, expected", [
