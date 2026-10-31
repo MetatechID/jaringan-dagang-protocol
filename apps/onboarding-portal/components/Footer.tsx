@@ -9,7 +9,7 @@ export function Footer() {
           </svg>
           <span>Powered by Beckn Protocol</span>
           <span className="text-slate-700">|</span>
-          <span>Jaringan Dagang - Indonesia Open Commerce Network</span>
+          <span>OITO - Indonesia Open Commerce Network</span>
         </div>
         <div className="text-xs text-slate-600">
           v0.1.0

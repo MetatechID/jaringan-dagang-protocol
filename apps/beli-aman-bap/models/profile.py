@@ -21,7 +21,7 @@ from .base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class BeliAmanProfile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """A person's identity. Canonical for the whole Jaringan Dagang network."""
+    """A person's identity. Canonical for the whole OITO network."""
 
     __tablename__ = "profiles"
 

@@ -1,9 +1,9 @@
 import Link from "next/link";
 
 export const metadata = {
-  title: "Beli Aman — Buyer-protection layer · Jaringan Dagang",
+  title: "Beli Aman — Buyer-protection layer · OITO",
   description:
-    "Beli Aman is the consumer-facing reference BAP on Jaringan Dagang. Drop-in escrow + Google SSO + recourse for any Indonesian DTC brand site.",
+    "Beli Aman is the consumer-facing reference BAP on OITO. Drop-in escrow + Google SSO + recourse for any Indonesian DTC brand site.",
 };
 
 export default function BeliAmanSpecPage() {
@@ -43,8 +43,8 @@ export default function BeliAmanSpecPage() {
             <li>Releases funds to the brand on goods-received confirmation, or D+3 auto-release.</li>
           </ol>
           <p className="mt-3 text-slate-400 text-sm">
-            Think of it as the <strong>buyer-side reference implementation</strong> of Jaringan
-            Dagang — what UPI/PhonePe is to ONDC, Beli Aman is to JD.
+            Think of it as the <strong>buyer-side reference implementation</strong> of OITO
+            — what UPI/PhonePe is to ONDC, Beli Aman is to OITO.
           </p>
         </Section>
 
@@ -76,7 +76,7 @@ export default function BeliAmanSpecPage() {
          │                                                          │
          ▼                                                          ▼
 ┌─────────────────────────────┐                       ┌──────────────────────────┐
-│  Jaringan Dagang Gateway    │                       │  Xendit                  │
+│  OITO Gateway               │                       │  Xendit                  │
 │  (Beckn registry + routing) │                       │  (payment + payouts)     │
 └─────────────────────────────┘                       └──────────────────────────┘`}</pre>
         </Section>

@@ -443,7 +443,13 @@ def test_pay_page_renders_for_pending_order():
     resp = client.get("/pay/po-123")
     assert resp.status_code == 200
     assert "Bayar pesanan" in resp.text
-    assert "Jaringan Dagang" in resp.text
+    assert '<title>Bayar pesanan · OITO</title>' in resp.text
+    assert '<div class="brand">OITO</div>' in resp.text
+    assert "melalui Xendit (PJP berlisensi) untuk pesanan di OITO" in resp.text
+    assert "Jaringan Dagang" not in resp.text
+    assert "Oito" not in resp.text
+    assert "atas nama" not in resp.text
+    assert "Consumerland 2026" in resp.text
     assert "Rp 1.500.000" in resp.text
 
 
@@ -455,6 +461,18 @@ def test_pay_page_paid_shows_success():
     resp = client.get("/pay/po-123")
     assert resp.status_code == 200
     assert "Pembayaran berhasil" in resp.text
+    assert '<title>Bayar pesanan · OITO</title>' in resp.text
+    assert '<div class="brand">OITO</div>' in resp.text
+
+
+def test_pay_page_failed_keeps_oito_branding():
+    client = _build_pay_app(FakeSession([stub_partner_order()]))
+
+    resp = client.get("/pay/po-123/failed")
+    assert resp.status_code == 200
+    assert '<title>Pembayaran belum selesai · OITO</title>' in resp.text
+    assert '<div class="brand">OITO</div>' in resp.text
+    assert 'href="/pay/po-123"' in resp.text
 
 
 def test_pay_page_404_for_unknown_order():
@@ -605,6 +623,13 @@ def test_pay_page_dipay_renders_inline_qris(monkeypatch):
     resp = client.get("/pay/po-123")
     assert resp.status_code == 200
     assert "Scan QRIS" in resp.text
+    assert '<title>Bayar pesanan · OITO</title>' in resp.text
+    assert '<div class="brand">OITO</div>' in resp.text
+    assert "melalui Dipay untuk pesanan di OITO" in resp.text
+    assert "Jaringan Dagang" not in resp.text
+    assert "Oito" not in resp.text
+    assert "atas nama" not in resp.text
+    assert "Consumerland 2026" in resp.text
     assert "/api/v1/qris/q-0f0e8a2e00000000000000000000.png" in resp.text
     # Dipay orders never show the Xendit redirect button.
     assert "Bayar Sekarang" not in resp.text

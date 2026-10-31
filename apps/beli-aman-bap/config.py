@@ -97,7 +97,7 @@ class Settings(BaseSettings):
     # Callbacks). Verified against header ``x-callback-token``.
     xendit_webhook_token: str = ""
 
-    # Public base URL for the /pay/{id} partner pay page (Jardag-branded
+    # Public base URL for the /pay/{id} partner pay page (OITO-branded
     # hosted payment surface). Returned by POST /api/v1/partner/orders as
     # ``payment_url``.
     partner_pay_base_url: str = "https://api.beli-aman.metatech.id"

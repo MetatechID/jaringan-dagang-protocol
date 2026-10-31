@@ -1,4 +1,4 @@
-"""Jardag-branded hosted payment page for partner orders.
+"""OITO-branded hosted payment page for partner orders.
 
   GET /pay/{id}          — pay page (amount, countdown, "Bayar Sekarang")
   GET /pay/{id}/done     — Xendit success-redirect fallback
@@ -89,7 +89,7 @@ def _render_shell(title: str, body_html: str) -> str:
 </head>
 <body>
 <main>
-  <div class="brand">Jaringan Dagang &middot; Oito</div>
+  <div class="brand">OITO</div>
   {body_html}
 </main>
 </body>
@@ -140,7 +140,7 @@ async def pay_page(order_id: str, db: AsyncSession = Depends(get_db)) -> HTMLRes
   <div class="qr"><img src="{qr_src}" alt="Kode QRIS" width="240" height="240"></div>
   <div class="row"><span class="label">Berlaku</span><span id="expires">&mdash;</span></div>
   <p id="state" class="note"><span class="spin"></span>Menunggu pembayaran&hellip; halaman ini akan berpindah otomatis setelah pembayaran berhasil.</p>
-  <p class="note">Pindai kode QRIS dengan aplikasi bank atau e-wallet Anda. Pembayaran diproses melalui Dipay atas nama Jaringan Dagang (Oito).
+  <p class="note">Pindai kode QRIS dengan aplikasi bank atau e-wallet Anda. Pembayaran diproses melalui Dipay untuk pesanan di OITO.
      Jangan tutup halaman ini sebelum pembayaran selesai.</p>
   <script>
     var orderId = {order_js};
@@ -180,7 +180,7 @@ async def pay_page(order_id: str, db: AsyncSession = Depends(get_db)) -> HTMLRes
   <div class="row"><span class="label">Order</span><span>{html.escape(order.external_order_id[:24])}</span></div>
   <a id="payBtn" class="btn" href="#">Bayar Sekarang</a>
   <p id="state" class="note"><span class="spin"></span>Menunggu pembayaran&hellip; halaman ini akan berpindah otomatis setelah pembayaran berhasil.</p>
-  <p class="note">Pembayaran diproses oleh Xendit (PJP berlisensi) atas nama Jaringan Dagang (Oito).
+  <p class="note">Pembayaran diproses melalui Xendit (PJP berlisensi) untuk pesanan di OITO.
      Jangan tutup halaman ini sebelum pembayaran selesai.</p>
   <script>
     var orderId = {order_js};
@@ -220,7 +220,7 @@ async def pay_page(order_id: str, db: AsyncSession = Depends(get_db)) -> HTMLRes
         .catch(function () {{}});
     }}, 4000);
   </script>"""
-    return HTMLResponse(content=_render_shell("Bayar pesanan · Jaringan Dagang", body))
+    return HTMLResponse(content=_render_shell("Bayar pesanan · OITO", body))
 
 
 @router.get("/{order_id}/pay-target", include_in_schema=False)
@@ -293,7 +293,7 @@ async def pay_failed(order_id: str, db: AsyncSession = Depends(get_db)) -> HTMLR
     order = await _load_order(db, order_id)
     back = f"/pay/{html.escape(order.id)}"
     return HTMLResponse(content=_render_shell(
-        "Pembayaran belum selesai",
+        "Pembayaran belum selesai · OITO",
         f"""<h1>Pembayaran belum selesai</h1>
   <p class="desc">Pembayaran untuk pesanan ini belum berhasil. Silakan coba lagi.</p>
   <a class="btn" href="{back}">Kembali ke halaman pembayaran</a>""",

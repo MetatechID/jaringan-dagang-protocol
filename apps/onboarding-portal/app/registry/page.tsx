@@ -114,7 +114,7 @@ export default function RegistryExplorer() {
             Registry Explorer
           </h1>
           <p className="text-sm text-slate-400 mt-1">
-            Browse and search all participants registered on the Jaringan Dagang
+            Browse and search all participants registered on the OITO
             network
           </p>
         </div>

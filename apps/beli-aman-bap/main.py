@@ -123,7 +123,7 @@ app = FastAPI(
     title="Beli Aman BAP",
     description=(
         "Buyer-protection layer for Indonesian DTC commerce. "
-        "Built on the Jaringan Dagang Beckn-protocol open commerce network."
+        "Built on the OITO Beckn-protocol open commerce network."
     ),
     version="0.1.0",
     lifespan=lifespan,

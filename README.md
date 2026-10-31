@@ -1,4 +1,7 @@
-# jaringan-dagang-protocol
+# OITO protocol
+
+Source repository: `MetatechID/jaringan-dagang-protocol`. Existing package names
+and network subscriber identifiers remain unchanged.
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 

@@ -1,6 +1,6 @@
 """StoreMembership — the network-wide ACL, owned by Beli Aman (the IdP).
 
-Beli Aman is the identity provider for the whole Jaringan Dagang network.
+Beli Aman is the identity provider for the whole OITO network.
 A person signs in once ("Sign in with Beli Aman"); their permissions on each
 toko are these rows. Both the seller dashboard and the buyer-side Vibe editor
 resolve "what can this person do for store X" from here.
