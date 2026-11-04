@@ -90,7 +90,7 @@ export function Navigation() {
             </div>
             <div>
               <span className="text-base font-bold text-white tracking-tight">
-                Jaringan Dagang
+                OITO
               </span>
               <span className="hidden sm:block text-[10px] font-medium text-cyan-400/70 tracking-widest uppercase">
                 Network Dashboard

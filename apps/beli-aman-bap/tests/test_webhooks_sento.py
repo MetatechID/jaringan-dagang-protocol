@@ -14,7 +14,7 @@ endpoints. Covers:
 - /invoice FAILED/CLOSED → cart.payment_state='failed'
 - 400 / 404 / 401 / 200 error paths
 - Status verification: sento_client.get_status called before mutation;
-  SentoError(404) → 404 to caller; other SentoError → proceed defensively
+  SentoError(404) → 404 to caller; other query errors → retryable 503
 - Brand resolution (cart-branch, order-snapshot-branch, no-match)
 - Payment Link shape: lowercase ``status`` field on body, flat response
 
@@ -35,6 +35,7 @@ _BAP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _BAP_DIR not in sys.path:
     sys.path.insert(0, _BAP_DIR)
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -97,7 +98,9 @@ def _stub_status_check(
     ):
         if raises is not None:
             raise raises
-        return returns or {"status": "complete", "partner_tx_id": partner_tx_id}
+        return {"partner_tx_id": partner_tx_id, **(
+            returns if returns is not None else {"status": "complete"}
+        )}
 
     monkeypatch.setattr(sento_client, "get_status", _fake_get_status)
     return _fake_get_status
@@ -117,7 +120,7 @@ class TestInvoiceCallbackComplete:
         _stub_brand_lookup(monkeypatch, brand)
         _stub_status_check(
             monkeypatch,
-            returns={"status": "complete", "partner_tx_id": "order-ord-1"},
+            returns={"status": "complete", "partner_tx_id": "order-ord-1", "tx_ref_number": "STX-1"},
         )
 
         captured: dict = {}
@@ -157,7 +160,7 @@ class TestInvoiceCallbackComplete:
         _stub_brand_lookup(monkeypatch, brand)
         _stub_status_check(
             monkeypatch,
-            returns={"status": "complete"},
+            returns={"status": "complete", "amount": 100000, "currency": "IDR"},
         )
 
         body = json.dumps({
@@ -193,7 +196,7 @@ class TestInvoiceCallbackComplete:
         _stub_brand_lookup(monkeypatch, brand)
         _stub_status_check(
             monkeypatch,
-            returns={"status": "complete"},  # status-api shape; body drives dispatch
+            returns={"status": "expired"},
         )
 
         body = json.dumps({
@@ -218,7 +221,7 @@ class TestInvoiceCallbackComplete:
         _stub_brand_lookup(monkeypatch, brand)
         _stub_status_check(
             monkeypatch,
-            returns={"status": "complete"},
+            returns={"status": "failed"},
         )
 
         body = json.dumps({
@@ -336,7 +339,7 @@ class TestInvoiceCallbackComplete:
         _stub_brand_lookup(monkeypatch, brand)
         _stub_status_check(
             monkeypatch,
-            returns={"status": "processing"},
+            returns={"status": "charge_in_progress"},
         )
 
         body = json.dumps({
@@ -451,11 +454,10 @@ class TestStatusVerification:
         )
         assert resp.status_code == 404
 
-    def test_proceeds_with_status_from_body_if_get_status_fails_for_other_reason(
+    def test_fails_closed_if_get_status_fails_for_other_reason(
         self, monkeypatch, client,
     ):
-        """Non-404 SentoError from get_status → proceed with body
-        status (defensive: webhooks are advisory, status API may be transient)."""
+        """A transient verification error cannot authorize a payment."""
         client_, app = client
         brand = StubBrand()
         cart = StubCart(payment_state="pending")
@@ -478,8 +480,8 @@ class TestStatusVerification:
             content=body,
             headers={"Content-Type": "application/json"},
         )
-        assert resp.status_code == 200, resp.text
-        assert cart.payment_state == "paid"
+        assert resp.status_code == 503, resp.text
+        assert cart.payment_state == "pending"
 
 
 # ---- Brand resolution branches --------------------------------------------
@@ -516,3 +518,171 @@ class TestResolveBrand:
         db = FakeSession([None, None])
         result = await _resolve_brand_for_invoice_id(db, "stx-unknown")
         assert result is None
+
+
+@pytest.mark.parametrize("provider, expected", [
+    ({"status": "waiting_payment"}, 200),
+    ({"status": "failed"}, 200),
+    ({"status": "complete", "partner_tx_id": "another"}, 503),
+    ({"status": "complete", "partner_tx_id": None}, 503),
+    ({"status": "nonsense"}, 503),
+    ({"status": {}}, 503),
+    ({}, 503),
+    (SentoError(500, "unavailable"), 503),
+    (SentoError(401, "credentials"), 503),
+    (ValueError("invalid JSON"), 503),
+    (httpx.ReadTimeout("timeout"), 503),
+    (httpx.ConnectError("offline"), 503),
+])
+def test_invoice_body_success_cannot_authorize(monkeypatch, client, provider, expected):
+    client_, app = client
+    cart = StubCart()
+    session = _patch_db(app, monkeypatch, cart, None)
+    _stub_brand_lookup(monkeypatch, StubBrand())
+    if isinstance(provider, Exception):
+        _stub_status_check(monkeypatch, raises=provider)
+    else:
+        _stub_status_check(monkeypatch, returns=provider)
+    response = client_.post("/webhooks/sento/invoice", json={
+        "partner_tx_id": f"cart-{cart.id}", "status": "success",
+        "tx_ref_number": "forged", "amount": 100000,
+    })
+    assert response.status_code == expected
+    assert cart.payment_state == ("failed" if provider == {"status": "failed"} else "pending")
+    assert not session.added
+    assert not session.committed
+
+
+@pytest.mark.parametrize("provider", [None, [], "bad", {"status": "complete", "amount": 1},
+    {"status": "complete", "amount": True}, {"status": "complete", "amount": "NaN"},
+    {"status": "complete", "currency": "USD"},
+    {"status": "complete"},  # no echoed lookup key
+])
+def test_invoice_malformed_or_wrong_value_has_no_effects(monkeypatch, client, provider):
+    client_, app = client
+    cart = StubCart()
+    session = _patch_db(app, monkeypatch, cart, None)
+    _stub_brand_lookup(monkeypatch, StubBrand())
+    async def query(**kwargs):
+        if isinstance(provider, dict) and provider != {"status": "complete"}:
+            return {"partner_tx_id": kwargs["partner_tx_id"], **provider}
+        return provider
+    monkeypatch.setattr(sento_client, "get_status", query)
+    response = client_.post("/webhooks/sento/invoice", json={
+        "partner_tx_id": f"cart-{cart.id}", "status": "success",
+    })
+    assert response.status_code == 503
+    assert cart.payment_state == "pending"
+    assert not session.added
+
+
+@pytest.mark.parametrize("code, expected", [("000", "COMPLETED"), ("300", "FAILED"),
+    ("301", "PENDING"), ("101", "PENDING"), ("102", "PENDING")])
+def test_remit_provider_controls_settlement(monkeypatch, client, code, expected):
+    from models.escrow_ledger import EscrowEntryStatus
+    client_, app = client
+    row = SimpleNamespace(status=EscrowEntryStatus.PENDING, external_ref="provider-trx",
+                          description="release", amount_idr=750000)
+    _patch_db(app, monkeypatch, StubOrder(id="ord-1"), StubBrand(), row)
+    async def query(*, partner_trx_id, api_key, username):
+        assert partner_trx_id == "order-ord-1-release"
+        return {"status": {"code": code}, "partner_trx_id": partner_trx_id,
+                "trx_id": "provider-trx", "amount": 750000}
+    monkeypatch.setattr(sento_client, "get_disbursement_status", query)
+    response = client_.post("/webhooks/sento/remit", json={
+        "partner_tx_id": "order-ord-1-release", "status": {"code": "000"},
+        "trx_id": "forged", "receipt_url": "forged", "tx_status_description": "forged",
+    })
+    assert response.status_code == 200, response.text
+    assert row.status.name == expected
+    assert row.external_ref == "provider-trx"
+    assert "forged" not in row.description
+
+
+@pytest.mark.parametrize("provider, expected", [
+    (SentoError(500, "down"), 503), (SentoError(404, "unknown"), 404),
+    (ValueError("JSON"), 503), (httpx.ReadTimeout("timeout"), 503),
+    (httpx.ConnectError("offline"), 503), (None, 503), ([], 503), ({}, 503),
+    ({"status": "000"}, 503), ({"status": {"code": "204"}}, 404),
+    ({"status": {"code": "unknown"}}, 503),
+    ({"partner_trx_id": "another"}, 503), ({"amount": 1}, 503),
+    ({"currency": "USD"}, 503), ({"trx_id": "another"}, 503),
+])
+def test_remit_unverified_response_has_no_effects(monkeypatch, client, provider, expected):
+    from models.escrow_ledger import EscrowEntryStatus
+    client_, app = client
+    row = SimpleNamespace(status=EscrowEntryStatus.PENDING, external_ref="provider-trx",
+                          description="release", amount_idr=750000)
+    session = _patch_db(app, monkeypatch, StubOrder(id="ord-1"), StubBrand(), row)
+    async def query(*, partner_trx_id, **kwargs):
+        if isinstance(provider, Exception):
+            raise provider
+        if isinstance(provider, dict) and provider and "status" not in provider:
+            return {"status": {"code": "000"}, "partner_trx_id": partner_trx_id,
+                    "trx_id": "provider-trx", "amount": 750000, **provider}
+        return provider
+    monkeypatch.setattr(sento_client, "get_disbursement_status", query)
+    response = client_.post("/webhooks/sento/remit", json={
+        "partner_tx_id": "order-ord-1-release", "status": {"code": "000"},
+    })
+    assert response.status_code == expected
+    assert row.status == EscrowEntryStatus.PENDING
+    assert row.external_ref == "provider-trx"
+    assert row.description == "release"
+    assert not session.added and not session.committed
+
+
+@pytest.mark.parametrize("amount, expected", [(750000, 200), ("750000.00", 200), (1, 503)])
+def test_order_amount_and_reference_are_provider_only(monkeypatch, client, amount, expected):
+    client_, app = client
+    session = _patch_db(app, monkeypatch, StubOrder(id="ord-1"))
+    _stub_brand_lookup(monkeypatch, StubBrand())
+    _stub_status_check(monkeypatch, returns={"status": "complete", "amount": amount,
+                                           "currency": "IDR", "tx_ref_number": "verified"})
+    calls = []
+    async def paid(db, **kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(id="ord-1", state=SimpleNamespace(value="ESCROW_HELD"))
+    monkeypatch.setattr("routers.webhooks_sento.order_paid.mark_order_paid", paid)
+    response = client_.post("/webhooks/sento/invoice", json={
+        "partner_tx_id": "order-ord-1", "status": "failed", "amount": 1,
+        "currency": "USD", "tx_ref_number": "forged",
+    })
+    assert response.status_code == expected
+    if expected == 200:
+        assert calls[0]["invoice_id"] == "verified"
+    else:
+        assert not calls and not session.added
+
+
+@pytest.mark.asyncio
+async def test_verification_failure_uses_database_rollback(monkeypatch):
+    import database
+    from fastapi import HTTPException
+    from routers.webhooks_sento import invoice_callback
+    session = FakeSession([])
+    session.rolled_back = False
+    async def rollback():
+        session.rolled_back = True
+    session.rollback = rollback
+    class Context:
+        async def __aenter__(self):
+            return session
+        async def __aexit__(self, *args):
+            return False
+    monkeypatch.setattr(database, "async_session", Context)
+    _stub_brand_lookup(monkeypatch, StubBrand())
+    _stub_status_check(monkeypatch, raises=httpx.ReadTimeout("timeout"))
+    class Request:
+        async def body(self):
+            return b'{}'
+        async def json(self):
+            return {"partner_tx_id": "order-ord-1", "status": "success"}
+    dependency = database.get_db()
+    db = await anext(dependency)
+    with pytest.raises(HTTPException) as error:
+        await invoice_callback(Request(), db=db)
+    assert error.value.status_code == 503
+    with pytest.raises(HTTPException):
+        await dependency.athrow(error.value)
+    assert session.rolled_back and not session.committed and not session.added

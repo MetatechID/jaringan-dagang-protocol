@@ -7,6 +7,115 @@ on:
     branches: [main]
 
 jobs:
+  partner-return-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          python -m venv apps/beli-aman-bap/.venv
+          apps/beli-aman-bap/.venv/bin/pip install -r apps/beli-aman-bap/requirements.txt 'pytest>=8,<9' 'pytest-asyncio>=0.24,<0.25' build
+          apps/beli-aman-bap/.venv/bin/python -m build --wheel --outdir /tmp/beckn-wheels packages/beckn-protocol-py
+          apps/beli-aman-bap/.venv/bin/pip install /tmp/beckn-wheels/*.whl
+      - run: env -i PATH=/usr/bin:/bin apps/beli-aman-bap/.venv/bin/python -I apps/beli-aman-bap/scripts/test_partner_returns_offline.py
+
+  sento-verification:
+    name: Sento authoritative callbacks (offline)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          python -m venv apps/beli-aman-bap/.venv
+          apps/beli-aman-bap/.venv/bin/pip install -r apps/beli-aman-bap/requirements.txt 'pytest>=8,<9' 'pytest-asyncio>=0.24,<0.25' build
+          apps/beli-aman-bap/.venv/bin/python -m build --wheel --outdir /tmp/beckn-wheels packages/beckn-protocol-py
+          apps/beli-aman-bap/.venv/bin/pip install /tmp/beckn-wheels/*.whl
+      - run: env -i PATH=/usr/bin:/bin apps/beli-aman-bap/.venv/bin/python -I apps/beli-aman-bap/scripts/test_sento_offline.py
+
+  jd-036-provider-webhook-auth:
+    name: Provider webhook authentication
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r apps/beli-aman-bap/requirements.txt ./packages/beckn-protocol-py pytest
+      - name: Run isolated provider auth regressions
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: python -m pytest -p no:cacheprovider apps/beli-aman-bap/tests/test_provider_webhook_auth.py -q
+
+  jd-005-production-mock-routes:
+    name: BAP — production mock route exclusion
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r apps/beli-aman-bap/requirements.txt ./packages/beckn-protocol-py pytest
+      - name: Test real application lifespan and all mock routes offline
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+        run: python -m pytest -p no:cacheprovider apps/beli-aman-bap/tests/test_production_mock_routes.py -q
+
+  jd-012-dipay-verification:
+    name: Dipay — fail-closed callback verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install app requirements and canonical protocol wheel
+        run: |
+          python -m pip install -r apps/beli-aman-bap/requirements.txt ./packages/beckn-protocol-py pytest
+          python -m pip check
+      - name: Run offline webhook regressions with pre-import isolation
+        run: python apps/beli-aman-bap/scripts/test_dipay_webhooks.py
+
+  bap-startup-guards:
+    name: BAP — production startup guards (Python 3.12)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ENVIRONMENT: test
+      DEBUG: "false"
+      BAP_PRODUCTION_DEPLOYMENT: "false"
+      ADMIN_TOKEN: synthetic-ci-admin-token
+      SELLER_BRIDGE_TOKEN: synthetic-ci-seller-bridge-token
+      DATABASE_URL: postgresql+asyncpg://test:test@127.0.0.1:1/test
+      BECKN_WORKERS_ENABLED: "false"
+      SKIP_CREATE_ALL: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Match the app image: requirements wheels plus the canonical local wheel,
+      # not the bootstrap workspace or a source-tree PYTHONPATH substitute.
+      - name: Build and install application dependencies
+        run: |
+          python -m pip wheel --wheel-dir "$RUNNER_TEMP/bap-wheels" -r apps/beli-aman-bap/requirements.txt
+          python -m pip wheel --no-deps --wheel-dir "$RUNNER_TEMP/bap-wheels" ./packages/beckn-protocol-py
+          python -m pip install --no-index "$RUNNER_TEMP"/bap-wheels/*.whl
+          python -m pip install pytest
+          python -m pip check
+      - name: Run isolated startup guards (no services or real dotenv)
+        working-directory: ${{ runner.temp }}
+        run: python -m pytest "$GITHUB_WORKSPACE/apps/beli-aman-bap/tests/test_production_startup_guards.py" -q
+
   js:
     name: JS — build · lint · test
     runs-on: ubuntu-latest
@@ -25,6 +134,26 @@ jobs:
       - run: pnpm run build || true
       - run: pnpm run lint || true
       - run: pnpm run test || true
+
+  dipay-callback-key:
+    name: Dipay callback verification completeness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install BAP dependencies and canonical wheel
+        run: |
+          python -m venv apps/beli-aman-bap/.venv
+          apps/beli-aman-bap/.venv/bin/python -m pip wheel --no-deps ./packages/beckn-protocol-py --wheel-dir /tmp/protocol-wheel
+          apps/beli-aman-bap/.venv/bin/python -m pip install /tmp/protocol-wheel/*.whl -r apps/beli-aman-bap/requirements.txt pytest pytest-asyncio
+      - name: Run isolated offline Dipay regressions (blocking)
+        run: >-
+          apps/beli-aman-bap/.venv/bin/python -I
+          apps/beli-aman-bap/scripts/test-dipay-callback-key.py
+          test_dipay_callback_key.py test_dipay_client.py test_dipay_invoices.py
+          test_webhooks_dipay.py test_routes_dipay_invoice.py
 
   python:
     name: Python — lint · test

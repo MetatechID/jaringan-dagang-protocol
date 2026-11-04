@@ -1,4 +1,4 @@
-# jaringan-dagang-protocol — technical architecture
+# OITO protocol — technical architecture
 
 > Apache-2.0. For runnable Indonesian-commerce reference deployments
 > built on this, see [`MetatechID/jaringan-dagang`](https://github.com/MetatechID/jaringan-dagang)

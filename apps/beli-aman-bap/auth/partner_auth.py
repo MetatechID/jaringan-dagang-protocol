@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import hmac
 
-from fastapi import Depends, HTTPException, Header, status
+from fastapi import Depends, HTTPException, Header, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,6 +30,7 @@ from models.brand import Brand
 
 
 async def require_partner(
+    request: Request,
     authorization: str | None = Header(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> Brand:
@@ -52,6 +53,8 @@ async def require_partner(
         if hmac.compare_digest(
             presented.encode("utf-8"), brand.partner_api_key.encode("utf-8")
         ):
+            from services.webhook_audit import attach
+            attach(request, brand=brand)
             return brand
 
     raise HTTPException(

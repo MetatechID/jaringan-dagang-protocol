@@ -8,7 +8,9 @@ COPY packages/beckn-protocol-py /src/beckn-protocol-py
 RUN pip wheel --no-deps --wheel-dir /wheels /src/beckn-protocol-py
 
 FROM python:3.12-slim AS runtime
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 SKIP_CREATE_ALL=true DEBUG=false
+# Deployment-owned signal, independent of mutable application ENVIRONMENT.
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 SKIP_CREATE_ALL=true DEBUG=false \
+    BAP_PRODUCTION_DEPLOYMENT=true ENVIRONMENT=production
 WORKDIR /app
 RUN groupadd --gid 10001 app && useradd --uid 10001 --gid app --no-create-home app
 COPY --from=builder /wheels /wheels

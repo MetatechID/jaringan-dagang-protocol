@@ -274,7 +274,7 @@ export default function SpecsPage() {
             Indonesia Network Extension Specs
           </h1>
           <p className="text-sm text-slate-400 mt-1">
-            Domain-specific configurations for the Jaringan Dagang network --
+            Domain-specific configurations for the OITO network --
             cities, payment methods, logistics providers, and categories adapted
             for Indonesia
           </p>

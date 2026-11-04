@@ -5,24 +5,19 @@ All routes here are signature-verified + idempotent.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 import re
-import sys
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# Make the beckn-protocol package importable from the buyer monorepo root.
-_proto_path = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "..", "packages", "beckn-protocol")
-)
-if _proto_path not in sys.path:
-    sys.path.insert(0, _proto_path)
-
-from beckn_protocol import RegistryClient, SubscriberNotFound, verify_request  # noqa: E402
+from jaringan_dagang_beckn import RegistryClient, SubscriberNotFound, verify_request  # noqa: E402
+from routers.beckn_ownership import VerifiedContext, authorize_resources
 
 from config import settings  # noqa: E402
 from database import async_session  # noqa: E402
@@ -115,12 +110,11 @@ def _extract_subscriber_id(auth: str) -> str | None:
     return m.group(1).split("|")[0]
 
 
-async def _verify(request: Request, body: bytes) -> str | None:
+async def _verify(request: Request, body: bytes) -> str:
     auth = request.headers.get("authorization") or request.headers.get("Authorization")
     if not auth:
-        if REQUIRE_SIGNATURE:
-            raise HTTPException(401, "Missing Authorization header")
-        return None
+        # Unsigned callbacks have no principal and cannot authorize mutations.
+        raise HTTPException(401, "Missing Authorization header")
     sid = _extract_subscriber_id(auth)
     if not sid:
         raise HTTPException(401, "Malformed Authorization header")
@@ -129,10 +123,8 @@ async def _verify(request: Request, body: bytes) -> str | None:
     except SubscriberNotFound:
         raise HTTPException(401, f"Unknown subscriber: {sid}")
     except Exception:
-        if REQUIRE_SIGNATURE:
-            logger.exception("Registry lookup failed for %s", sid)
-            raise HTTPException(503, "Registry lookup failed")
-        return sid
+        logger.exception("Registry lookup failed for %s", sid)
+        raise HTTPException(503, "Registry lookup failed")
     if not verify_request(body, auth, sub.signing_public_key_b64):
         raise HTTPException(401, "Invalid Beckn signature")
     return sid
@@ -182,48 +174,62 @@ _BECKN_ACTIONS = (
 def _make_endpoint(action: str):
     async def handler(request: Request):
         raw = await request.body()
-        bpp_id = await _verify(request, raw)
-        body = await request.json()
-        ctx = body.get("context", {}) or {}
-        message_id = ctx.get("message_id", "")
+        signer = await _verify(request, raw)
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                raise ValueError()
+            context = body["context"]
+            message = body.get("message", {})
+            if not isinstance(context, dict) or not isinstance(message, dict):
+                raise ValueError()
+            for field in ("message_id", "transaction_id"):
+                if not isinstance(context.get(field), str) or not context[field].strip():
+                    raise ValueError()
+        except (ValueError, TypeError, KeyError):
+            raise HTTPException(400, "Invalid Beckn envelope")
+        if context.get("bpp_id") != signer or context.get("bap_id") != settings.subscriber_id:
+            raise HTTPException(403, "Beckn participant identity mismatch")
+        if context.get("action") != action:
+            raise HTTPException(400, "Beckn action mismatch")
+        ctx = VerifiedContext(context, signer)
+        # Keep the existing unique message_id column schema while namespacing
+        # retries by their verified identity and protocol correlation fields.
+        message_id = hashlib.sha256(json.dumps([
+            signer, action, ctx["transaction_id"], ctx["message_id"],
+        ], separators=(",", ":")).encode()).hexdigest()
 
         async with async_session() as db:
-            cached = await _idempotent(db, message_id)
-            if cached is not None:
-                return cached
-
-            # Phase 2/3/4/5 will plug real handlers here.
-            # For now: ACK + record the inbound log so dedupe works.
-            response = _ack()
-            from routers import beckn_handlers
-            real = getattr(beckn_handlers, f"handle_{action}", None)
-            if real is not None:
-                try:
-                    handler_response = await real(ctx, body.get("message", {}), db)
+            try:
+                # Authorization precedes dedupe so an old ACK cannot bypass a
+                # changed owner/resource boundary.
+                await authorize_resources(action, ctx, message, db)
+                cached = await _idempotent(db, message_id)
+                if cached is not None:
+                    return cached
+                response = _ack()
+                from routers import beckn_handlers
+                real = getattr(beckn_handlers, f"handle_{action}", None)
+                if real is not None:
+                    handler_response = await real(ctx, message, db)
                     if handler_response is not None:
                         response = handler_response
-                    await db.commit()
-                except Exception:
-                    logger.exception("buyer %s handler failed", action)
-                    await db.rollback()
-
-            log = BecknInboundLog(
-                message_id=message_id,
-                transaction_id=ctx.get("transaction_id"),
-                action=action,
-                bpp_id=ctx.get("bpp_id") or bpp_id,
-                bap_id=ctx.get("bap_id"),
-                response_status=200,
-                response_body=response,
-                received_at=datetime.now(timezone.utc),
-            )
-            db.add(log)
-            try:
+                db.add(BecknInboundLog(
+                    message_id=message_id,
+                    transaction_id=ctx["transaction_id"], action=action,
+                    bpp_id=signer, bap_id=ctx["bap_id"], response_status=200,
+                    response_body=response, received_at=datetime.now(timezone.utc),
+                ))
+                # Effects and success record commit together. Failed work is
+                # never acknowledged or recorded as a completed retry.
                 await db.commit()
-            except Exception:
-                logger.exception("failed to log inbound message %s", message_id)
+            except HTTPException:
                 await db.rollback()
-
+                raise
+            except Exception:
+                await db.rollback()
+                logger.exception("buyer %s callback failed", action)
+                raise HTTPException(500, "Beckn callback processing failed")
         return response
 
     handler.__name__ = f"beckn_{action}"

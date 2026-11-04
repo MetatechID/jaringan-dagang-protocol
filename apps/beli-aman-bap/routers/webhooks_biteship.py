@@ -13,6 +13,7 @@ Status mapping:
 
 from __future__ import annotations
 
+import hmac
 import logging
 from datetime import datetime, timezone
 
@@ -41,15 +42,18 @@ def _verify(authorization: str | None, token_query: str | None) -> None:
     accepted as a fallback if a future Biteship release does set Authorization.
     """
     expected = settings.biteship_webhook_token
-    if not expected:
+    if not expected or not expected.strip():
         raise HTTPException(503, "BITESHIP_WEBHOOK_TOKEN not configured")
     candidates = {
         authorization,
         authorization.removeprefix("Bearer ") if authorization else None,
         token_query,
     }
-    if expected in candidates:
-        return
+    for candidate in candidates:
+        if candidate and hmac.compare_digest(
+            candidate.encode("utf-8"), expected.encode("utf-8")
+        ):
+            return
     raise HTTPException(401, "Invalid Biteship webhook token")
 
 

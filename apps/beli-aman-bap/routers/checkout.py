@@ -93,6 +93,9 @@ async def confirm_cart(
     ).scalar_one_or_none()
     if cart is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Cart not found")
+    from services.payment_policy import invoice_mock_mode, reject_nonlocal_demo_invoice
+
+    reject_nonlocal_demo_invoice(cart.invoice_id, cart.qr_image_url)
     if cart.status == CartStatus.CONFIRMED:
         # Idempotent — return the existing handle.
         return ConfirmOut(
@@ -111,6 +114,13 @@ async def confirm_cart(
             status.HTTP_409_CONFLICT,
             f"Cart in state {cart.status.value} — cannot /confirm",
         )
+
+    # Preflight before Beckn confirmation and before changing cart state.
+    brand_q = await db.execute(select(Brand).where(Brand.bpp_id == cart.bpp_id))
+    brand = brand_q.scalars().first()
+    provider = (brand.payment_provider if brand is not None else "xendit") or "xendit"
+    if provider != "dipay":
+        invoice_mock_mode(provider if provider in {"oy", "sento"} else "xendit", brand)
 
     quote_token = body.quote_token or cart.quote_token
     pseudo_order_id = str(uuid.uuid4())
@@ -145,11 +155,6 @@ async def confirm_cart(
     # Mint the brand provider's payment surface. Hosted providers return a
     # checkout page; Dipay returns a durable QRIS renderer URL plus raw QRIS
     # content. Only a verified provider webhook can mark the cart paid.
-    brand_q = await db.execute(
-        select(Brand).where(Brand.bpp_id == cart.bpp_id)
-    )
-    brand = brand_q.scalars().first()
-    provider = (brand.payment_provider if brand is not None else "xendit") or "xendit"
     try:
         if provider == "oy":
             from services import oy_invoices as _invoice_mod

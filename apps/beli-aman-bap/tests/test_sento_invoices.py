@@ -384,6 +384,9 @@ class TestMockModeMatrix:
             mock_checkout_public_base="http://x",
             sento_invoice_duration_seconds=86400,
         )
+        from config import settings
+        monkeypatch.setattr(settings, "sento_api_key", fake_settings.sento_api_key)
+        monkeypatch.setattr(settings, "sento_default_username", fake_settings.sento_default_username)
         monkeypatch.setattr(sento_invoices, "settings", fake_settings)
         monkeypatch.setattr(
             sento_invoices.sento_client, "create_invoice", fake_create_invoice,
@@ -407,6 +410,9 @@ class TestMockModeMatrix:
             mock_checkout_public_base="http://x",
             sento_invoice_duration_seconds=86400,
         )
+        from config import settings
+        monkeypatch.setattr(settings, "sento_api_key", fake_settings.sento_api_key)
+        monkeypatch.setattr(settings, "sento_default_username", fake_settings.sento_default_username)
         monkeypatch.setattr(sento_invoices, "settings", fake_settings)
         monkeypatch.setattr(
             sento_invoices.sento_client, "create_invoice", fake_create_invoice,

@@ -43,17 +43,9 @@ def _customer_fields(cart: Cart) -> tuple[str | None, str | None]:
 
 
 def _mock_mode(brand: Brand | None) -> bool:
-    # Real OY needs (a) brand row, (b) oy_api_key (env or per-Brand),
-    # (c) a brand.xendit_sub_account_id-shaped routing key. While the OY
-    # account is pending verification, fall back to the mock-checkout page
-    # so the bot still surfaces a clickable URL.
-    if brand is None:
-        return True
-    if brand.payment_provider != "oy":
-        return True
-    has_env_key = bool(getattr(settings, "oy_api_key", ""))
-    has_brand_key = bool(getattr(brand, "oy_api_key", None))
-    return not (has_env_key or has_brand_key)
+    from services.payment_policy import invoice_mock_mode
+
+    return invoice_mock_mode("oy", brand)
 
 
 async def create_invoice_for_cart(db: AsyncSession, cart: Cart) -> dict:
@@ -135,17 +127,7 @@ async def create_invoice_for_order(db: AsyncSession, order: Order) -> dict:
     brand_q = await db.execute(select(Brand).where(Brand.id == order.brand_id))
     brand = brand_q.scalar_one_or_none()
 
-    # ponytail: mock-mode fallback mirrors the cart path below. Without
-    # this, /invoice 500s whenever OY_API_KEY is empty (local dev) or
-    # the brand row hasn't been onboarded. The dispatcher's
-    # `if provider == "oy"` already guarantees this code path only
-    # runs for OY brands, so the strict `payment_provider != "oy"`
-    # guard from earlier turns is redundant — and a footgun during
-    # provider flips. Drop both strict checks; the mock branch
-    # handles brand-missing and OY-unconfigured uniformly. If the
-    # dispatcher ever routes an OY service call for a non-OY brand,
-    # that's a real bug; fall through and let the OY API reject it
-    # (or hit the mock branch).
+    # Share cart policy: local fixtures only; other modes fail before mutation.
     if _mock_mode(brand):
         mock_base = (
             getattr(settings, "mock_checkout_public_base", None)

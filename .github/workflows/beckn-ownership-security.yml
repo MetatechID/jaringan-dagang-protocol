@@ -1,0 +1,30 @@
+name: Beckn signer ownership security
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  beckn-ownership-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install canonical protocol wheel and test dependencies
+        run: |
+          python -m venv apps/beli-aman-bap/.venv
+          apps/beli-aman-bap/.venv/bin/python -m pip wheel --no-deps --wheel-dir /tmp/beckn-wheels ./packages/beckn-protocol-py
+          apps/beli-aman-bap/.venv/bin/python -m pip install /tmp/beckn-wheels/*.whl -r apps/beli-aman-bap/requirements.txt pytest pytest-asyncio aiosqlite
+      - name: Run isolated signature and ownership regressions
+        run: >-
+          apps/beli-aman-bap/.venv/bin/python -I
+          apps/beli-aman-bap/scripts/test-beckn-ownership-security.py
+          tests/test_beckn_ownership_security.py
+          tests/test_handle_on_issue.py
+          tests/test_order_flow_envelopes.py
+          tests/test_bot_rest_routes.py::TestHandleOnConfirmCartLinkage

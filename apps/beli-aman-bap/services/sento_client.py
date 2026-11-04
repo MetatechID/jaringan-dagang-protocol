@@ -68,15 +68,21 @@ async def _request(
     params: dict | None = None,
 ) -> dict:
     """Thin httpx wrapper. Raises SentoError on non-2xx."""
-    if not api_key and not settings.sento_api_key:
+    from services.payment_policy import credential
+
+    api_key = credential(api_key, settings.sento_api_key)
+    username = credential(username, settings.sento_default_username)
+    if not api_key:
         raise SentoError(0, "SENTO_API_KEY not configured (env or Brand.sento_api_key)")
+    if not username:
+        raise SentoError(0, "Sento username not configured")
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.request(
             method,
             f"{_base_url()}{path}",
             headers=_headers(
-                api_key=api_key or settings.sento_api_key,
-                username=username or settings.sento_default_username,
+                api_key=api_key,
+                username=username,
             ),
             json=json,
             params=params,

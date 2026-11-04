@@ -100,7 +100,7 @@ def _api_base() -> str:
 
 
 def _require_creds() -> None:
-    if settings.jubelio_client_id and settings.jubelio_client_secret:
+    if settings.jubelio_client_id.strip() and settings.jubelio_client_secret.strip():
         return
     if settings.environment in ("test", "development"):
         return
@@ -242,11 +242,14 @@ async def get_rates(
             resp.raise_for_status()
             data = resp.json()
     except Exception as e:  # noqa: BLE001
-        logger.warning("Jubelio rates call failed (%s); falling back to mock", e)
-        return _mock_rates(items)
+        if settings.environment.strip().lower() in {"development", "test"}:
+            return _mock_rates(items)
+        raise ShippingError("Jubelio rates unavailable") from e
 
     out: list[dict[str, Any]] = []
-    for rate in data if isinstance(data, list) else []:
+    if not isinstance(data, list) or any(not isinstance(rate, dict) for rate in data):
+        raise ShippingError("Jubelio returned malformed shipping rates")
+    for rate in data:
         out.append({
             "carrier": "jubelio",
             "courier_code": str(rate.get("courier_id")),
@@ -256,9 +259,13 @@ async def get_rates(
             "duration": _eta_label(rate),
             # Per the contract note: the charged amount is "rates", not
             # "final_rates".
-            "price": int(rate.get("rates") or 0),
+            "price": rate.get("rates"),
         })
-    return out or _mock_rates(items)
+    if not out:
+        if settings.environment.strip().lower() in {"development", "test"}:
+            return _mock_rates(items)
+        raise ShippingError("Jubelio returned no shipping rates")
+    return out
 
 
 def _eta_label(rate: dict[str, Any]) -> str:

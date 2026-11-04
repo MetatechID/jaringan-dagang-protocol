@@ -5,14 +5,20 @@ local development. The Beli Aman BAP runs on port 8003 by default to
 avoid colliding with the JD BAP (8002).
 """
 
-from pydantic import field_validator, model_validator
+import os
+from typing import Literal
+
+from pydantic import TypeAdapter, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
-    model_config = {"env_prefix": "", "env_file": ".env", "extra": "ignore"}
+    model_config = {
+        "env_prefix": "", "env_file": ".env", "extra": "ignore",
+        "hide_input_in_errors": True,
+    }
 
     # --- Service identity ---
     # Canonical Beckn subscriber_id (Task A3): ``*.jaringan-dagang.id`` is
@@ -76,6 +82,9 @@ class Settings(BaseSettings):
     port: int = 8003
     debug: bool = True
 
+    # Explicit operator-managed exemption; omitted shipping never implies free.
+    shipping_free_brand_slugs: str = ""
+
     # --- Auto-release window for escrow (days after delivered) ---
     auto_release_days: int = 3
 
@@ -88,10 +97,13 @@ class Settings(BaseSettings):
     # Callbacks). Verified against header ``x-callback-token``.
     xendit_webhook_token: str = ""
 
-    # Public base URL for the /pay/{id} partner pay page (Jardag-branded
+    # Public base URL for the /pay/{id} partner pay page (OITO-branded
     # hosted payment surface). Returned by POST /api/v1/partner/orders as
     # ``payment_url``.
     partner_pay_base_url: str = "https://api.beli-aman.metatech.id"
+    # JSON object of immutable Brand IDs to exact browser return origins.
+    # Empty by default: no partner-controlled external navigation.
+    partner_return_origins: dict[str, list[str]] = {}
     # Public BAP base URL Xendit posts callbacks to. Used to construct
     # invoice success/failure redirect URLs.
     xendit_callback_base_url: str = "https://api.beli-aman.metatech.id"
@@ -176,7 +188,10 @@ class Settings(BaseSettings):
     # (fees would eat the release). Matches Sento's Rp10.000 minimum.
     dipay_disbursement_min_amount_idr: int = 10_000
     # Dipay callback public key used to verify incoming webhook signatures
-    # (SHA256withRSA). Supply either inline PEM or base64 PEM.
+    # (SHA256withRSA), separate from the merchant signing private key.
+    # Accepts inline PEM, base64 PEM/DER, or a local file path. Required and
+    # RSA-validated for nonlocal invoice creation; only development/test
+    # fixtures may omit it. No key-size restriction (provider contract).
     dipay_callback_public_key: str = ""
     # TEMPORARY diagnostic switch: log the complete inbound QRIS callback
     # (headers + raw body, with card-data fields redacted), including
@@ -237,7 +252,45 @@ class Settings(BaseSettings):
     default_carrier: str = "jubelio"
 
     # --- Environment flag (controls test-only fallbacks like shipping mock) ---
-    environment: str = "development"  # production | staging | development | test
+    environment: Literal["production", "staging", "development", "test"] = "development"
+
+    @field_validator("environment", mode="before")
+    @classmethod
+    def _normalize_environment(cls, value):
+        return value.strip().lower() if isinstance(value, str) else value
+
+    def validate_startup(self) -> None:
+        """Check deployment invariants without I/O, before DB/worker startup.
+
+        The independent marker is read ONLY from the process environment, not
+        .env or application settings. Deployment launchers must set it after
+        sourcing mutable app configuration; local direct runs default false.
+        """
+        try:
+            production_deployment = TypeAdapter(bool).validate_python(
+                os.environ.get("BAP_PRODUCTION_DEPLOYMENT", "false")
+            )
+        except ValidationError:
+            raise ValueError("BAP_PRODUCTION_DEPLOYMENT must be a boolean") from None
+        if self.environment not in {"production", "staging", "development", "test"}:
+            raise ValueError("Invalid environment; expected production, staging, development or test")
+        if production_deployment and self.environment != "production":
+            raise ValueError("BAP_PRODUCTION_DEPLOYMENT requires ENVIRONMENT=production")
+        if self.environment in {"production", "staging"}:
+            for field, default in (
+                ("admin_token", "dev-admin-token"),
+                ("seller_bridge_token", "dev-seller-bridge-token"),
+            ):
+                value = getattr(self, field).strip()
+                if not value or value == default:
+                    raise ValueError(f"{field.upper()} must be nonblank and nondefault outside development/test")
+            if self.debug:
+                raise ValueError("DEBUG must be false outside development/test")
+
+    @model_validator(mode="after")
+    def _validate_startup(self) -> "Settings":
+        self.validate_startup()
+        return self
 
     # --- Passwordless OTP login (WA + email) ---
     # whatsmeow sidecar HTTP base URL (jd-wa-whatsmeow). Empty in dev → OTPs

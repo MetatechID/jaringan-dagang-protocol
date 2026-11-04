@@ -27,8 +27,10 @@ Reference: https://api-docs.sento.id/docs-page/payment-link
 from __future__ import annotations
 
 import logging
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -67,6 +69,39 @@ def _parse_status(body: dict) -> str | None:
     if raw == "success":
         return "complete"
     return None
+
+
+def _unverified() -> HTTPException:
+    return HTTPException(503, "Sento status could not be verified; retry later")
+
+
+def _verify_resource(response: Any, reference: str, reference_key: str) -> dict:
+    if not isinstance(response, dict) or response.get(reference_key) != reference:
+        raise _unverified()
+    for key in ("tx_ref_number", "trx_id", "receipt_url", "tx_status_description"):
+        if key in response and (not isinstance(response[key], str) or not response[key].strip()):
+            raise _unverified()
+    # Currency is not specified in the checked-in Sento contract. Do not
+    # require an invented field, but reject an explicit non-IDR assertion.
+    if "currency" in response and response["currency"] != "IDR":
+        raise _unverified()
+    return response
+
+
+def _verify_amount(response: dict, expected: int) -> None:
+    # Sento's documented amount is IDR. Validate it when returned; older
+    # payment-link fixtures contain only status + partner_tx_id.
+    if "amount" not in response:
+        return
+    value = response["amount"]
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        raise _unverified()
+    try:
+        amount = Decimal(str(value))
+        if not amount.is_finite() or amount <= 0 or amount != Decimal(expected):
+            raise _unverified()
+    except (InvalidOperation, ValueError, TypeError):
+        raise _unverified()
 
 
 async def _resolve_brand_for_invoice_id(
@@ -127,6 +162,8 @@ async def invoice_callback(
         except Exception:  # noqa: BLE001
             raise HTTPException(400, "Invalid JSON body")
 
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Expected JSON object")
     partner_tx_id = body.get("partner_tx_id")
     if not partner_tx_id or not isinstance(partner_tx_id, str):
         raise HTTPException(400, "Missing partner_tx_id in callback")
@@ -139,13 +176,9 @@ async def invoice_callback(
         )
         raise HTTPException(404, "Unknown Sento invoice")
 
-    # Verify the live state via Sento's status API — webhook is advisory.
-    # If Sento says the invoice is not found (404), bounce — defense against
-    # forged webhooks hitting us for partner_tx_ids we never issued. For
-    # other Sento errors (5xx, network), we proceed with the body's status:
-    # webhooks are best-effort, status API may be transient.
+    # The body supplies only a lookup key, never financial authorization.
     try:
-        await sento_client.get_status(
+        status_resp = await sento_client.get_status(
             partner_tx_id=partner_tx_id,
             api_key=brand.sento_api_key,
             username=brand.sento_username,
@@ -157,24 +190,26 @@ async def invoice_callback(
                 partner_tx_id,
             )
             raise HTTPException(404, "Sento reports invoice not found")
-        _LOG.warning(
-            "Sento status API error %s for partner_tx_id=%s — proceeding "
-            "with body status (advisory)",
-            e.status_code, partner_tx_id,
-        )
+        raise _unverified() from e
+    except (httpx.RequestError, ValueError) as e:
+        raise _unverified() from e
 
-    status = _parse_status(body)
-    if not status:
-        return {"ok": True, "ignored_status": body.get("status", "")}
+    status_resp = _verify_resource(status_resp, partner_tx_id, "partner_tx_id")
+    if status_resp.get("status") not in (
+        "created", "waiting_payment", "expired", "charge_in_progress",
+        "failed", "complete", "closed",
+    ):
+        raise _unverified()
+    status = _parse_status(status_resp)
     _LOG.info(
         "Sento invoice callback: brand=%s partner_tx_id=%s status=%s",
         getattr(brand, "slug", None), partner_tx_id, status,
     )
 
     if status == "complete":
-        return await _handle_paid(db, partner_tx_id, body)
+        return await _handle_paid(db, partner_tx_id, status_resp)
     if status == "expired":
-        return await _handle_expired(db, partner_tx_id, body)
+        return await _handle_expired(db, partner_tx_id, status_resp)
     if status in ("failed", "closed"):
         return await _handle_failed(db, partner_tx_id)
     return {"ok": True, "ignored_status": status}
@@ -183,16 +218,21 @@ async def invoice_callback(
 async def _handle_paid(db: AsyncSession, partner_tx_id: str, body: dict) -> dict:
     """Process a ``complete`` callback (Payment Link).
 
-    The Payment Link flat body carries ``tx_ref_number`` (Sento's internal
-    id) directly. We prefer it as ``invoice_id`` so the ledger row's
-    ``external_ref`` matches what Sento echoes in the callback; falls back
-    to ``partner_tx_id`` if absent.
+    ``body`` here is the verified status-API response, NOT the callback.
+    Its ``tx_ref_number`` is preferred as ``invoice_id``; older responses
+    without it use the verified ``partner_tx_id``.
     """
     invoice_id = str(body.get("tx_ref_number") or partner_tx_id)
     actor = "system:sento_webhook"
 
     if partner_tx_id.startswith("order-"):
         order_id = partner_tx_id[len("order-"):]
+        if "amount" in body:
+            from models.order import Order
+            local_order = (await db.execute(select(Order).where(Order.id == order_id))).scalar_one_or_none()
+            if local_order is None:
+                raise HTTPException(404, "Unknown Sento invoice order")
+            _verify_amount(body, local_order.total_idr)
         order = await order_paid.mark_order_paid(
             db,
             order_id=order_id,
@@ -208,6 +248,7 @@ async def _handle_paid(db: AsyncSession, partner_tx_id: str, body: dict) -> dict
         ).scalar_one_or_none()
         if cart is None:
             raise HTTPException(404, f"No cart for partner_tx_id={partner_tx_id}")
+        _verify_amount(body, int((cart.quote_json or {}).get("total_idr") or 0))
         if cart.payment_state != "paid":
             cart.payment_state = "paid"
         if cart.invoice_id is None:
@@ -248,6 +289,7 @@ async def _handle_paid(db: AsyncSession, partner_tx_id: str, body: dict) -> dict
         )
     ).scalars().first()
     if recovered is not None:
+        _verify_amount(body, recovered.total_idr)
         order = await order_paid.mark_order_paid(
             db,
             order_id=recovered.id,
@@ -323,6 +365,8 @@ async def remit_callback(
     except Exception:  # noqa: BLE001
         raise HTTPException(400, "Invalid JSON body")
 
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Expected JSON object")
     partner_tx_id = body.get("partner_tx_id")
     if not partner_tx_id or not isinstance(partner_tx_id, str):
         raise HTTPException(400, "Missing partner_tx_id in callback")
@@ -356,12 +400,10 @@ async def remit_callback(
         )
         raise HTTPException(404, "Unknown brand for disbursement")
 
-    # Advisory callback → re-verify the live status. If Sento says the
-    # disbursement doesn't exist (204), bounce — defense against forged POSTs.
-    # For other Sento errors (5xx, network) proceed with the body's status.
+    # Re-query using the client's actual remit correlation-key spelling.
     try:
         status_resp = await sento_client.get_disbursement_status(
-            partner_tx_id=partner_tx_id,
+            partner_trx_id=partner_tx_id,
             api_key=brand.sento_api_key,
             username=brand.sento_username,
         )
@@ -372,15 +414,19 @@ async def remit_callback(
                 partner_tx_id,
             )
             raise HTTPException(404, "Sento reports disbursement not found")
-        _LOG.warning(
-            "Sento remit status API error %s for partner_tx_id=%s — "
-            "proceeding with body status (advisory)",
-            e.status_code, partner_tx_id,
-        )
-        status_resp = body
+        raise _unverified() from e
+    except (httpx.RequestError, ValueError) as e:
+        raise _unverified() from e
 
-    code = str((status_resp.get("status") or {}).get("code") or "")
-    trx_id = status_resp.get("trx_id") or body.get("trx_id") or None
+    if not isinstance(status_resp, dict) or not isinstance(status_resp.get("status"), dict):
+        raise _unverified()
+    code = status_resp["status"].get("code")
+    if code == "204":
+        raise HTTPException(404, "Sento reports disbursement not found")
+    status_resp = _verify_resource(status_resp, partner_tx_id, "partner_trx_id")
+    if code not in ("000", "300", "206", "225", "101", "102", "301", "504", "999"):
+        raise _unverified()
+    trx_id = status_resp.get("trx_id")
     _LOG.info(
         "Sento remit callback: order=%s partner_tx_id=%s code=%s",
         order_id, partner_tx_id, code,
@@ -404,18 +450,21 @@ async def remit_callback(
         )
         return {"ok": True, "order_id": order_id, "code": code, "noop": True}
 
+    _verify_amount(status_resp, row.amount_idr)
+    if row.external_ref and trx_id and row.external_ref != trx_id:
+        raise _unverified()
+
     if code == _REMIT_SUCCESS:
         row.status = EscrowEntryStatus.COMPLETED
         if trx_id:
             row.external_ref = trx_id
         desc = row.description or ""
-        receipt = status_resp.get("receipt_url") or body.get("receipt_url")
+        receipt = status_resp.get("receipt_url")
         if receipt and receipt not in desc:
             row.description = f"{desc} — receipt: {receipt}".strip(" —")
     elif code in _REMIT_FAILED:
         row.status = EscrowEntryStatus.FAILED
         reason = (status_resp.get("tx_status_description")
-                  or body.get("tx_status_description")
                   or (status_resp.get("status") or {}).get("message"))
         if reason:
             row.description = f"{row.description or ''} — failed: {reason}".strip(" —")

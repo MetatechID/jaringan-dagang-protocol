@@ -25,7 +25,8 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from services.webhook_audit import attach
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,6 +40,7 @@ from services import xendit_client
 from services.dipay_client import DipayError
 from services.partner_orders import create_partner_order, get_partner_order
 from services.release_clock import JAKARTA
+from services.partner_return_url import stored_return_url
 from services.xendit_client import XenditError
 
 _LOG = logging.getLogger("beli_aman_bap.partner")
@@ -145,12 +147,9 @@ def _pay_page_url(order: PartnerOrder) -> str:
 
 
 def _is_mock_mode(brand: Brand) -> bool:
-    """Same rule as ``services/xendit_invoices._is_mock_mode`` — brands not
-    yet onboarded to Xendit still get a working (sandbox) payment flow."""
-    return (
-        not brand.xendit_sub_account_id
-        or not getattr(settings, "xendit_secret_key", "")
-    )
+    from services.payment_policy import invoice_mock_mode
+
+    return invoice_mock_mode("xendit", brand)
 
 
 def _validity_period(expires_in: int) -> tuple[str, datetime]:
@@ -176,6 +175,7 @@ async def _create_dipay_invoice(
     """
     from services import dipay_client, dipay_invoices
 
+    dipay_client.require_callback_public_key()
     config = dipay_client.resolve_config(brand)
     partner_ref = dipay_client.snap_ref("q", str(order.id))
     validity_period, expires_at = _validity_period(expires_in)
@@ -226,7 +226,7 @@ async def _create_invoice(
         description=order.description[:255],
         customer_email=(order.buyer or {}).get("email"),
         customer_name=(order.buyer or {}).get("name"),
-        success_redirect_url=order.success_url or f"{base}/pay/{order.id}/done",
+        success_redirect_url=f"{base}/pay/{order.id}/done",
         failure_redirect_url=f"{base}/pay/{order.id}/failed",
         duration_seconds=expires_in,
         items=[
@@ -247,8 +247,18 @@ async def register_order(
     body: PartnerOrderIn,
     brand: Brand = Depends(require_partner),
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ) -> PartnerOrderOut:
     """Register a payment and get the pay-page URL to redirect the buyer to."""
+    # Reject incomplete provider configuration before inserting an order.
+    if (getattr(brand, "payment_provider", None) or "").strip().lower() == "dipay":
+        from services.dipay_client import require_callback_public_key
+        try:
+            require_callback_public_key()
+        except DipayError as exc:
+            raise HTTPException(502, "Dipay callback verification is not configured") from exc
+    else:
+        _is_mock_mode(brand)
     order = await create_partner_order(
         db,
         brand=brand,
@@ -260,6 +270,7 @@ async def register_order(
         success_url=body.success_url,
     )
 
+    attach(request, brand=brand, order=order)
     try:
         await _create_invoice(db, brand, order, body.expires_in_seconds)
     except (XenditError, DipayError) as e:
@@ -269,6 +280,7 @@ async def register_order(
 
     await db.commit()
     await db.refresh(order)
+    attach(request, brand=brand, order=order)
 
     expires_at = order.expires_at or (
         datetime.now(timezone.utc) + timedelta(seconds=body.expires_in_seconds)
@@ -285,6 +297,7 @@ async def register_order(
 
 @router.get("/orders/{order_id}", response_model=PartnerStatusOut)
 async def get_order_status(
+    request: Request,
     order_id: str,
     brand: Brand = Depends(require_partner),
     db: AsyncSession = Depends(get_db),
@@ -292,6 +305,7 @@ async def get_order_status(
     order = await get_partner_order(db, order_id)
     if order is None or order.brand_id != brand.id:
         raise HTTPException(404, "Order not found")
+    attach(request, brand=brand, order=order)
     return PartnerStatusOut(
         order_id=order.id,
         external_order_id=order.external_order_id,
@@ -316,7 +330,7 @@ async def get_public_order_status(
         status=order.status,
         amount_idr=order.amount_idr,
         paid_at=order.paid_at.isoformat() if order.paid_at else None,
-        success_url=order.success_url,
+        success_url=stored_return_url(order) if order.status == "paid" else None,
     )
 
 # ---------- Admin (seller dashboard BFF) ----------

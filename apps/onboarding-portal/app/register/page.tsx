@@ -95,7 +95,7 @@ export default function RegisterParticipant() {
             Register Participant
           </h1>
           <p className="text-sm text-slate-400 mt-1">
-            Join the Jaringan Dagang network by registering as a BAP or BPP
+            Join the OITO network by registering as a BAP or BPP
           </p>
         </div>
 

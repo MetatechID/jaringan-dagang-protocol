@@ -1,5 +1,5 @@
 """PartnerOrder — an external merchant's transaction registered via the
-partner API (e.g. a Consumerland ticket order paid through Oito).
+partner API (e.g. a Consumerland ticket order paid through OITO).
 
 Deliberately simpler than ``Order``: partners fulfill instantly on the
 ``paid`` callback (Consumerland issues e-tickets), so there is no escrow

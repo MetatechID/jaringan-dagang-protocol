@@ -48,6 +48,13 @@ async def create_partner_order(
 ) -> PartnerOrder:
     """Insert a pending partner order. Raises 409 when the partner already
     registered this ``external_order_id`` (idempotency key per brand)."""
+    from services.partner_return_url import validate_return_url
+
+    try:
+        success_url = validate_return_url(success_url, brand.id)
+    except ValueError:
+        raise HTTPException(422, "Invalid or unapproved partner return URL") from None
+
     existing = await get_partner_order_by_external_id(
         db, brand_id=brand.id, external_order_id=external_order_id
     )

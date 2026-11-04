@@ -1297,13 +1297,18 @@ class TestCartOrderIdNoForeignKey:
 
 
 class TestHandleOnConfirmCartLinkage:
-    """Critical #2: ``handle_on_confirm`` MUST update the bot Cart row
-    so the MCP polling ``GET /api/v1/checkout/{cart_id}/status`` sees the
-    QR + ``payment_state="paid"`` instead of stuck-pending forever.
-    """
+    """Correlated confirmations surface QR data without asserting payment."""
 
     def _setup_db(self):
         from sqlalchemy import text
+        from sqlalchemy.ext.compiler import compiles
+        from sqlalchemy.dialects.postgresql import JSONB
+        from models.order import Order
+
+        @compiles(JSONB, "sqlite")
+        def compile_jsonb_sqlite(type_, compiler, **kw):
+            return "JSON"
+
         from sqlalchemy.ext.asyncio import (
             AsyncSession,
             async_sessionmaker,
@@ -1324,48 +1329,9 @@ class TestHandleOnConfirmCartLinkage:
             async with engine.begin() as conn:
                 await conn.run_sync(
                     Base.metadata.create_all,
-                    tables=[SearchSession.__table__, Cart.__table__],
+                    tables=[SearchSession.__table__, Cart.__table__, Order.__table__],
                     checkfirst=True,
                 )
-                # The on_confirm handler also queries ``orders`` (storefront
-                # path). The real Order model uses Postgres-only JSONB, so we
-                # can't ``create_all`` it under sqlite. We only need the
-                # SELECT ... WHERE seller_order_ref = ? path to NOT crash —
-                # the handler treats "no row" as "no storefront order to
-                # update, only bot cart". A minimal stub table is enough.
-                await conn.execute(text(
-                    "CREATE TABLE IF NOT EXISTS orders ("
-                    "  id VARCHAR(36) PRIMARY KEY, "
-                    "  profile_id VARCHAR(36), "
-                    "  brand_id VARCHAR(36), "
-                    "  state VARCHAR(40), "
-                    "  items TEXT, "
-                    "  subtotal_idr BIGINT, "
-                    "  shipping_idr BIGINT, "
-                    "  fee_idr BIGINT, "
-                    "  total_idr BIGINT, "
-                    "  shipping_address TEXT, "
-                    "  payment_method_snapshot TEXT, "
-                    "  bap_id VARCHAR(255), "
-                    "  bpp_id VARCHAR(255), "
-                    "  seller_order_ref VARCHAR(255), "
-                    "  shipped_at TIMESTAMP, "
-                    "  delivered_at TIMESTAMP, "
-                    "  auto_release_at TIMESTAMP, "
-                    "  released_at TIMESTAMP, "
-                    "  fulfillment_status VARCHAR(40), "
-                    "  fulfillment_awb VARCHAR(255), "
-                    "  fulfillment_tracking_url VARCHAR(512), "
-                    "  fulfillment_last_event_at TIMESTAMP, "
-                    # A6 RSP settlement columns on Order
-                    "  settlement_status VARCHAR(40), "
-                    "  settlement_basis VARCHAR(40), "
-                    "  settlement_window VARCHAR(20), "
-                    "  settlement_reference VARCHAR(255), "
-                    "  created_at TIMESTAMP, "
-                    "  updated_at TIMESTAMP"
-                    ")"
-                ))
 
         asyncio.run(_create())
         return Session
@@ -1381,9 +1347,10 @@ class TestHandleOnConfirmCartLinkage:
             async with Session() as db:
                 cart = Cart(
                     id=str(uuid.uuid4()),
-                    bpp_id="safiyafood.jaringan-dagang.id",
+                    bpp_id="x",
                     items_json=[{"sku_id": "sku-1", "qty": 1}],
                     transaction_id=txn_id,
+                    order_id="seller-order-AAA",
                     status=CartStatus.CONFIRMED,
                     payment_state="pending",
                 )
@@ -1405,7 +1372,8 @@ class TestHandleOnConfirmCartLinkage:
                 ],
             }
         }
-        context = {"transaction_id": txn_id, "bpp_id": "x"}
+        from routers.beckn_ownership import VerifiedContext
+        context = VerifiedContext({"transaction_id": txn_id, "bpp_id": "x"}, "x")
 
         async def call_and_read():
             async with Session() as db:
@@ -1420,13 +1388,10 @@ class TestHandleOnConfirmCartLinkage:
 
         qr, state = asyncio.run(call_and_read())
         assert qr == "https://qr.example.id/abc.png"
-        assert state == "paid"
+        assert state == "pending"
 
-    def test_on_confirm_no_matching_cart_does_not_error(self):
-        """Firebase-storefront flow: customer ordered direct, no Cart row.
-
-        Handler must succeed and just be a no-op on the Cart side.
-        """
+    def test_on_confirm_no_matching_cart_is_rejected(self):
+        """A callback with neither a matching order nor a cart is rejected."""
         from routers.beckn_handlers import handle_on_confirm
 
         Session = self._setup_db()
@@ -1439,7 +1404,8 @@ class TestHandleOnConfirmCartLinkage:
                 ],
             }
         }
-        context = {"transaction_id": "txn-no-cart", "bpp_id": "x"}
+        from routers.beckn_ownership import VerifiedContext
+        context = VerifiedContext({"transaction_id": "txn-no-cart", "bpp_id": "x"}, "x")
 
         async def call():
             async with Session() as db:
@@ -1448,7 +1414,10 @@ class TestHandleOnConfirmCartLinkage:
                 await db.commit()
                 return result
 
-        assert asyncio.run(call()) is None
+        from fastapi import HTTPException
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(call())
+        assert exc.value.status_code == 404
 
     def test_on_confirm_does_not_reflip_expired_cart(self):
         """Idempotency / safety: once payment_state has moved to a terminal
@@ -1468,6 +1437,7 @@ class TestHandleOnConfirmCartLinkage:
                     bpp_id="x",
                     items_json=[{"sku_id": "sku-1", "qty": 1}],
                     transaction_id=txn_id,
+                    order_id="seller-order-late",
                     status=CartStatus.EXPIRED,
                     payment_state="expired",
                 )
@@ -1485,7 +1455,8 @@ class TestHandleOnConfirmCartLinkage:
                 ],
             }
         }
-        context = {"transaction_id": txn_id, "bpp_id": "x"}
+        from routers.beckn_ownership import VerifiedContext
+        context = VerifiedContext({"transaction_id": txn_id, "bpp_id": "x"}, "x")
 
         async def call_and_read():
             async with Session() as db:
@@ -1522,6 +1493,7 @@ class TestHandleOnConfirmCartLinkage:
                     bpp_id="x",
                     items_json=[{"sku_id": "sku-1", "qty": 1}],
                     transaction_id=txn_id,
+                    order_id="seller-order-AAA",
                     status=CartStatus.CONFIRMED,
                     payment_state="paid",
                     qr_image_url="https://qr.example.id/first.png",
@@ -1544,7 +1516,8 @@ class TestHandleOnConfirmCartLinkage:
                 ],
             }
         }
-        context = {"transaction_id": txn_id, "bpp_id": "x"}
+        from routers.beckn_ownership import VerifiedContext
+        context = VerifiedContext({"transaction_id": txn_id, "bpp_id": "x"}, "x")
 
         async def call_and_read():
             async with Session() as db:

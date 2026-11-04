@@ -6,7 +6,7 @@ import { AuthProvider } from "@/lib/auth-context";
 import SignInGate from "@/components/SignInGate";
 
 export const metadata: Metadata = {
-  title: "Jaringan Dagang Network Dashboard",
+  title: "OITO Network Dashboard",
   description:
     "Network visualization and management dashboard for Indonesia's Beckn open commerce network",
 };

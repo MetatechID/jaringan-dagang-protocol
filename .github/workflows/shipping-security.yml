@@ -1,0 +1,27 @@
+name: Shipping security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  authoritative-shipping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build and install canonical protocol wheel
+        run: |
+          python -m pip wheel --no-deps --wheel-dir /tmp/protocol-wheels ./packages/beckn-protocol-py
+          python -m pip install /tmp/protocol-wheels/*.whl
+      - name: Install app and test dependencies
+        run: python -m pip install -r apps/beli-aman-bap/requirements.txt pytest pytest-asyncio
+      - name: Run isolated authoritative shipping regressions
+        run: python -I apps/beli-aman-bap/scripts/test-shipping-security.py tests/test_shipping_security.py tests/test_shipping_proxy.py tests/test_carriers_passthrough.py

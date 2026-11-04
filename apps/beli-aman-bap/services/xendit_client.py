@@ -32,7 +32,7 @@ class XenditError(Exception):
 
 def _auth_header() -> str:
     """Xendit uses HTTP Basic with the secret key as username, empty password."""
-    raw = f"{settings.xendit_secret_key}:".encode()
+    raw = f"{settings.xendit_secret_key.strip()}:".encode()
     return "Basic " + base64.b64encode(raw).decode()
 
 
@@ -42,7 +42,7 @@ def _headers(*, for_user_id: str | None, idempotency_key: str | None = None) -> 
         "Content-Type": "application/json",
     }
     if for_user_id:
-        h["for-user-id"] = for_user_id
+        h["for-user-id"] = for_user_id.strip()
     if idempotency_key:
         # Xendit uses different idempotency header names across products. Set
         # both — Xendit ignores headers it doesn't recognize.
@@ -62,7 +62,7 @@ async def _request(
     json: dict | None = None,
     idempotency_key: str | None = None,
 ) -> dict:
-    if not settings.xendit_secret_key:
+    if not settings.xendit_secret_key.strip():
         raise XenditError(0, "XENDIT_SECRET_KEY not configured")
 
     async with httpx.AsyncClient(timeout=30.0) as client:

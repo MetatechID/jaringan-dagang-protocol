@@ -84,7 +84,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Beckn Registry",
-    description="Jaringan Dagang — Beckn network participant registry",
+    description="OITO — Beckn network participant registry",
     version="0.1.0",
     lifespan=lifespan,
 )

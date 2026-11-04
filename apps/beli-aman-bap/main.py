@@ -75,6 +75,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Startup / shutdown hooks."""
+    settings.validate_startup()
     import asyncio
     import os
     logging.basicConfig(
@@ -85,6 +86,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         "Starting %s (subscriber_id=%s) at %s",
         settings.service_name, settings.subscriber_id, settings.subscriber_url,
     )
+
+    # Environment-enabled Dipay must be able to verify callbacks before any
+    # startup effects. Brand-only enablement is checked at invoice runtime.
+    from services.dipay_client import require_callback_public_key
+    if settings.dipay_client_key.strip():
+        require_callback_public_key()
 
     # Schema changes are an explicit operator action, never normal startup.
     if os.environ.get("SKIP_CREATE_ALL", "true").lower() == "false":
@@ -116,7 +123,7 @@ app = FastAPI(
     title="Beli Aman BAP",
     description=(
         "Buyer-protection layer for Indonesian DTC commerce. "
-        "Built on the Jaringan Dagang Beckn-protocol open commerce network."
+        "Built on the OITO Beckn-protocol open commerce network."
     ),
     version="0.1.0",
     lifespan=lifespan,
@@ -239,7 +246,9 @@ app.include_router(escrow_router)
 app.include_router(disputes_router)
 app.include_router(igm_router)
 app.include_router(rsp_rating_router)
-app.include_router(internal_mock_router)
+# Mock state transitions are local tools, never deployed API surfaces.
+if settings.environment.strip().lower() in {"development", "test"}:
+    app.include_router(internal_mock_router)
 app.include_router(shipping_router)
 app.include_router(analytics_router)
 app.include_router(storefront_integrations_router)
@@ -304,3 +313,8 @@ async def ready():
         logger.warning("BAP schema readiness failed", exc_info=True)
         raise HTTPException(status_code=503, detail="Database/schema not ready") from exc
     return {"status": "ready"}
+
+
+# Outside Starlette's error middleware so generated 500s are captured too.
+from services.webhook_audit import AuditMiddleware
+app = AuditMiddleware(app)

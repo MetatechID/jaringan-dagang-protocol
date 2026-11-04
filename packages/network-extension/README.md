@@ -1,6 +1,6 @@
 # Indonesia Network Extension Layer
 
-This directory defines Indonesia-specific standards, taxonomies, and configurations for the Beckn commerce network operating under the **Jaringan Dagang** project.
+This directory defines Indonesia-specific standards, taxonomies, and configurations for the Beckn commerce network operating under the **OITO** project.
 
 ## Canonical Subscriber ID Scheme (Task A3)
 

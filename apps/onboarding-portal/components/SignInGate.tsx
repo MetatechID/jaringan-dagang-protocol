@@ -43,7 +43,7 @@ export default function SignInGate({ children }: { children: React.ReactNode }) 
             </h1>
             <p className="text-sm text-slate-400 mt-2">
               You're signed in as <span className="text-slate-200">{me.email}</span>, but
-              this portal is restricted to Jaringan Dagang network administrators.
+              this portal is restricted to OITO network administrators.
               Contact the network team if you believe this is a mistake.
             </p>
           </div>
@@ -85,11 +85,11 @@ export default function SignInGate({ children }: { children: React.ReactNode }) 
     <div className="min-h-screen flex items-center justify-center bg-surface-900 px-4">
       <div className="w-full max-w-md rounded-2xl border border-slate-700/60 bg-slate-900/60 p-8 backdrop-blur">
         <div className="text-center mb-6">
-          <div className="w-12 h-12 mx-auto mb-3 rounded-xl bg-indigo-600 grid place-items-center text-white text-xl font-bold">
-            JD
+          <div className="w-12 h-12 mx-auto mb-3 rounded-xl bg-indigo-600 grid place-items-center text-white text-sm font-bold">
+            OITO
           </div>
           <h1 className="text-xl font-semibold text-slate-100">
-            Jaringan Dagang Network
+            OITO Network
           </h1>
           <p className="text-sm text-slate-400 mt-2">
             Sign in to manage the open commerce network. Super-admin access only.

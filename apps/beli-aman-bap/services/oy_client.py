@@ -58,15 +58,21 @@ async def _request(
     json: dict | None = None,
 ) -> dict:
     """Thin httpx wrapper. Raises OYError on non-2xx."""
-    if not api_key and not settings.oy_api_key:
+    from services.payment_policy import credential
+
+    api_key = credential(api_key, settings.oy_api_key)
+    username = credential(username, settings.oy_default_username)
+    if not api_key:
         raise OYError(0, "OY_API_KEY not configured (env or Brand.oy_api_key)")
+    if not username:
+        raise OYError(0, "OY username not configured")
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.request(
             method,
             f"{_BASE_URL}{path}",
             headers=_headers(
-                api_key=api_key or settings.oy_api_key,
-                username=username or settings.oy_default_username,
+                api_key=api_key,
+                username=username,
             ),
             json=json,
         )

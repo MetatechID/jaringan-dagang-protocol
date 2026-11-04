@@ -72,16 +72,9 @@ def _customer_fields(cart: Cart) -> tuple[str | None, str | None]:
 
 
 def _mock_mode(brand: Brand | None) -> bool:
-    """Real Sento needs (a) brand row, (b) provider=='sento', (c) sento_api_key
-    (env or per-Brand). Until all three, fall back to the mock-checkout page.
-    """
-    if brand is None:
-        return True
-    if brand.payment_provider != "sento":
-        return True
-    has_env_key = bool(getattr(settings, "sento_api_key", ""))
-    has_brand_key = bool(getattr(brand, "sento_api_key", None))
-    return not (has_env_key or has_brand_key)
+    from services.payment_policy import invoice_mock_mode
+
+    return invoice_mock_mode("sento", brand)
 
 
 async def create_invoice_for_cart(db: AsyncSession, cart: Cart) -> dict:
@@ -157,10 +150,7 @@ async def create_invoice_for_order(
     brand_q = await db.execute(select(Brand).where(Brand.id == order.brand_id))
     brand = brand_q.scalar_one_or_none()
 
-    # ponytail: same shape as the OY order path — drop the strict provider
-    # / brand-missing guards so the dispatcher isn't a footgun during
-    # provider flips. Mock-mode covers brand-missing and Sento-unconfigured
-    # uniformly.
+    # Share cart policy: local fixtures only; other modes fail before mutation.
     if _mock_mode(brand):
         mock_base = (
             getattr(settings, "mock_checkout_public_base", None)

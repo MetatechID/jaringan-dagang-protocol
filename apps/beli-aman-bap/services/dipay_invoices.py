@@ -47,7 +47,7 @@ _INVOICE_STATUS_FAILED = "failed"
 
 
 def _mock_allowed() -> bool:
-    env = str(getattr(settings, "environment", "test") or "test").lower()
+    env = str(getattr(settings, "environment", "") or "").strip().lower()
     return env in {"development", "test"}
 
 
@@ -133,6 +133,7 @@ def _resolved_config(brand: Brand | None) -> DipayConfig | None:
             return None
         raise DipayError(0, "Dipay credentials not configured")
 
+    dipay_client.require_callback_public_key()
     if not brand_key and env_key:
         return dipay_client.resolve_config(None)
 

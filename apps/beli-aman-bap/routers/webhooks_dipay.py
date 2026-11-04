@@ -4,9 +4,9 @@ Mirror of ``routers/webhooks_sento.py`` — same advisory-callback pattern:
 
 - Auth: inbound ``X-SIGNATURE`` is RSA-verified (SHA256withRSA, base64) against
   ``DIPAY_CALLBACK_PUBLIC_KEY`` — see ``services.dipay_client.
-  verify_notification_signature``.  In non-production environments with no key
-  configured the check is skipped with a warning; in production a missing or
-  invalid signature is a 401.  Independently of that, the callback is treated
+  verify_notification_signature``. Only explicit development/test fixtures
+  with no key skip verification with a warning; all other modes reject a
+  missing or invalid signature with 401.  Independently of that, the callback is treated
   as **advisory**: state is re-verified via the status APIs before mutating —
   ``POST /qr/qr-mpm-query`` for payments, ``POST /transfer/status`` for
   disbursements. A forged POST can at worst make us ask Dipay what's true.
@@ -212,9 +212,7 @@ async def _verify_inbound_signature(
     x_timestamp: str | None,
 ) -> None:
     public_key = getattr(settings, "dipay_callback_public_key", None)
-    is_prod = getattr(settings, "environment", "development") == "production"
-
-    if not public_key and not is_prod:
+    if not public_key and dipay_client.local_fixtures_allowed():
         _LOG.warning(
             "Dipay callback signature verification skipped in %s mode (no dipay_callback_public_key configured)",
             getattr(settings, "environment", "development"),
@@ -283,48 +281,21 @@ async def _verify_inbound_signature(
     raise HTTPException(401, "Invalid Dipay callback signature")
 
 
-# Temporary diagnostics: substring test against lowercased header names and
-# JSON keys, so nested PAN/customer fields are redacted regardless of casing.
-_REDACTED = "<redacted>"
-_SENSITIVE_FIELD_MARKERS = ("pan", "cvv", "card", "customer", "email", "phone")
-
-
-def _redact_headers(headers: Any) -> dict[str, str]:
-    return {
-        name: _REDACTED
-        if any(marker in name.lower() for marker in _SENSITIVE_FIELD_MARKERS)
-        else value
-        for name, value in headers.items()
-    }
-
-
-def _redact_json(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {
-            key: _REDACTED
-            if any(marker in str(key).lower() for marker in _SENSITIVE_FIELD_MARKERS)
-            else _redact_json(item)
-            for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [_redact_json(item) for item in value]
-    return value
-
-
+# Optional diagnostics remain metadata-only; raw audit bytes must never reach logs.
 def _log_full_callback_for_debug(request: Request, body_bytes: bytes) -> None:
     """Log the full rejected callback when explicitly enabled (temporary)."""
     if not getattr(settings, "dipay_debug_log_full_callback", False):
         return
-    raw = body_bytes.decode("utf-8", errors="replace")
-    try:
-        body: Any = _redact_json(json.loads(raw))
-    except Exception:
-        body = raw
+    from services.webhook_audit import Capture
+    capture = Capture()
+    capture.feed(body_bytes)
+    capture.complete = True
+    body = capture.snapshot()
     _LOG.warning(
         "TEMPORARY FULL DIPAY QRIS CALLBACK method=%r path=%r headers=%r body=%r",
         request.method,
         request.url.path,
-        _redact_headers(request.headers),
+        {},  # Never put callback credentials or arbitrary headers in application logs.
         body,
     )
 
@@ -425,6 +396,8 @@ async def _qris_notify(
         raise HTTPException(400, "Missing originalPartnerReferenceNo in callback")
 
     brand, cart, order, partner_order = await _resolve_targets(db, ref)
+    from services.webhook_audit import attach
+    attach(request, brand=brand, order=partner_order, reference=ref)
     if brand is None and cart is None and order is None and partner_order is None:
         _LOG.warning(
             "Dipay QRIS callback: no surface for originalPartnerReferenceNo=%s "
@@ -447,10 +420,10 @@ async def _qris_notify(
         if exc.status_code == 404 or code.startswith(_QRIS_QUERY_NOT_FOUND_PREFIX):
             raise HTTPException(404, "Dipay reports transaction not found") from exc
         _LOG.warning(
-            "Dipay QRIS query error %s for ref=%s — proceeding with body status (advisory)",
+            "Dipay QRIS query error %s for ref=%s — refusing unverified callback",
             exc.status_code, ref,
         )
-        verified = body
+        raise HTTPException(502, "Could not verify Dipay callback") from exc
     except Exception as exc:  # noqa: BLE001
         _LOG.exception("Dipay QRIS verification failed for ref=%s", ref)
         raise HTTPException(502, "Could not verify Dipay callback") from exc
@@ -696,6 +669,8 @@ async def remit_callback(
         )
         raise HTTPException(404, "Unknown Dipay disbursement")
 
+    from services.webhook_audit import attach
+    attach(request, reference=partner_ref)
     order_id = row.order_id
     if row.status != EscrowEntryStatus.PENDING:
         _LOG.warning(
@@ -709,6 +684,7 @@ async def remit_callback(
     if order is None:
         raise HTTPException(404, "Unknown Dipay order")
     brand = (await db.execute(select(Brand).where(Brand.id == order.brand_id))).scalar_one_or_none()
+    attach(request, brand=brand, reference=partner_ref)
     if brand is None:
         raise HTTPException(502, "Dipay callback owner is not configured")
     try:
@@ -724,10 +700,10 @@ async def remit_callback(
             )
             raise HTTPException(404, "Dipay reports disbursement not found") from exc
         _LOG.warning(
-            "Dipay remit status API error %s for partner_ref=%s — proceeding with body status (advisory)",
+            "Dipay remit status API error %s for partner_ref=%s — refusing unverified callback",
             exc.status_code, partner_ref,
         )
-        verified = body
+        raise HTTPException(502, "Could not verify Dipay callback") from exc
     except Exception as exc:  # noqa: BLE001
         _LOG.exception("Dipay remit verification failed for ref=%s", partner_ref)
         raise HTTPException(502, "Could not verify Dipay callback") from exc

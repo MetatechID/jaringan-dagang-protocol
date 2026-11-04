@@ -107,7 +107,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Beckn Gateway",
-    description="Jaringan Dagang — Beckn search multicast gateway",
+    description="OITO — Beckn search multicast gateway",
     version="0.1.0",
     lifespan=lifespan,
 )
