@@ -6,6 +6,7 @@ the order. The seller dashboard piece of the demo just won't show new rows.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -14,6 +15,10 @@ import httpx
 from config import settings
 
 logger = logging.getLogger(__name__)
+
+# Strong refs to in-flight fire-and-forget tasks so the event loop's weak
+# reference doesn't let them be garbage-collected mid-flight.
+_BG_TASKS: set[asyncio.Task] = set()
 
 
 async def post_order(*, order_dict: dict[str, Any], order_id: str = "") -> bool:
@@ -98,3 +103,34 @@ async def patch_escrow_status(*, order_id: str, escrow_status: str) -> bool:
             url, order_id, escrow_status, e,
         )
         return False
+
+
+def notify_cart_paid(cart: Any) -> None:
+    """Fire-and-forget: tell the seller-bpp a bot/Bella cart was actually paid.
+
+    Bot carts (jd-sell MCP checkout) send Beckn /confirm to the seller BEFORE
+    the shopper pays, under ``cart.order_id`` (a pseudo order id). The seller
+    awards OITO loyalty points for that order only once it sees
+    ``escrow_status="held"``. Call this exactly on the cart's transition to
+    ``payment_state="paid"`` (not on webhook replays).
+
+    Scheduled as a background task so a slow/unreachable seller can't delay
+    the provider ACK; never raises into the caller.
+    """
+    order_id = getattr(cart, "order_id", None)
+    if not order_id:
+        return
+    try:
+        task = asyncio.create_task(_notify_cart_paid_bg(order_id))
+        _BG_TASKS.add(task)
+        task.add_done_callback(_BG_TASKS.discard)
+    except Exception as e:  # noqa: BLE001 — must never break the webhook
+        logger.warning("seller-bridge cart-paid schedule failed (order_id=%s): %s", order_id, e)
+
+
+async def _notify_cart_paid_bg(order_id: str) -> None:
+    try:
+        # Looked up on the module at call time so tests can monkeypatch it.
+        await patch_escrow_status(order_id=order_id, escrow_status="held")
+    except Exception as e:  # noqa: BLE001 — background, non-fatal
+        logger.warning("seller-bridge cart-paid PATCH failed (order_id=%s): %s", order_id, e)
