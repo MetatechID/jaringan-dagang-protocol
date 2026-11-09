@@ -99,6 +99,8 @@ async def _handle_paid(db: AsyncSession, invoice_id: str, external_id: str) -> d
         # callback endpoint can't delay the 200 ACK back to Xendit (which would
         # make Xendit retry). Opens its own DB session for the brand lookup.
         asyncio.create_task(partner_webhook.notify_partner_paid_bg(order.id))
+        # Record it in the seller's OITO (best-effort, background, idempotent).
+        seller_bridge.notify_partner_order_paid(order)
         return {"ok": True, "order_id": order.id, "status": order.status}
 
     if external_id.startswith("order-"):

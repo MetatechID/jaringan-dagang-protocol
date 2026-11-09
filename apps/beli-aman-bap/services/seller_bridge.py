@@ -134,3 +134,98 @@ async def _notify_cart_paid_bg(order_id: str) -> None:
         await patch_escrow_status(order_id=order_id, escrow_status="held")
     except Exception as e:  # noqa: BLE001 — background, non-fatal
         logger.warning("seller-bridge cart-paid PATCH failed (order_id=%s): %s", order_id, e)
+
+
+# ---- partner-API checkouts → OITO ---------------------------------------------
+
+
+def partner_checkout_payload(order: Any, brand_slug: str) -> dict[str, Any]:
+    """Body for the seller's ``POST /api/oito/internal/partner-checkouts``."""
+    return {
+        "partner_order_id": str(order.id),
+        "brand_slug": brand_slug,
+        "external_order_id": order.external_order_id,
+        "amount_idr": order.amount_idr,
+        "paid_at": order.paid_at.isoformat() if order.paid_at else None,
+        "buyer": order.buyer or None,
+        "items": order.items or [],
+        "invoice_provider": order.invoice_provider,
+    }
+
+
+async def load_partner_checkout(partner_order_id: str) -> dict[str, Any] | None:
+    """Own DB session: the paid partner order + its brand slug → payload (else None)."""
+    from sqlalchemy import select
+
+    from database import async_session
+    from models.brand import Brand
+    from models.partner_order import PartnerOrderStatus
+    from services import partner_orders
+
+    async with async_session() as session:
+        order = await partner_orders.get_partner_order(session, partner_order_id)
+        if order is None or order.status != PartnerOrderStatus.PAID:
+            return None
+        slug = (
+            await session.execute(select(Brand.slug).where(Brand.id == order.brand_id))
+        ).scalar_one_or_none()
+    return partner_checkout_payload(order, slug) if slug else None
+
+
+async def post_partner_checkout(payload: dict[str, Any]) -> bool:
+    """POST a paid partner checkout to the seller's OITO (non-fatal)."""
+    if not settings.seller_bridge_enabled:
+        logger.debug("Seller bridge disabled — skipping partner checkout POST")
+        return False
+
+    url = f"{settings.seller_bridge_url.rstrip('/')}/api/oito/internal/partner-checkouts"
+    headers = {
+        "Content-Type": "application/json",
+        "X-Internal-Token": settings.seller_bridge_token,
+    }
+    order_id = payload.get("partner_order_id")
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+        if 200 <= resp.status_code < 300:
+            logger.info("seller-bridge partner checkout ok %s -> %s (partner_order=%s)",
+                        url, resp.status_code, order_id)
+            return True
+        logger.warning("seller-bridge partner checkout non-2xx %s -> %s %s (partner_order=%s)",
+                       url, resp.status_code, resp.text[:200], order_id)
+        return False
+    except Exception as e:  # noqa: BLE001
+        logger.warning("seller-bridge partner checkout exception %s (partner_order=%s): %s",
+                       url, order_id, e)
+        return False
+
+
+def notify_partner_order_paid(order: Any) -> None:
+    """Fire-and-forget: record a paid partner order in the seller's OITO.
+
+    Call after the paid flip is committed, on every paid webhook (replays
+    included): the seller is idempotent on the partner order id, so a replay
+    doubles as a retry when the seller was down. No-op unless ``paid``.
+    Never raises into the caller.
+    """
+    from models.partner_order import PartnerOrderStatus
+
+    if getattr(order, "status", None) != PartnerOrderStatus.PAID:
+        return
+    order_id = str(order.id)
+    try:
+        task = asyncio.create_task(_notify_partner_order_paid_bg(order_id))
+        _BG_TASKS.add(task)
+        task.add_done_callback(_BG_TASKS.discard)
+    except Exception as e:  # noqa: BLE001 — must never break the webhook
+        logger.warning("seller-bridge partner-paid schedule failed (partner_order=%s): %s", order_id, e)
+
+
+async def _notify_partner_order_paid_bg(partner_order_id: str) -> None:
+    try:
+        # Looked up on the module at call time so tests can monkeypatch them.
+        payload = await load_partner_checkout(partner_order_id)
+        if payload is not None:
+            await post_partner_checkout(payload)
+    except Exception as e:  # noqa: BLE001 — background, non-fatal
+        logger.warning("seller-bridge partner-paid POST failed (partner_order=%s): %s", partner_order_id, e)

@@ -496,6 +496,8 @@ async def _handle_paid(
         # Notify the partner out-of-band — same pattern as the Xendit
         # receiver: the callback ACK must not wait on the partner endpoint.
         asyncio.create_task(partner_webhook.notify_partner_paid_bg(p_order.id))
+        # Record it in the seller's OITO (best-effort, background, idempotent).
+        seller_bridge.notify_partner_order_paid(p_order)
         return {
             "responseCode": "2005200",
             "responseMessage": "Request has been processed successfully",
