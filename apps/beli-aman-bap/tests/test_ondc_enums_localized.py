@@ -26,8 +26,7 @@ _ENUM_PATH = os.path.abspath(
         "..",
         "..",
         "..",
-        "..",
-        "jaringan-dagang-network",
+        "packages",
         "network-extension",
         "enums",
         "retail.yaml",
@@ -37,8 +36,7 @@ _ENUM_PATH = os.path.abspath(
 
 @pytest.fixture(scope="module")
 def enums() -> dict:
-    if not os.path.exists(_ENUM_PATH):
-        pytest.skip(f"network-extension enums not checked out at {_ENUM_PATH}")
+    assert os.path.exists(_ENUM_PATH), f"Required tracked enum file missing: {_ENUM_PATH}"
     with open(_ENUM_PATH, "r", encoding="utf-8") as fh:
         data = yaml.safe_load(fh)
     assert isinstance(data, dict)

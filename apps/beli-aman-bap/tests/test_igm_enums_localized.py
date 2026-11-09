@@ -21,8 +21,7 @@ _ENUM_PATH = os.path.abspath(
         "..",
         "..",
         "..",
-        "..",
-        "jaringan-dagang-network",
+        "packages",
         "network-extension",
         "enums",
         "igm.yaml",
@@ -32,8 +31,7 @@ _ENUM_PATH = os.path.abspath(
 
 @pytest.fixture(scope="module")
 def igm() -> dict:
-    if not os.path.exists(_ENUM_PATH):
-        pytest.skip(f"network-extension IGM enums not checked out at {_ENUM_PATH}")
+    assert os.path.exists(_ENUM_PATH), f"Required tracked enum file missing: {_ENUM_PATH}"
     with open(_ENUM_PATH, "r", encoding="utf-8") as fh:
         data = yaml.safe_load(fh)
     assert isinstance(data, dict)
@@ -110,7 +108,7 @@ class TestBecknProtocolMirror:
         )
         if proto not in sys.path:
             sys.path.insert(0, proto)
-        from python import ISSUE_CATEGORIES, ISSUE_SUB_CATEGORIES_ITEM
+        from jaringan_dagang_beckn import ISSUE_CATEGORIES, ISSUE_SUB_CATEGORIES_ITEM
 
         yaml_cats = {r["code"] for r in igm["issue_category"]}
         # The protocol set must be the same as the YAML set (no drift).

@@ -150,6 +150,11 @@ class Settings(BaseSettings):
     # EXPIRED. 24h matches OY's default.
     sento_invoice_duration_seconds: int = 86400  # 24h
 
+    # Server-only Midtrans fallback; a brand override must be complete.
+    midtrans_server_key: str = ""
+    midtrans_environment: str = "sandbox"
+    midtrans_merchant_id: str = ""
+
     # --- Dipay (https://api-docs.dipay.id/) — SNAP v2.1 ---
     # Base URL for Dipay's SNAP v2.1 HTTP API. Default is the demo
     # (https://api-b2x-demo.dipay.id/snap/v2.1); prod overrides via

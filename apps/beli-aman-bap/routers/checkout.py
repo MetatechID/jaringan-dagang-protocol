@@ -97,6 +97,10 @@ async def confirm_cart(
 
     reject_nonlocal_demo_invoice(cart.invoice_id, cart.qr_image_url)
     if cart.status == CartStatus.CONFIRMED:
+        if cart.invoice_provider == "midtrans" and not cart.qr_image_url:
+            from services import midtrans_invoices
+            async with async_session() as reservation_db:
+                await midtrans_invoices.create_invoice_for_cart(db, cart, reservation_db=reservation_db)
         # Idempotent — return the existing handle.
         return ConfirmOut(
             cart_id=cart.id,
@@ -119,7 +123,13 @@ async def confirm_cart(
     brand_q = await db.execute(select(Brand).where(Brand.bpp_id == cart.bpp_id))
     brand = brand_q.scalars().first()
     provider = (brand.payment_provider if brand is not None else "xendit") or "xendit"
-    if provider != "dipay":
+    if provider == "midtrans":
+        from services.midtrans_client import resolve_config
+        try:
+            resolve_config(brand, settings)
+        except ValueError:
+            raise HTTPException(409, "Invalid Midtrans configuration") from None
+    if provider not in {"dipay", "midtrans"}:
         invoice_mock_mode(provider if provider in {"oy", "sento"} else "xendit", brand)
 
     quote_token = body.quote_token or cart.quote_token
@@ -160,11 +170,13 @@ async def confirm_cart(
             from services import oy_invoices as _invoice_mod
         elif provider == "sento":
             from services import sento_invoices as _invoice_mod
+        elif provider == "midtrans":
+            from services import midtrans_invoices as _invoice_mod
         elif provider == "dipay":
             from services import dipay_invoices as _invoice_mod
         else:
             _invoice_mod = xendit_invoices
-        if provider == "dipay":
+        if provider in {"dipay", "midtrans"}:
             async with async_session() as reservation_db:
                 await _invoice_mod.create_invoice_for_cart(
                     db, cart, reservation_db=reservation_db,

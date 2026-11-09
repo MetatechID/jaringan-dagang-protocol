@@ -13,7 +13,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 APP = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(APP))
 URL = os.getenv("AUDIT_TEST_DATABASE_URL")
-pytestmark = pytest.mark.skipif(not URL, reason="requires disposable AUDIT_TEST_DATABASE_URL")
+pytestmark = [pytest.mark.integration,
+              pytest.mark.skipif(not URL, reason="requires disposable AUDIT_TEST_DATABASE_URL")]
 
 
 def load_script(name):

@@ -167,6 +167,7 @@ from routers.webhooks_jubelio import router as webhooks_jubelio_router  # noqa: 
 from routers.webhooks_oy import router as webhooks_oy_router  # noqa: E402
 from routers.webhooks_sento import router as webhooks_sento_router  # noqa: E402
 from routers.webhooks_dipay import router as webhooks_dipay_router  # noqa: E402
+from routers.webhooks_midtrans import router as webhooks_midtrans_router  # noqa: E402
 from routers.qris import router as qris_router  # noqa: E402
 from routers.wishlist import router as wishlist_router  # noqa: E402
 from routers.loyalty import router as loyalty_router  # noqa: E402
@@ -256,6 +257,7 @@ app.include_router(webhooks_xendit_router)
 app.include_router(webhooks_oy_router)
 app.include_router(webhooks_sento_router)
 app.include_router(webhooks_dipay_router)
+app.include_router(webhooks_midtrans_router)
 app.include_router(webhooks_biteship_router)
 app.include_router(webhooks_jubelio_router)
 app.include_router(qris_router)
