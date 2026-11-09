@@ -140,7 +140,7 @@ async def _notify_cart_paid_bg(order_id: str) -> None:
 
 
 def partner_checkout_payload(order: Any, brand_slug: str) -> dict[str, Any]:
-    """Body for the seller's ``POST /api/oito/internal/partner-checkouts``."""
+    """Body for the seller's ``POST /api/internal/partner-checkouts``."""
     return {
         "partner_order_id": str(order.id),
         "brand_slug": brand_slug,
@@ -178,7 +178,7 @@ async def post_partner_checkout(payload: dict[str, Any]) -> bool:
         logger.debug("Seller bridge disabled — skipping partner checkout POST")
         return False
 
-    url = f"{settings.seller_bridge_url.rstrip('/')}/api/oito/internal/partner-checkouts"
+    url = f"{settings.seller_bridge_url.rstrip('/')}/api/internal/partner-checkouts"
     headers = {
         "Content-Type": "application/json",
         "X-Internal-Token": settings.seller_bridge_token,

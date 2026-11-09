@@ -2,7 +2,7 @@
 
 Partner orders (``/api/v1/partner``, e.g. consumerland.id tickets) live only
 in the BAP DB. When one is paid the BAP POSTs a snapshot to the seller's
-``POST /api/oito/internal/partner-checkouts`` (X-Internal-Token = the seller
+``POST /api/internal/partner-checkouts`` (X-Internal-Token = the seller
 bridge token) so it is recorded as an OITO transaction.
 
 These tests pin that every partner paid path (Xendit + Dipay webhooks)
@@ -141,7 +141,7 @@ def test_loader_reads_order_and_brand_slug_and_skips_unpaid(monkeypatch):
     assert asyncio.run(seller_bridge.load_partner_checkout("po-1")) is None
 
 
-def test_post_hits_oito_internal_endpoint_with_bridge_token(monkeypatch):
+def test_post_hits_internal_partner_checkouts_endpoint_with_bridge_token(monkeypatch):
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -158,7 +158,7 @@ def test_post_hits_oito_internal_endpoint_with_bridge_token(monkeypatch):
     assert asyncio.run(seller_bridge.post_partner_checkout({"partner_order_id": "po-1"})) is True
     [req] = seen
     assert req.method == "POST"
-    assert str(req.url) == "http://seller.test/api/oito/internal/partner-checkouts"
+    assert str(req.url) == "http://seller.test/api/internal/partner-checkouts"
     assert req.headers["X-Internal-Token"] == "tok"
     assert json.loads(req.content) == {"partner_order_id": "po-1"}
 
