@@ -26,6 +26,7 @@ from models.escrow_ledger import EscrowEntryStatus, EscrowEntryType, EscrowLedge
 from services import order_paid
 from services import partner_orders
 from services import partner_webhook
+from services import seller_bridge
 
 _LOG = logging.getLogger("beli_aman_bap.webhooks_xendit")
 
@@ -98,6 +99,8 @@ async def _handle_paid(db: AsyncSession, invoice_id: str, external_id: str) -> d
         # callback endpoint can't delay the 200 ACK back to Xendit (which would
         # make Xendit retry). Opens its own DB session for the brand lookup.
         asyncio.create_task(partner_webhook.notify_partner_paid_bg(order.id))
+        # Record it in the seller's OITO (best-effort, background, idempotent).
+        seller_bridge.notify_partner_order_paid(order)
         return {"ok": True, "order_id": order.id, "status": order.status}
 
     if external_id.startswith("order-"):
@@ -116,6 +119,9 @@ async def _handle_paid(db: AsyncSession, invoice_id: str, external_id: str) -> d
             raise HTTPException(404, f"No cart for external_id={external_id}")
         if cart.payment_state != "paid":
             cart.payment_state = "paid"
+            # Only on the transition (not replays): tell the seller the bot
+            # cart is paid so it can award OITO points. Fire-and-forget.
+            seller_bridge.notify_cart_paid(cart)
         if cart.invoice_id is None:
             cart.invoice_id = invoice_id
         cart.invoice_provider = "xendit"

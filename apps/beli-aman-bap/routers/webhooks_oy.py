@@ -30,6 +30,7 @@ from models.bot_rest import Cart, CartStatus
 from models.brand import Brand
 from models.escrow_ledger import EscrowEntryStatus, EscrowEntryType, EscrowLedger
 from services import order_paid
+from services import seller_bridge
 
 _LOG = logging.getLogger("beli_aman_bap.webhooks_oy")
 
@@ -194,6 +195,9 @@ async def _handle_paid(db: AsyncSession, invoice_id: str, body: dict) -> dict:
             raise HTTPException(404, f"No cart for external_ref={external_ref}")
         if cart.payment_state != "paid":
             cart.payment_state = "paid"
+            # Only on the transition (not replays): tell the seller the bot
+            # cart is paid so it can award OITO points. Fire-and-forget.
+            seller_bridge.notify_cart_paid(cart)
         if cart.invoice_id is None:
             cart.invoice_id = invoice_id
         cart.invoice_provider = "oy"

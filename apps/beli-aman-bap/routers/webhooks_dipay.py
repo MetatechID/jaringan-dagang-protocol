@@ -62,6 +62,7 @@ from services import dipay_client
 from services import order_paid
 from services import partner_orders
 from services import partner_webhook
+from services import seller_bridge
 from services.dipay_client import DipayError
 
 _LOG = logging.getLogger("beli_aman_bap.webhooks_dipay")
@@ -495,6 +496,8 @@ async def _handle_paid(
         # Notify the partner out-of-band — same pattern as the Xendit
         # receiver: the callback ACK must not wait on the partner endpoint.
         asyncio.create_task(partner_webhook.notify_partner_paid_bg(p_order.id))
+        # Record it in the seller's OITO (best-effort, background, idempotent).
+        seller_bridge.notify_partner_order_paid(p_order)
         return {
             "responseCode": "2005200",
             "responseMessage": "Request has been processed successfully",
@@ -521,6 +524,9 @@ async def _handle_paid(
     if cart is not None:
         if cart.payment_state != "paid":
             cart.payment_state = "paid"
+            # Only on the transition (not replays): tell the seller the bot
+            # cart is paid so it can award OITO points. Fire-and-forget.
+            seller_bridge.notify_cart_paid(cart)
         if cart.invoice_id is None:
             cart.invoice_id = ref
         cart.invoice_provider = "dipay"

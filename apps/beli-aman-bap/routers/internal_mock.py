@@ -71,7 +71,11 @@ async def mock_dipay_qris_paid(
     if body.amount_idr is not None and body.amount_idr != expected:
         raise HTTPException(409, "Mock payment amount mismatch")
     if cart is not None:
-        cart.payment_state = "paid"
+        if cart.payment_state != "paid":
+            cart.payment_state = "paid"
+            # Same as the real webhooks: notify the seller on the transition
+            # only, so it can award OITO points. Fire-and-forget.
+            seller_bridge.notify_cart_paid(cart)
         cart.invoice_provider = "dipay"
         return {"ok": True, "cart_id": cart.id, "payment_state": cart.payment_state}
     paid = await order_paid.mark_order_paid(

@@ -41,6 +41,7 @@ from models.brand import Brand
 from models.escrow_ledger import EscrowEntryStatus, EscrowEntryType, EscrowLedger
 from services import order_paid
 from services import sento_client
+from services import seller_bridge
 from services.sento_client import SentoError
 
 _LOG = logging.getLogger("beli_aman_bap.webhooks_sento")
@@ -251,6 +252,9 @@ async def _handle_paid(db: AsyncSession, partner_tx_id: str, body: dict) -> dict
         _verify_amount(body, int((cart.quote_json or {}).get("total_idr") or 0))
         if cart.payment_state != "paid":
             cart.payment_state = "paid"
+            # Only on the transition (not replays): tell the seller the bot
+            # cart is paid so it can award OITO points. Fire-and-forget.
+            seller_bridge.notify_cart_paid(cart)
         if cart.invoice_id is None:
             cart.invoice_id = partner_tx_id
         cart.invoice_provider = "sento"
