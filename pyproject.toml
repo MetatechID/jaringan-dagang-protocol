@@ -23,10 +23,13 @@ select = ["E", "F", "I", "B", "UP"]
 ignore = ["E501"]
 
 [tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests", "packages/*/tests", "apps/*/tests"]
 markers = [
+  "integration: requires explicitly provisioned disposable external services; excluded from offline unit tier.",
   "browser: long-running browser/Playwright tests (real Chrome/Chromium). Run with `pytest -m browser`.",
   "llm: tests that require a live LLM provider. Run with `pytest -m llm`.",
 ]
 # Default: run only the unit tier. Override with `-m browser` or `-m llm` (the last `-m` wins).
-addopts = "-m 'not browser and not llm'"
+addopts = "-m 'not browser and not llm and not integration'"

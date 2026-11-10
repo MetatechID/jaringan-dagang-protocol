@@ -135,6 +135,12 @@ async def release(
     brand_q = await db.execute(select(Brand).where(Brand.id == order.brand_id))
     brand = brand_q.scalar_one_or_none()
     provider = (brand.payment_provider if brand is not None else "xendit") or "xendit"
+    snapshot_provider = (order.payment_method_snapshot or {}).get("payment_provider")
+    if provider == "midtrans" or snapshot_provider == "midtrans":
+        entry.status = EscrowEntryStatus.FAILED
+        entry.description = "Midtrans payout requires manual reconciliation; automatic disbursement unsupported"
+        await db.commit()
+        raise ReleaseFailed("Midtrans automatic payouts are not supported", status_code=409)
     if provider == "dipay":
         entry.partner_ref = snap_ref("r", str(entry.id))
 
@@ -240,6 +246,8 @@ async def refund(
     brand_q = await db.execute(select(Brand).where(Brand.id == order.brand_id))
     brand = brand_q.scalar_one_or_none()
     provider = (brand.payment_provider if brand is not None else "xendit") or "xendit"
+    if (order.payment_method_snapshot or {}).get("payment_provider") == "midtrans":
+        provider = "midtrans"
     if provider == "dipay":
         entry.status = EscrowEntryStatus.FAILED
         entry.description = f"{entry.description} — manual Dipay refund required"

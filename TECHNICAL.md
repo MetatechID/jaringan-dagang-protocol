@@ -32,6 +32,14 @@ Each app is deployable to Vercel / a container runtime out of the box.
 The reference deployment is configured + run by MetatechID; this repo
 is the source of truth for the code.
 
+## Midtrans Payment Link collection
+
+BAP's `midtrans` provider uses durable link/attempt tables, server-only credentials,
+existing hosted `invoice_url` contracts, and verified `/webhooks/midtrans` callbacks.
+Explicit schema migration is required; no startup migration. Automatic Midtrans
+payout/refund is unsupported. See [Midtrans operations](apps/beli-aman-bap/MIDTRANS.md)
+for configuration, recovery, limitations and offline checks.
+
 ## Domain conventions (ONDC for Indonesia)
 
 | Domain code | Maps to | Used by |
@@ -149,8 +157,9 @@ Their tags + Docker images follow the latest stable
 ## Payment gateways
 
 The BAP supports multiple payment gateway providers. Each brand configures
-its preferred provider via the `Brand.payment_provider` column (`oy` or
-`xendit`).
+its preferred collection provider via the `Brand.payment_provider` column
+(`xendit`, `oy`, `sento`, `dipay`, or `midtrans`). Provider selection does not
+imply payout/refund support; Midtrans is hosted collection only.
 
 ### OY! Indonesia
 

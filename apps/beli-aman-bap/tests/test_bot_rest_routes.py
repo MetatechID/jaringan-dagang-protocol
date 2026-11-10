@@ -240,7 +240,12 @@ def _build_test_client(monkeypatch):
         MirrorStore,
     )
 
+    from models.brand import Brand
+    from sqlalchemy.dialects.sqlite import base as sqlite_base
+    monkeypatch.setattr(sqlite_base.SQLiteTypeCompiler, "visit_JSONB", sqlite_base.SQLiteTypeCompiler.visit_JSON, raising=False)
+
     _TABLES_FOR_TESTS = [
+        Brand.__table__,
         SearchSession.__table__,
         Cart.__table__,
         MirrorStore.__table__,
@@ -258,7 +263,21 @@ def _build_test_client(monkeypatch):
                 checkfirst=True,
             )
 
+        async with TestSession() as session:
+            session.add(Brand(slug="safiya", name="Test store", bpp_id="safiyafood.jaringan-dagang.id", payment_provider="xendit"))
+            await session.commit()
+
     asyncio.run(_create())
+
+    from services import xendit_invoices
+    async def fake_invoice(db, cart):
+        cart.invoice_id = f"test-{cart.id}"
+        cart.invoice_provider = "xendit"
+        cart.qr_image_url = "https://checkout.example.test/invoice"
+        return {"id": cart.invoice_id, "invoice_url": cart.qr_image_url}
+    monkeypatch.setattr(xendit_invoices, "create_invoice_for_cart", fake_invoice)
+    from services import payment_policy
+    monkeypatch.setattr(payment_policy, "invoice_mock_mode", lambda *args, **kwargs: True)
 
     # Set the bot token before importing routers.
     monkeypatch.setenv("BOT_API_TOKEN", "test-bot-secret")
@@ -986,13 +1005,10 @@ class TestCheckoutStatusLazyBackfill:
 
         return asyncio.run(_read())
 
-    def test_promotes_payment_state_to_paid_when_seller_reports_paid(
+    def test_unsigned_seller_report_cannot_mark_paid(
         self, monkeypatch
     ):
-        """Regression for the original bug report: BPP says paid but BAP
-        cart stuck at pending. /status must pick up ``payment_status="paid"``
-        from the seller and flip ``cart.payment_state``.
-        """
+        """Only verified gateway callbacks authorize paid state, never seller hints."""
         import httpx
 
         client, TestSession = _build_test_client(monkeypatch)
@@ -1018,17 +1034,14 @@ class TestCheckoutStatusLazyBackfill:
             headers={"Authorization": "Bearer test-bot-secret"},
         )
         assert resp.status_code == 200, resp.text
-        assert resp.json()["payment_state"] == "paid"
+        assert resp.json()["payment_state"] == "pending"
+        assert _FakeAsyncClient.captured["calls"] == 0
 
         state, _ = self._read_cart(TestSession, cart_id)
-        assert state == "paid"
+        assert state == "pending"
 
-    def test_polls_seller_even_when_qr_image_already_present(self, monkeypatch):
-        """The old gate ``not cart.qr_image_url`` caused the seller poll
-        to skip once the QR was filled — locking ``payment_state`` at
-        whatever value was there. The gate must also fire while
-        payment_state is still ``pending``.
-        """
+    def test_status_does_not_query_seller_with_existing_qr(self, monkeypatch):
+        """QR display data never authorizes payment or seller backchannel polling."""
         import httpx
 
         client, TestSession = _build_test_client(monkeypatch)
@@ -1048,10 +1061,8 @@ class TestCheckoutStatusLazyBackfill:
             f"/api/v1/checkout/{cart_id}/status",
             headers={"Authorization": "Bearer test-bot-secret"},
         )
-        assert "url" in _FakeAsyncClient.captured, (
-            "Seller payment endpoint must be polled even when qr_image_url "
-            "is already filled, otherwise payment_state stays stuck."
-        )
+        assert _FakeAsyncClient.captured["calls"] == 0
+        assert self._read_cart(TestSession, cart_id)[0] == "pending"
 
     def test_keeps_pending_when_seller_reports_pending(self, monkeypatch):
         """If the BPP hasn't seen payment yet, BAP must not flip to paid."""
@@ -1104,10 +1115,8 @@ class TestCheckoutStatusLazyBackfill:
         state, _ = self._read_cart(TestSession, cart_id)
         assert state == "expired"
 
-    def test_fills_qr_image_url_when_missing(self, monkeypatch):
-        """The original lazy-backfill behaviour still works: a cart with
-        no qr_image_url gets it filled from the seller payload.
-        """
+    def test_status_does_not_backfill_unverified_seller_url(self, monkeypatch):
+        """Missing display data stays absent until trusted checkout/callback writes it."""
         import httpx
 
         client, TestSession = _build_test_client(monkeypatch)
@@ -1132,7 +1141,8 @@ class TestCheckoutStatusLazyBackfill:
             f"/api/v1/checkout/{cart_id}/status",
             headers={"Authorization": "Bearer test-bot-secret"},
         )
-        assert resp.json()["qr_image_url"] == "https://seller.example.id/qr.png"
+        assert resp.json()["qr_image_url"] is None
+        assert _FakeAsyncClient.captured["calls"] == 0
 
     def test_seller_network_error_does_not_500(self, monkeypatch):
         """If the seller endpoint is unreachable or times out, /status must
@@ -1185,44 +1195,20 @@ class TestCheckoutStatusLazyBackfill:
         assert resp.json()["payment_state"] == "pending"
 
     def test_idempotent_no_repoll_once_paid(self, monkeypatch):
-        """Once payment_state has been promoted to ``paid``, subsequent
-        /status hits must NOT keep polling the seller (the gate condition
-        ``needs_url or needs_paid`` is both false). This bounds the load
-        the bot's poller puts on the BPP's payment endpoint.
-        """
+        """Status returns persisted gateway-paid state, with no seller calls."""
         import httpx
 
         client, TestSession = _build_test_client(monkeypatch)
         cart_id = self._seed_confirmed_cart(
-            TestSession,
-            payment_state="pending",
-            qr_image_url="https://seller.example.id/qr.png",
-        )
-
-        monkeypatch.setattr(
-            httpx,
-            "AsyncClient",
-            _FakeAsyncClient.factory({"payment_status": "paid"}),
-        )
-
-        # First hit: should promote pending → paid (1 seller call).
-        client.get(
-            f"/api/v1/checkout/{cart_id}/status",
-            headers={"Authorization": "Bearer test-bot-secret"},
-        )
-        assert _FakeAsyncClient.captured["calls"] == 1
-
-        # Second hit: cart is now paid + qr_image_url present, so the
-        # gate is false on both legs — no further seller poll.
-        client.get(
-            f"/api/v1/checkout/{cart_id}/status",
-            headers={"Authorization": "Bearer test-bot-secret"},
-        )
-        assert _FakeAsyncClient.captured["calls"] == 1, (
-            "Expected no extra seller poll once payment_state=paid and "
-            "qr_image_url is present; got "
-            f"{_FakeAsyncClient.captured['calls']} total calls."
-        )
+            TestSession, payment_state="paid", qr_image_url="https://seller.example.id/qr.png")
+        monkeypatch.setattr(httpx, "AsyncClient", _FakeAsyncClient.factory({"payment_status": "pending"}))
+        for _ in range(2):
+            response = client.get(f"/api/v1/checkout/{cart_id}/status",
+                headers={"Authorization": "Bearer test-bot-secret"})
+            assert response.status_code == 200
+            assert response.json()["payment_state"] == "paid"
+        assert _FakeAsyncClient.captured["calls"] == 0
+        assert self._read_cart(TestSession, cart_id)[0] == "paid"
 
 
 # --- 4. Search envelope (pure builder) ---------------------------------

@@ -18,17 +18,9 @@ import sys
 
 import pytest
 
-# Buyer tests live at apps/beli-aman-bap/tests/; the vendored package is
-# at the buyer repo root (three levels up).
-_PROTO = os.path.abspath(
-    os.path.join(
-        os.path.dirname(__file__), "..", "..", "..", "packages", "beckn-protocol"
-    )
-)
-if _PROTO not in sys.path:
-    sys.path.insert(0, _PROTO)
+# Exercise canonical wheel installed in the BAP test environment.
 
-from python.errors import (  # noqa: E402
+from jaringan_dagang_beckn.errors import (  # noqa: E402
     ONDC_RETAIL_ERROR_CODES,
     BecknError,
     BecknErrorType,

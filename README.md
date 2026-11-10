@@ -64,6 +64,12 @@ docker run -p 3030:3030 ghcr.io/metatechid/jaringan-dagang-registry:latest
 See [`examples/`](examples/) for end-to-end scenarios:
 quote-a-product, confirm-an-order, dispute-a-fulfillment.
 
+## Midtrans hosted payments
+
+BAP optionally supports Midtrans Payment Links alongside existing providers. See
+[setup, migration and verification limits](apps/beli-aman-bap/MIDTRANS.md).
+Midtrans payout/refund automation is not included; no provider default changes.
+
 ## BAP callback authorization
 
 BAP callbacks require a verified subscriber signature, even when the legacy

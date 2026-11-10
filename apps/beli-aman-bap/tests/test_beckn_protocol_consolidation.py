@@ -33,7 +33,7 @@ if _BAP_DIR not in sys.path:
 
 _VENDORED_DIR = os.path.join(_BAP_DIR, "beckn_protocol")
 _CANONICAL_DIR = os.path.abspath(
-    os.path.join(_BAP_DIR, "..", "..", "packages", "beckn-protocol", "python")
+    os.path.join(_BAP_DIR, "..", "..", "packages", "beckn-protocol-py", "src", "jaringan_dagang_beckn")
 )
 
 
@@ -120,7 +120,7 @@ def test_resolver_resolves_safiya_to_ret11():
 def test_vendored_surface_is_superset_of_canonical():
     """Every canonical export must be re-exported by the vendored copy."""
     beckn_protocol = importlib.import_module("beckn_protocol")
-    canonical = importlib.import_module("python")
+    canonical = importlib.import_module("jaringan_dagang_beckn")
     missing = [
         name for name in canonical.__all__ if not hasattr(beckn_protocol, name)
     ]

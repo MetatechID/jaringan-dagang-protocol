@@ -292,6 +292,7 @@ def client():
     from models.base import Base
     from models.brand import Brand
     from models.payout_bank_account import PayoutBankAccount
+    from models.midtrans_payment import MidtransPaymentLink
     from models.profile import BeliAmanProfile
     from models.store_membership import StoreMembership
     from routers.brands import router as brands_router
@@ -319,6 +320,7 @@ def client():
                     PayoutBankAccount.__table__,
                     BeliAmanProfile.__table__,
                     StoreMembership.__table__,
+                    MidtransPaymentLink.__table__,
                 ],
                 checkfirst=True,
             )
@@ -657,6 +659,80 @@ def test_dipay_provider_requires_active_bank_account(client):
     # incomplete in the test env — assert the bank-account part worked.
     rows = asyncio.run(fetch_accounts("antarestar"))
     assert rows[0].is_active is True
+
+
+@pytest.fixture
+def global_midtrans(monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "midtrans_server_key", "test-platform-secret")
+    monkeypatch.setattr(settings, "midtrans_environment", "sandbox")
+    monkeypatch.setattr(settings, "midtrans_merchant_id", "platform-merchant")
+    return settings
+
+
+def test_seller_selects_midtrans_using_global_config(client, global_midtrans):
+    import asyncio
+    tc, _, seed, fetch_brand, _ = client
+    asyncio.run(seed())
+    response = _put(tc, "antarestar", {"payment_provider": "midtrans"})
+    assert response.status_code == 200, response.text
+    assert response.json()["payment_provider"] == "midtrans"
+    assert asyncio.run(fetch_brand("antarestar")).payment_provider == "midtrans"
+    response = tc.get("/api/v1/brands/antarestar/payouts")
+    assert response.json()["payment_provider"] == "midtrans"
+    assert "test-platform-secret" not in response.text
+    assert not any(key.startswith("midtrans_") for key in response.json())
+    # Unrecognized brand fields cannot change platform credentials.
+    assert _put(tc, "antarestar", {"midtrans_server_key": "override"}).status_code == 200
+    assert global_midtrans.midtrans_server_key == "test-platform-secret"
+
+
+def test_midtrans_selection_requires_store_membership(client, global_midtrans):
+    import asyncio
+    from types import SimpleNamespace
+    from deps import get_current_profile
+    tc, _, seed, fetch_brand, _ = client
+    asyncio.run(seed())
+    tc.app.dependency_overrides[get_current_profile] = lambda: SimpleNamespace(id="outsider", is_super_admin=False)
+    response = _put(tc, "antarestar", {"payment_provider": "midtrans"})
+    assert response.status_code == 403
+    assert asyncio.run(fetch_brand("antarestar")).payment_provider != "midtrans"
+
+
+def test_midtrans_requires_platform_config(client, global_midtrans, monkeypatch):
+    import asyncio
+    tc, _, seed, fetch_brand, _ = client
+    asyncio.run(seed())
+    monkeypatch.setattr(global_midtrans, "midtrans_server_key", "")
+    response = _put(tc, "antarestar", {"payment_provider": "midtrans"})
+    assert response.status_code == 422
+    assert asyncio.run(fetch_brand("antarestar")).payment_provider != "midtrans"
+
+
+def test_midtrans_outstanding_link_blocks_configuration_changes(client, global_midtrans):
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+    from models.midtrans_payment import MidtransPaymentLink
+
+    tc, Session, seed, fetch_brand, _ = client
+    asyncio.run(seed())
+    assert _put(tc, "antarestar", {"payment_provider": "midtrans",
+        "midtrans_server_key": "original", "midtrans_environment": "sandbox"}).status_code == 200
+    brand = asyncio.run(fetch_brand("antarestar"))
+
+    async def reserve():
+        async with Session() as db:
+            db.add(MidtransPaymentLink(brand_id=brand.id, order_id="test-order",
+                base_reference="mt-outstanding", amount_idr=10000, environment="sandbox",
+                status="ready", expires_at=datetime.now(timezone.utc) + timedelta(minutes=60)))
+            await db.commit()
+    asyncio.run(reserve())
+    response = _put(tc, "antarestar", {"payment_provider": "oy"})
+    assert response.status_code == 409, response.text
+    # Saving unrelated fields or identical settings remains safe.
+    assert _put(tc, "antarestar", {"payment_provider": "midtrans",
+        "midtrans_environment": "sandbox"}).status_code == 200
+    assert asyncio.run(fetch_brand("antarestar")).payment_provider == "midtrans"
 
 
 def test_active_account_survives_other_puts(client):

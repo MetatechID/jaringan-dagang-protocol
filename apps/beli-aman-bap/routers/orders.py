@@ -924,7 +924,7 @@ async def create_invoice(
     ``payment_provider``).
     """
     from models.brand import Brand
-    from services import dipay_invoices, oy_invoices, sento_invoices, xendit_invoices
+    from services import dipay_invoices, midtrans_invoices, oy_invoices, sento_invoices, xendit_invoices
     from services.dipay_client import DipayError
 
     # Do not retain a row lock over provider I/O. Dipay reserves the
@@ -962,6 +962,11 @@ async def create_invoice(
             response = await sento_invoices.create_invoice_for_order(
                 db, order, buyer_email=profile.email,
             )
+        elif provider == "midtrans":
+            async with async_session() as reservation_db:
+                response = await midtrans_invoices.create_invoice_for_order(
+                    db, order, reservation_db=reservation_db,
+                )
         elif provider == "dipay":
             # Same buyer-email threading as the Sento path — QRIS MPM generate
             # itself takes no email, but the snapshot stores it for ops parity.

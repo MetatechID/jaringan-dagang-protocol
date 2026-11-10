@@ -9,6 +9,7 @@ from .otp_code import OtpCode
 from .address import Address
 from .payment_method import PaymentMethod
 from .brand import Brand
+from .midtrans_payment import MidtransPaymentLink, MidtransPaymentAttempt
 from .partner_order import PartnerOrder, PartnerOrderStatus
 from .webhook_audit import WebhookAudit
 from .payout_bank_account import PayoutBankAccount

@@ -196,7 +196,7 @@ async def get_product(slug: str, product_slug: str) -> dict:
 # ----- Payouts & Fulfillment (vibe-admin) -----
 
 
-ALLOWED_PAYMENT_PROVIDERS = {"xendit", "sento", "dipay", "oy"}
+ALLOWED_PAYMENT_PROVIDERS = {"xendit", "sento", "dipay", "oy", "midtrans"}
 
 
 class BankAccountIn(BaseModel):
@@ -396,12 +396,25 @@ async def put_payouts(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     brand = await _resolve_brand_for_edit(slug, profile, db)
+    # Serialize configuration changes with new Midtrans reservations.
+    brand = (await db.execute(select(Brand).where(Brand.id == brand.id)
+                             .with_for_update().execution_options(populate_existing=True))).scalar_one()
 
     def _normalize(v: str | None) -> str | None:
         if v is None:
             return None
         v = v.strip()
         return v or None
+
+    changes_provider = body.payment_provider is not None and body.payment_provider != brand.payment_provider
+    if changes_provider:
+        from models.midtrans_payment import MidtransPaymentLink
+        pending = (await db.execute(select(MidtransPaymentLink.id).where(
+            MidtransPaymentLink.brand_id == brand.id,
+            MidtransPaymentLink.status != "paid",
+        ).limit(1))).scalar_one_or_none()
+        if pending:
+            raise HTTPException(409, "Outstanding Midtrans payments require reconciliation before configuration changes")
 
     # --- payout bank accounts: delete → create/update → set active ---
     existing = {a.id: a for a in await _brand_accounts(db, brand.id)}
@@ -500,6 +513,13 @@ async def put_payouts(
         normalized_pp = _normalize(body.payment_provider)
         if normalized_pp not in ALLOWED_PAYMENT_PROVIDERS:
             raise HTTPException(422, "Unsupported payment_provider")
+        if normalized_pp == "midtrans":
+            from config import settings
+            from services.midtrans_client import resolve_config
+            try:
+                resolve_config(None, settings)
+            except ValueError:
+                raise HTTPException(422, "Midtrans is not configured by platform operator") from None
         if normalized_pp == "dipay":
             from services.dipay_client import DipayError, resolve_config
             try:

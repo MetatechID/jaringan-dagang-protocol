@@ -85,6 +85,7 @@ async def mark_order_paid(
     order_id: str,
     invoice_id: str,
     actor: str = "system:xendit_webhook",
+    schedule_effects: bool = True,
 ) -> Order:
     """Idempotently flip ``order_id`` to ESCROW_HELD with a HOLD ledger row.
 
@@ -143,14 +144,16 @@ async def mark_order_paid(
     # Best-effort seller dispatch — non-fatal. Scheduled as a background
     # task so the DB transaction can commit (releasing the row lock)
     # before the slow HTTP calls to Beckn / seller bridge.
-    asyncio.create_task(_dispatch_to_seller(order))
+    if schedule_effects:
+        asyncio.create_task(_dispatch_to_seller(order))
 
     # Best-effort Meta Conversions API Purchase event. Scheduled as a
     # background task so a Meta outage or slow response can't delay the
     # webhook ACK back to Xendit. Runs in its own DB session because the
     # caller's session may already be committed/closed by the time we
     # actually fire.
-    asyncio.create_task(_fire_capi_purchase_bg(order.id))
+    if schedule_effects:
+        asyncio.create_task(_fire_capi_purchase_bg(order.id))
 
     return order
 
