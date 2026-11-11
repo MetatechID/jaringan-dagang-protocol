@@ -151,10 +151,10 @@ Clients must submit the destination used for quoting and handle 409 by
 requoting/recreating, not by removing shipping. Older clients that omit the
 destination are intentionally incompatible.
 
-The fatal `Shipping security / authoritative-shipping` workflow runs synthetic
-route/provider regressions with Python 3.12 and the canonical protocol wheel.
-Repository branch protection must require that check to block merging. To run
-locally after installing app/test dependencies and the canonical wheel:
+Synthetic route/provider regressions can be run manually with Python 3.12 and
+the canonical protocol wheel. This standalone security workflow was removed by
+operator request, so these checks no longer run automatically in GitHub Actions.
+To run locally after installing app/test dependencies and the canonical wheel:
 
 ```sh
 python -I apps/beli-aman-bap/scripts/test-shipping-security.py \
