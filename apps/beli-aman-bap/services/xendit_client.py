@@ -15,6 +15,8 @@ import logging
 from typing import Any
 
 import httpx
+from jaringan_dagang_ops import exchanges
+from jaringan_dagang_ops.http import instrument
 
 from config import settings
 
@@ -66,6 +68,7 @@ async def _request(
         raise XenditError(0, "XENDIT_SECRET_KEY not configured")
 
     async with httpx.AsyncClient(timeout=30.0) as client:
+        instrument(client, "xendit", exchanges.path_operation(method, path), idempotent=True if idempotency_key else None)
         resp = await client.request(
             method,
             f"{_BASE_URL}{path}",

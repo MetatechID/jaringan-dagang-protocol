@@ -9,6 +9,7 @@ See ``services/oy_client.py`` for the raw HTTP wrapper.
 
 from __future__ import annotations
 
+from jaringan_dagang_ops import context
 import logging
 from typing import Any
 
@@ -89,6 +90,7 @@ async def create_invoice_for_cart(db: AsyncSession, cart: Cart) -> dict:
     success_url = f"{base}/checkout/done?cart_id={cart.id}"
     failure_url = f"{base}/checkout/failed?cart_id={cart.id}"
 
+    context.bind_refs(cart_id=cart.id, brand_id=getattr(brand, "id", None))
     response = await oy_client.create_invoice(
         api_key=brand.oy_api_key,
         username=brand.oy_username,
@@ -170,6 +172,7 @@ async def create_invoice_for_order(db: AsyncSession, order: Order) -> dict:
     # still sees the receipt on OY's hosted page. Re-model when OY
     # supports a richer line-item payload.
 
+    context.bind_refs(order_id=order.id, brand_id=getattr(brand, "id", None))
     response = await oy_client.create_invoice(
         api_key=brand.oy_api_key,
         username=brand.oy_username,

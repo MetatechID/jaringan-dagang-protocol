@@ -11,6 +11,7 @@ from models.bot_rest import Cart, CartStatus
 from models.order import Order, OrderState
 from models.escrow_ledger import EscrowLedger, EscrowEntryType, EscrowEntryStatus
 from models.midtrans_payment import MidtransPaymentLink, MidtransPaymentAttempt
+from services.partner_exchange import bind_reference
 from services import midtrans_client as client, order_paid
 
 router = APIRouter(prefix="/webhooks", tags=["midtrans"])
@@ -55,6 +56,7 @@ async def midtrans_notification(request: Request, db: AsyncSession = Depends(get
     if link is None:
         raise HTTPException(404, "Payment reference not found")
     brand = (await db.execute(select(Brand).where(Brand.id == link.brand_id))).scalar_one()
+    bind_reference(None, provider_ref=attempt_id, brand=brand)
     try:
         config = client.resolve_config(brand, settings)
     except ValueError:

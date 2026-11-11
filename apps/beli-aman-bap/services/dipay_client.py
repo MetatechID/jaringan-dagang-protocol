@@ -66,6 +66,8 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
+from jaringan_dagang_ops import exchanges
+from jaringan_dagang_ops.http import instrument
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
@@ -339,6 +341,7 @@ async def _fetch_token(config: DipayConfig) -> tuple[str, int]:
     x_timestamp = _x_timestamp()
     signature = _rsa_sha256(f"{config.client_key}|{x_timestamp}", private_key)
     async with httpx.AsyncClient(timeout=30.0) as client:
+        instrument(client, "dipay", "access_token")
         resp = await client.post(
             url,
             headers={
@@ -429,6 +432,7 @@ async def _signed_request(
     # Send the exact minified bytes we hashed — httpx's json= serializer
     # would re-order / re-space and break the signature.
     async with httpx.AsyncClient(timeout=30.0) as client:
+        instrument(client, "dipay", exchanges.path_operation(method, path))
         resp = await client.request(method, url, headers=headers, content=body_str)
     if resp.status_code >= 400:
         body = _error_from_response(resp).body

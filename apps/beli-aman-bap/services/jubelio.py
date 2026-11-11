@@ -33,6 +33,7 @@ import time
 from typing import Any, Iterable
 
 import httpx
+from jaringan_dagang_ops.http import instrument
 
 from config import settings
 
@@ -124,6 +125,7 @@ async def _get_token(force: bool = False) -> str:
         if not force and _token_value and now < _token_expiry:
             return _token_value
         async with httpx.AsyncClient(timeout=15.0) as client:
+            instrument(client, "jubelio", "auth_token")
             resp = await client.post(
                 f"{_api_base()}/auth/generate-token",
                 json={
@@ -236,6 +238,7 @@ async def get_rates(
             payload["service_category_id"] = int(service_category_id)
 
         async with httpx.AsyncClient(timeout=20.0) as client:
+            instrument(client, "jubelio", "rates")
             resp = await client.post(
                 f"{_api_base()}{rates_path}", headers=headers, json=payload
             )
@@ -351,6 +354,7 @@ async def create_shipment(
                 last_status, last_body,
             )
         async with httpx.AsyncClient(timeout=30.0) as client:
+            instrument(client, "jubelio", "shipment_create")
             resp = await client.post(
                 f"{_api_base()}/shipments/create", headers=headers, json=payload
             )
@@ -416,6 +420,7 @@ async def cancel_shipment(*, awb_code: str, reason: str = "Barang belum siap") -
     _require_creds()
     headers = await _auth_headers()
     async with httpx.AsyncClient(timeout=20.0) as client:
+        instrument(client, "jubelio", "shipment_cancel")
         resp = await client.post(
             f"{_api_base()}/shipments/cancel",
             headers=headers,
@@ -440,6 +445,7 @@ async def get_shipment_by_awb(awb: str) -> dict[str, Any]:
     _require_creds()
     headers = await _auth_headers()
     async with httpx.AsyncClient(timeout=20.0) as client:
+        instrument(client, "jubelio", "shipment_by_awb")
         resp = await client.get(
             f"{_api_base()}/shipments/awb/{awb}",
             headers=headers,
@@ -469,6 +475,7 @@ async def get_service_categories() -> list[dict[str, Any]]:
     _require_creds()
     headers = await _auth_headers()
     async with httpx.AsyncClient(timeout=20.0) as client:
+        instrument(client, "jubelio", "service_categories")
         resp = await client.get(
             f"{_api_base()}/services/categories", headers=headers,
         )
@@ -487,6 +494,7 @@ async def get_regions(name: str | None = None) -> list[dict[str, Any]]:
     headers = await _auth_headers()
     params: dict[str, str] | None = {"name": name} if name else None
     async with httpx.AsyncClient(timeout=20.0) as client:
+        instrument(client, "jubelio", "regions")
         resp = await client.get(
             f"{_api_base()}/regions",
             headers=headers,
@@ -504,6 +512,7 @@ async def get_provinces() -> list[dict[str, Any]]:
     _require_creds()
     headers = await _auth_headers()
     async with httpx.AsyncClient(timeout=20.0) as client:
+        instrument(client, "jubelio", "provinces")
         resp = await client.get(
             f"{_api_base()}/region/provinces", headers=headers,
         )
@@ -519,6 +528,7 @@ async def get_cities(province_id: str) -> list[dict[str, Any]]:
     _require_creds()
     headers = await _auth_headers()
     async with httpx.AsyncClient(timeout=20.0) as client:
+        instrument(client, "jubelio", "cities")
         resp = await client.get(
             f"{_api_base()}/region/cities/{province_id}", headers=headers,
         )
@@ -534,6 +544,7 @@ async def get_districts(city_id: str) -> list[dict[str, Any]]:
     _require_creds()
     headers = await _auth_headers()
     async with httpx.AsyncClient(timeout=20.0) as client:
+        instrument(client, "jubelio", "districts")
         resp = await client.get(
             f"{_api_base()}/region/districts/{city_id}", headers=headers,
         )
@@ -554,6 +565,7 @@ async def get_areas(district_id: str) -> list[dict[str, Any]]:
     _require_creds()
     headers = await _auth_headers()
     async with httpx.AsyncClient(timeout=20.0) as client:
+        instrument(client, "jubelio", "areas")
         resp = await client.get(
             f"{_api_base()}/region/areas/{district_id}", headers=headers,
         )

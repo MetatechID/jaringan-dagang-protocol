@@ -287,7 +287,7 @@ def _log_full_callback_for_debug(request: Request, body_bytes: bytes) -> None:
     """Log the full rejected callback when explicitly enabled (temporary)."""
     if not getattr(settings, "dipay_debug_log_full_callback", False):
         return
-    from services.webhook_audit import Capture
+    from services.partner_exchange import Capture
     capture = Capture()
     capture.feed(body_bytes)
     capture.complete = True
@@ -397,7 +397,7 @@ async def _qris_notify(
         raise HTTPException(400, "Missing originalPartnerReferenceNo in callback")
 
     brand, cart, order, partner_order = await _resolve_targets(db, ref)
-    from services.webhook_audit import attach
+    from services.partner_exchange import attach
     attach(request, brand=brand, order=partner_order, reference=ref)
     if brand is None and cart is None and order is None and partner_order is None:
         _LOG.warning(
@@ -675,7 +675,7 @@ async def remit_callback(
         )
         raise HTTPException(404, "Unknown Dipay disbursement")
 
-    from services.webhook_audit import attach
+    from services.partner_exchange import attach
     attach(request, reference=partner_ref)
     order_id = row.order_id
     if row.status != EscrowEntryStatus.PENDING:

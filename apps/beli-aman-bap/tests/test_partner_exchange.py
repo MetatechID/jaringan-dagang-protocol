@@ -7,7 +7,19 @@ from types import SimpleNamespace
 APP = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(APP))
 
-from services.webhook_audit import AuditMiddleware, Capture, inbound_operation, safe_endpoint
+import pytest
+
+import services.partner_exchange as audit
+from services.partner_exchange import Capture, inbound_operation, install, safe_endpoint
+
+
+@pytest.fixture(autouse=True)
+def _no_span_writes(monkeypatch):
+    spans_seen = []
+    async def keep(row):
+        spans_seen.append(row)
+    monkeypatch.setattr(audit, "record_span", keep)
+    return spans_seen
 
 
 def test_capture_preserves_raw_bytes_and_safe_metadata():
@@ -80,16 +92,26 @@ def test_json_projection_scalars_duplicate_keys_and_unsafe_values():
 
 def test_selected_routes_and_sanitized_endpoint():
     assert inbound_operation("/webhooks/dipay/qris", "POST") == ("dipay", "qris_notify")
+    assert inbound_operation("/webhooks/xendit/invoice", "POST") == ("xendit", "invoice")
+    assert inbound_operation("/webhooks/xendit/disbursement", "POST") == ("xendit", "disbursement")
+    assert inbound_operation("/webhooks/sento/remit", "POST") == ("sento", "remit")
+    assert inbound_operation("/webhooks/oy/invoice", "POST") == ("oy", "invoice")
+    assert inbound_operation("/webhooks/biteship/tracking", "POST") == ("biteship", "tracking")
+    assert inbound_operation("/webhooks/jubelio", "POST") == ("jubelio", "webhook")
+    assert inbound_operation("/webhooks/midtrans", "POST") == ("midtrans", "notification")
+    assert inbound_operation("/api/v1/partner/orders/abc", "GET") == (
+        "partner", "order_status", "/api/v1/partner/orders/{order_id}")
+    assert inbound_operation("/api/v1/partner/orders/abc/x", "GET") is None
+    assert inbound_operation("/webhooks/xendit/invoice", "GET") is None
     assert inbound_operation("/health", "GET") is None
     assert safe_endpoint("https://example.test/secret/path?key=x") == "https://example.test"
 
 
 def test_middleware_records_actual_response_and_does_not_drain(monkeypatch):
     records = []
-    import services.webhook_audit as audit
     async def save(row):
         records.append(row)
-    monkeypatch.setattr(audit, "write_audit", save)
+    monkeypatch.setattr(audit, "record_exchange", save)
 
     async def app(scope, receive, send):
         # Simulate an early authentication rejection without reading body.
@@ -104,10 +126,11 @@ def test_middleware_records_actual_response_and_does_not_drain(monkeypatch):
 
     scope = {"type": "http", "method": "POST", "path": "/api/v1/partner/orders",
              "headers": [(b"authorization", b"Bearer secret")]}
-    asyncio.run(AuditMiddleware(app)(scope, receive, send))
+    asyncio.run(install(app)(scope, receive, send))
     assert messages[-1]["body"] == b'{"detail":"invalid"}'
     row = records[0]
     assert row["status"] == 401 and row["outcome"] == "http_error"
+    assert row["error_class"] == "auth_failed" and row["trace_id"]
     assert row["request"]["not_consumed"]
     assert row["response_body_raw"] == b'{"detail":"invalid"}'
     assert row["response_body_json"] == {"detail": "invalid"}
@@ -116,13 +139,12 @@ def test_middleware_records_actual_response_and_does_not_drain(monkeypatch):
 
 
 def test_asgi_preserves_malformed_binary_request_and_response(monkeypatch):
-    import services.webhook_audit as audit
     rows = []
     request_bytes = b'\xff\x00{broken json with secret'
     response_bytes = b'<html>unrecognized error</html>\xfe'
     async def save(row):
         rows.append(row)
-    monkeypatch.setattr(audit, "write_audit", save)
+    monkeypatch.setattr(audit, "record_exchange", save)
     async def app(scope, receive, send):
         assert (await receive())["body"] == request_bytes
         await send({"type": "http.response.start", "status": 400, "headers": []})
@@ -131,7 +153,7 @@ def test_asgi_preserves_malformed_binary_request_and_response(monkeypatch):
         return {"type": "http.request", "body": request_bytes}
     async def send(message):
         pass
-    asyncio.run(AuditMiddleware(app)({"type": "http", "method": "POST", "path": "/webhooks/dipay/qris"}, receive, send))
+    asyncio.run(install(app)({"type": "http", "method": "POST", "path": "/webhooks/dipay/qris"}, receive, send))
     assert rows[0]["request_body_raw"] == request_bytes
     assert rows[0]["response_body_raw"] == response_bytes
     assert rows[0]["request"]["complete"] and rows[0]["response"]["complete"]
@@ -159,11 +181,10 @@ def test_outer_wrapper_sees_500_and_times_final_chunk_not_background(monkeypatch
     from starlette.background import BackgroundTask
     from starlette.responses import JSONResponse
     from starlette.testclient import TestClient
-    import services.webhook_audit as audit
     rows = []
     async def save(row):
         rows.append(row)
-    monkeypatch.setattr(audit, "write_audit", save)
+    monkeypatch.setattr(audit, "record_exchange", save)
     app = FastAPI()
     @app.post("/webhooks/dipay/qris")
     async def callback():
@@ -171,7 +192,7 @@ def test_outer_wrapper_sees_500_and_times_final_chunk_not_background(monkeypatch
     @app.post("/webhooks/dipay/remit")
     async def fail():
         raise RuntimeError("sensitive exception text")
-    with TestClient(AuditMiddleware(app), raise_server_exceptions=False) as client:
+    with TestClient(install(app), raise_server_exceptions=False) as client:
         assert client.post("/webhooks/dipay/qris").status_code == 200
         assert client.post("/webhooks/dipay/remit").status_code == 500
     assert rows[0]["duration_ms"] < 70
@@ -179,6 +200,8 @@ def test_outer_wrapper_sees_500_and_times_final_chunk_not_background(monkeypatch
     assert rows[1]["status"] == 500
     assert rows[1]["response"]["complete"]
     assert rows[1]["error"] == "processing_error"
+    assert rows[0]["error_class"] == "ok"
+    assert rows[1]["error_class"] == "handler_error"
 
 
 def test_outbound_attempts_preserve_status_on_broken_body_and_bound_capture(monkeypatch):
@@ -187,7 +210,7 @@ def test_outbound_attempts_preserve_status_on_broken_body_and_bound_capture(monk
     rows = []
     async def save(row):
         rows.append(row)
-    monkeypatch.setattr(sender, "write_audit", save)
+    monkeypatch.setattr(audit, "record_exchange", save)
     monkeypatch.setattr(sender, "_RETRY_DELAYS", (0, 0))
     monkeypatch.setenv("WEBHOOK_AUDIT_BODY_LIMIT", "32")
     class Stream(httpx.AsyncByteStream):
@@ -219,16 +242,16 @@ def test_outbound_attempts_preserve_status_on_broken_body_and_bound_capture(monk
     assert all(r["response"]["json_parse_status"] == "truncated" for r in rows)
     assert all(r["response_body_raw"] == b"{" + b"x" * 31 for r in rows)
     assert all(r["endpoint"] == "https://example.test" for r in rows)
+    assert [r["error_class"] for r in rows] == ["retryable", "retryable", "ok"]
+    assert all(r["trace_id"] and r["span_id"] for r in rows)
 
 
 def test_writer_failure_is_best_effort(monkeypatch, caplog):
-    import database
-    from services.webhook_audit import write_audit
     def unavailable():
         raise RuntimeError("password=do-not-log")
-    monkeypatch.setattr(database, "async_session", unavailable)
-    asyncio.run(write_audit({}))
-    assert "write_failed" in caplog.text
+    monkeypatch.setattr(audit, "evidence_session", unavailable)
+    asyncio.run(audit.write_exchange({"integration": "partner", "operation": "x"}))
+    assert "exchange persistence failed" in caplog.text
     assert "do-not-log" not in caplog.text
 
 
@@ -241,7 +264,7 @@ def test_registration_dipay_paid_callback_and_duplicate_join(monkeypatch):
     from auth.partner_auth import require_partner
     from database import get_db
     from routers import partner, webhooks_dipay as dipay
-    from services import webhook_audit as audit, partner_webhook as sender
+    from services import partner_webhook as sender
     from config import settings
 
     rows, tasks = [], []
@@ -288,8 +311,7 @@ def test_registration_dipay_paid_callback_and_duplicate_join(monkeypatch):
             yield b'{"error":"webhook not configured"}'
         async def aclose(self):
             pass
-    monkeypatch.setattr(audit, "write_audit", save)
-    monkeypatch.setattr(sender, "write_audit", save)
+    monkeypatch.setattr(audit, "record_exchange", save)
     monkeypatch.setattr(sender, "CallbackTransport", Transport)
     monkeypatch.setattr(partner, "create_partner_order", create)
     monkeypatch.setattr(partner, "_create_invoice", invoice)
@@ -307,7 +329,7 @@ def test_registration_dipay_paid_callback_and_duplicate_join(monkeypatch):
     app.include_router(dipay.router)
     app.dependency_overrides[get_db] = get_session
     app.dependency_overrides[require_partner] = authenticated
-    with TestClient(AuditMiddleware(app)) as client:
+    with TestClient(install(app)) as client:
         response = client.post("/api/v1/partner/orders", json={
             "external_order_id": "EXT-1", "amount_idr": 100000, "description": "test",
             "buyer": {"name": "Sensitive buyer", "email": "buyer@example.test", "phone": "123456"}})
@@ -325,6 +347,12 @@ def test_registration_dipay_paid_callback_and_duplicate_join(monkeypatch):
     assert {r["partner_order_id"] for r in selected} == {"order-test"}
     assert {r["external_order_id"] for r in selected} == {"EXT-1"}
     assert {r["dipay_reference"] for r in selected} == {"q-join"}
+    assert {r["provider_ref"] for r in selected} == {"q-join"}
+    assert {r["brand_id"] for r in selected} == {"brand-test"}
+    # The partner callback runs in a task spawned by the QRIS request: same trace.
+    qris = {r["trace_id"] for r in selected if r["operation"] == "qris_notify"}
+    paid = {r["trace_id"] for r in selected if r["operation"] == "payment.paid"}
+    assert all(qris) and paid and paid <= qris
     outbound = [r for r in selected if r["direction"] == "outbound"]
     assert all(json.loads(r["response_body_raw"]) == {"error": "webhook not configured"} for r in outbound)
     registration = next(r for r in rows if r["operation"] == "register_order")
@@ -335,3 +363,87 @@ def test_registration_dipay_paid_callback_and_duplicate_join(monkeypatch):
     assert all(r["request_body_json"] == json.loads(r["request_body_raw"]) for r in outbound)
 
 
+
+
+def test_trace_header_matches_exchange_row_and_root_span(monkeypatch, _no_span_writes):
+    from fastapi import FastAPI
+    from starlette.testclient import TestClient
+    rows = []
+    async def save(row):
+        rows.append(row)
+    monkeypatch.setattr(audit, "record_exchange", save)
+    app = FastAPI()
+    @app.post("/webhooks/xendit/invoice")
+    async def callback():
+        audit.bind_reference("order-123e4567-e89b-12d3-a456-426614174000-release", provider_ref="inv-9")
+        return {"ok": True}
+    caller = "0af7651916cd43dd8448eb211c80319c"
+    with TestClient(install(app)) as client:
+        response = client.post("/webhooks/xendit/invoice", json={"id": "inv-9"})
+        adopted = client.post("/webhooks/xendit/invoice", json={},
+                              headers={"traceparent": f"00-{caller}-b7ad6b7169203331-01"})
+    trace_id = response.headers["x-trace-id"]
+    assert len(trace_id) == 32 and rows[0]["trace_id"] == trace_id
+    assert rows[0]["order_id"] == "123e4567-e89b-12d3-a456-426614174000"
+    assert rows[0]["provider_ref"] == "inv-9" and rows[0]["integration"] == "xendit"
+    assert adopted.headers["x-trace-id"] == caller and rows[1]["trace_id"] == caller
+    root = [s for s in _no_span_writes if s["kind"] == "server"]
+    assert root[0]["name"] == "http.server POST /webhooks/xendit/invoice"
+    assert root[0]["trace_id"] == trace_id
+
+
+def test_bind_reference_prefixes():
+    from jaringan_dagang_ops import context
+    with context.refs_scope():
+        audit.bind_reference("cart-123e4567-e89b-12d3-a456-426614174000")
+        audit.bind_reference("partner-223e4567-e89b-12d3-a456-426614174000", provider_ref="x")
+        audit.bind_reference("unrelated-id")
+        assert context.refs() == {"cart_id": "123e4567-e89b-12d3-a456-426614174000",
+                                  "partner_order_id": "223e4567-e89b-12d3-a456-426614174000",
+                                  "provider_ref": "x"}
+
+
+def test_record_exchange_keeps_known_columns_and_trims(monkeypatch):
+    added = []
+    class Session:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            pass
+        def add(self, row):
+            added.append(row)
+        async def commit(self):
+            pass
+    monkeypatch.setattr(audit, "evidence_session", Session)
+    asyncio.run(audit.record_exchange({
+        "started_at": None, "direction": "outbound", "integration": "jubelio", "operation": "rates",
+        "method": "POST", "endpoint": "https://x.test", "outcome": "response",
+        "request": {"json_parse_status": "parsed_null"}, "response": {},
+        "order_id": "o" * 80, "store_id": "not-a-column"}))
+    [row] = added
+    assert row.order_id == "o" * 36 and row.redacted is False
+    assert not hasattr(row, "store_id")
+
+
+def test_seller_bridge_propagates_trace_but_records_exchange(monkeypatch):
+    import httpx
+    from config import settings
+    from services import seller_bridge
+    rows, seen = [], []
+    async def save(row):
+        rows.append(row)
+    monkeypatch.setattr(audit, "record_exchange", save)
+    real = httpx.AsyncClient
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(200, json={"ok": True})
+    monkeypatch.setattr(seller_bridge.httpx, "AsyncClient",
+                        lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    monkeypatch.setattr(settings, "seller_bridge_enabled", True)
+    monkeypatch.setattr(settings, "seller_bridge_url", "http://seller.test/")
+    monkeypatch.setattr(settings, "seller_bridge_token", "tok")
+    assert asyncio.run(seller_bridge.post_partner_checkout({"partner_order_id": "po-1"})) is True
+    [req] = seen
+    assert req.headers["traceparent"].split("-")[1] == rows[0]["trace_id"]
+    assert rows[0]["integration"] == "seller" and rows[0]["operation"] == "partner_checkout"
+    assert rows[0]["partner_order_id"] == "po-1" and rows[0]["error_class"] == "ok"

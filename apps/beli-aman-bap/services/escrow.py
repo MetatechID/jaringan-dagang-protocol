@@ -13,6 +13,7 @@ ops for manual recovery.
 
 from __future__ import annotations
 
+from jaringan_dagang_ops import context
 import logging
 
 from sqlalchemy import select
@@ -89,6 +90,7 @@ async def release(
        manually then flips the row by hand.
     5. If Xendit rejects, ledger row → FAILED. Ops recovers.
     """
+    context.bind_refs(order_id=order_id)
     active = (
         await db.execute(
             select(EscrowLedger).where(
@@ -213,6 +215,7 @@ async def refund(
     Mirror of ``release`` but targets the original invoice rather than a
     disbursement.
     """
+    context.bind_refs(order_id=order_id)
     entry = EscrowLedger(
         order_id=order_id,
         entry_type=EscrowEntryType.REFUND,

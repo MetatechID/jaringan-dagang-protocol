@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from jaringan_dagang_ops import context
 import asyncio
 import logging
 from datetime import datetime, timezone
@@ -949,6 +950,7 @@ async def create_invoice(
     brand_q = await db.execute(select(Brand).where(Brand.id == order.brand_id))
     brand = brand_q.scalar_one_or_none()
     provider = (brand.payment_provider if brand is not None else "xendit") or "xendit"
+    context.bind_refs(order_id=order.id, brand_id=order.brand_id)
 
     try:
         if provider == "oy":

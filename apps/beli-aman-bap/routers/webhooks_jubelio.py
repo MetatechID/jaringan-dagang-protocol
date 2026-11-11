@@ -45,6 +45,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import settings
 from database import get_db
 from models.order import Order
+from services.partner_exchange import bind_reference
 from services.shipment_events import apply_shipment_event
 from services.state_machine import lock_order_for_update
 
@@ -114,6 +115,7 @@ async def tracking_callback(
             shipment_id, ref_no,
         )
         return {"ok": True, "matched": False}
+    bind_reference(None, provider_ref=shipment_id, order_id=order.id, brand_id=getattr(order, "brand_id", None))
 
     outcome = await apply_shipment_event(
         db=db, order=order, body=body, source="webhook",

@@ -11,6 +11,7 @@ import logging
 from typing import Any
 
 import httpx
+from jaringan_dagang_ops.http import instrument
 
 from config import settings
 
@@ -35,6 +36,7 @@ async def post_order(*, order_dict: dict[str, Any], order_id: str = "") -> bool:
 
     try:
         async with httpx.AsyncClient(timeout=8) as client:
+            instrument(client, "seller", "escrow_order", propagate=True, refs={"order_id": order_id or None})
             resp = await client.post(url, json=order_dict, headers=headers)
         if 200 <= resp.status_code < 300:
             logger.info(
@@ -81,6 +83,7 @@ async def patch_escrow_status(*, order_id: str, escrow_status: str) -> bool:
 
     try:
         async with httpx.AsyncClient(timeout=8) as client:
+            instrument(client, "seller", "escrow_status", propagate=True, refs={"order_id": order_id})
             resp = await client.patch(
                 url,
                 json={"escrow_status": escrow_status},
@@ -186,6 +189,7 @@ async def post_partner_checkout(payload: dict[str, Any]) -> bool:
     order_id = payload.get("partner_order_id")
     try:
         async with httpx.AsyncClient(timeout=8) as client:
+            instrument(client, "seller", "partner_checkout", propagate=True, refs={"partner_order_id": order_id})
             resp = await client.post(url, json=payload, headers=headers)
         if 200 <= resp.status_code < 300:
             logger.info("seller-bridge partner checkout ok %s -> %s (partner_order=%s)",

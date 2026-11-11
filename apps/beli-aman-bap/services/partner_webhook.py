@@ -24,7 +24,8 @@ import time
 import uuid
 from datetime import datetime, timezone
 
-from services.webhook_audit import Capture, safe_endpoint, write_audit
+from jaringan_dagang_ops import exchanges, spans
+from services.partner_exchange import Capture, safe_endpoint, write_exchange
 
 import httpx
 from sqlalchemy import select
@@ -76,14 +77,32 @@ async def send_payment_callback(*, url: str, secret: str, payload: dict, correla
 
     delivery_id = str(uuid.uuid4())
     for attempt in range(1, _RETRIES + 1):
-        started = time.monotonic()
-        incoming = Capture()
-        status, response_headers = None, {}
-        record = dict(started_at=datetime.now(timezone.utc), direction="outbound",
-                      integration="partner", operation="payment.paid", method="POST",
-                      endpoint=safe_endpoint(url), attempt=attempt, delivery_id=delivery_id,
-                      external_order_id=payload.get("order_id"), dipay_reference=payload.get("reference"))
-        record.update(correlation or {})
+        async with spans.span("http.client partner.payment.paid", kind="client",
+                              attributes={"attempt": attempt, "delivery_id": delivery_id}) as sp:
+            delivered, error_class = await _attempt(url, body, headers, payload, correlation,
+                                                    attempt, delivery_id)
+            sp.set(error_class=error_class)
+            if not delivered:
+                sp.fail(error_class)
+        if delivered:
+            return True
+        if attempt < _RETRIES:
+            await asyncio.sleep(_RETRY_DELAYS[attempt - 1])
+    return False
+
+
+async def _attempt(url, body, headers, payload, correlation, attempt, delivery_id) -> tuple[bool, str]:
+    """One delivery attempt, recorded as one exchange row. ``(delivered, error_class)``."""
+    started = time.monotonic()
+    incoming = Capture()
+    status, response_headers, sent = None, {}, False
+    record = exchanges.base_record(direction="outbound", integration="partner", operation="payment.paid",
+                                   method="POST", endpoint=safe_endpoint(url))
+    record.update(started_at=datetime.now(timezone.utc), attempt=attempt, delivery_id=delivery_id,
+                  external_order_id=payload.get("order_id"), dipay_reference=payload.get("reference"),
+                  provider_ref=payload.get("reference"))
+    record.update(correlation or {})
+    try:
         try:
             callback_destination(url)
             # Use the transport directly: no redirect/proxy machinery and no
@@ -93,6 +112,7 @@ async def send_payment_callback(*, url: str, secret: str, payload: dict, correla
                 request.extensions["timeout"] = {
                     phase: _TIMEOUT_SECONDS for phase in ("connect", "read", "write", "pool")
                 }
+                sent = True
                 resp = await transport.handle_async_request(request)
                 try:
                     status = resp.status_code
@@ -108,43 +128,56 @@ async def send_payment_callback(*, url: str, secret: str, payload: dict, correla
                 finally:
                     await resp.aclose()
             record.update(status=status, outcome="response" if 200 <= status < 300 else "http_error",
-                          error=None if incoming.complete else "response_capture_incomplete")
+                          error=None if incoming.complete else "response_capture_incomplete",
+                          error_class=exchanges.classify_status(status))
             if 200 <= status < 300:
                 _LOG.info("partner callback ok status=%d order_id=%s", status, payload.get("order_id"))
-                await _persist_attempt(record, body, incoming, response_headers, started)
-                return True
+                return True, exchanges.OK
             _LOG.warning(
                 "partner callback failed reason=non_2xx status=%d order_id=%s attempt=%d",
                 status, payload.get("order_id"), attempt,
             )
+            return False, record["error_class"]
         except Exception as exc:  # noqa: BLE001 — payment is already committed
             reason = "destination_rejected" if isinstance(exc, CallbackURLRejected) else "transport_error"
-            record.update(status=status, outcome="response" if status is not None and 200 <= status < 300 else "transport_error",
-                          error="response_capture_incomplete" if status is not None else reason)
-            if status is not None and 200 <= status < 300:
-                await _persist_attempt(record, body, incoming, response_headers, started)
-                return True
+            delivered = status is not None and 200 <= status < 300
+            record.update(status=status, outcome="response" if delivered else "transport_error",
+                          error="response_capture_incomplete" if status is not None else reason,
+                          error_class=_classify_failure(exc, status, sent))
+            if delivered:
+                return True, exchanges.OK
             _LOG.warning(
                 "partner callback failed reason=%s order_id=%s attempt=%d",
                 reason, payload.get("order_id"), attempt,
             )
+            return False, record["error_class"]
+    finally:
         await _persist_attempt(record, body, incoming, response_headers, started)
-        if attempt < _RETRIES:
-            await asyncio.sleep(_RETRY_DELAYS[attempt - 1])
-    return False
+
+
+def _classify_failure(exc, status, sent) -> str:
+    if status is not None:
+        return exchanges.classify_status(status)
+    if isinstance(exc, CallbackURLRejected):
+        return exchanges.LOCAL_ERROR  # the brand's configured URL is refused before sending
+    if isinstance(exc, TimeoutError):
+        return exchanges.AMBIGUOUS if sent else exchanges.RETRYABLE
+    return exchanges.classify_exception(exc, sent=sent, idempotent=False)
 
 
 async def _persist_attempt(record, body, incoming, response_headers, started):
     outgoing = Capture()
     outgoing.feed(body)
     outgoing.complete = True
+    response_json = incoming.parsed_json()[0]
     record.update(completed_at=datetime.now(timezone.utc),
                   duration_ms=int((time.monotonic() - started) * 1000),
                   request=outgoing.snapshot({"content-type": "application/json"}),
                   response=incoming.snapshot(response_headers),
                   request_body_raw=outgoing.raw_body(), response_body_raw=incoming.raw_body(),
-                  request_body_json=outgoing.parsed_json()[0], response_body_json=incoming.parsed_json()[0])
-    await write_audit(record)
+                  request_body_json=outgoing.parsed_json()[0], response_body_json=response_json,
+                  partner_code=exchanges.partner_code(response_json))
+    await write_exchange(record)
 
 
 async def notify_partner_paid(order, brand) -> bool:
@@ -162,7 +195,8 @@ async def notify_partner_paid(order, brand) -> bool:
         secret=brand.partner_callback_secret,
         payload=payload,
         correlation={"brand_id": str(brand.id), "partner_order_id": str(order.id),
-                     "external_order_id": order.external_order_id, "dipay_reference": order.invoice_id},
+                     "external_order_id": order.external_order_id, "dipay_reference": order.invoice_id,
+                     "provider_ref": order.invoice_id},
     )
 
 

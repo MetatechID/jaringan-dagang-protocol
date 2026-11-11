@@ -22,6 +22,8 @@ import logging
 from typing import Any
 
 import httpx
+from jaringan_dagang_ops import exchanges
+from jaringan_dagang_ops.http import instrument
 
 from config import settings
 
@@ -67,6 +69,7 @@ async def _request(
     if not username:
         raise OYError(0, "OY username not configured")
     async with httpx.AsyncClient(timeout=30.0) as client:
+        instrument(client, "oy", exchanges.path_operation(method, path))
         resp = await client.request(
             method,
             f"{_BASE_URL}{path}",

@@ -19,6 +19,7 @@ See ``services/sento_client.py`` for the raw HTTP wrapper.
 
 from __future__ import annotations
 
+from jaringan_dagang_ops import context
 import logging
 from typing import Any
 
@@ -109,6 +110,7 @@ async def disburse_to_seller(
             f"brand {brand.slug!r}"
         )
 
+    context.bind_refs(order_id=order.id, brand_id=getattr(brand, "id", None))
     partner_trx_id = f"order-{order.id}-release"
     response = await sento_client.create_disbursement(
         recipient_bank=provider_code,

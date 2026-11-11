@@ -22,6 +22,7 @@ import time
 from typing import Any, Optional
 
 import httpx
+from jaringan_dagang_ops.http import instrument
 
 from models.order import Order
 from models.profile import BeliAmanProfile
@@ -173,6 +174,7 @@ async def send_purchase(
     params = {"access_token": integration.fb_capi_access_token}
 
     async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
+        instrument(client, "meta_capi", "purchase")
         resp = await client.post(url, params=params, json=payload)
     if resp.status_code // 100 != 2:
         _LOG.warning(

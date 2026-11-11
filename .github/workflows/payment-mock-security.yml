@@ -21,7 +21,7 @@ jobs:
         run: |
           python -m venv apps/beli-aman-bap/.venv
           apps/beli-aman-bap/.venv/bin/python -m pip install -r apps/beli-aman-bap/requirements.txt pytest pytest-asyncio
-          apps/beli-aman-bap/.venv/bin/python -m pip wheel --no-deps packages/beckn-protocol-py --wheel-dir /tmp/protocol-wheel
+          apps/beli-aman-bap/.venv/bin/python -m pip wheel --no-deps packages/beckn-protocol-py packages/ops-py --wheel-dir /tmp/protocol-wheel
           apps/beli-aman-bap/.venv/bin/python -m pip install /tmp/protocol-wheel/*.whl
       - name: Run isolated offline payment security regressions
         run: >-

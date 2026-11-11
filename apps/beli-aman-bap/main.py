@@ -82,6 +82,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         level=logging.DEBUG if settings.debug else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    # JSON lines carrying trace_id/order_id so journald lines join spans and exchanges.
+    from jaringan_dagang_ops.logs import configure_logging
+    configure_logging("bap")
     logger.info(
         "Starting %s (subscriber_id=%s) at %s",
         settings.service_name, settings.subscriber_id, settings.subscriber_url,
@@ -317,6 +320,7 @@ async def ready():
     return {"status": "ready"}
 
 
-# Outside Starlette's error middleware so generated 500s are captured too.
-from services.webhook_audit import AuditMiddleware
-app = AuditMiddleware(app)
+# Trace + partner exchange capture, outside Starlette's error middleware so
+# generated 500s are captured too.
+from services.partner_exchange import install as install_operability
+app = install_operability(app)

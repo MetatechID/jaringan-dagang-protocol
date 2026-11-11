@@ -98,7 +98,7 @@ def install_transport(monkeypatch, backend):
     original = policy.CallbackTransport
     monkeypatch.setattr(webhook, "CallbackTransport", lambda: original(backend=backend))
     monkeypatch.setattr(webhook, "_RETRY_DELAYS", (0, 0))
-    monkeypatch.setattr(webhook, "write_audit", AsyncMock())
+    monkeypatch.setattr(webhook, "write_exchange", AsyncMock())
 
 
 def test_actual_transport_pins_dns_preserves_tls_host_target_and_signed_bytes(monkeypatch):

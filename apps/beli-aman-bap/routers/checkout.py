@@ -13,6 +13,7 @@ do NOT re-implement the envelope; we shape the bot's cart into the
 
 from __future__ import annotations
 
+from jaringan_dagang_ops import context
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -93,6 +94,7 @@ async def confirm_cart(
     ).scalar_one_or_none()
     if cart is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Cart not found")
+    context.bind_refs(cart_id=cart.id)
     from services.payment_policy import invoice_mock_mode, reject_nonlocal_demo_invoice
 
     reject_nonlocal_demo_invoice(cart.invoice_id, cart.qr_image_url)
@@ -165,6 +167,7 @@ async def confirm_cart(
     # Mint the brand provider's payment surface. Hosted providers return a
     # checkout page; Dipay returns a durable QRIS renderer URL plus raw QRIS
     # content. Only a verified provider webhook can mark the cart paid.
+    context.bind_refs(cart_id=cart.id)
     try:
         if provider == "oy":
             from services import oy_invoices as _invoice_mod

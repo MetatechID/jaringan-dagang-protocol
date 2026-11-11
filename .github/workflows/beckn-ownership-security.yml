@@ -18,7 +18,7 @@ jobs:
       - name: Install canonical protocol wheel and test dependencies
         run: |
           python -m venv apps/beli-aman-bap/.venv
-          apps/beli-aman-bap/.venv/bin/python -m pip wheel --no-deps --wheel-dir /tmp/beckn-wheels ./packages/beckn-protocol-py
+          apps/beli-aman-bap/.venv/bin/python -m pip wheel --no-deps --wheel-dir /tmp/beckn-wheels ./packages/beckn-protocol-py ./packages/ops-py
           apps/beli-aman-bap/.venv/bin/python -m pip install /tmp/beckn-wheels/*.whl -r apps/beli-aman-bap/requirements.txt pytest pytest-asyncio aiosqlite
       - name: Run isolated signature and ownership regressions
         run: >-

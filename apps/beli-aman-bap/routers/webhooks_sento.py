@@ -39,6 +39,7 @@ from database import get_db
 from models.bot_rest import Cart, CartStatus
 from models.brand import Brand
 from models.escrow_ledger import EscrowEntryStatus, EscrowEntryType, EscrowLedger
+from services.partner_exchange import bind_reference
 from services import order_paid
 from services import sento_client
 from services import seller_bridge
@@ -176,6 +177,7 @@ async def invoice_callback(
             partner_tx_id,
         )
         raise HTTPException(404, "Unknown Sento invoice")
+    bind_reference(partner_tx_id, provider_ref=partner_tx_id, brand=brand)
 
     # The body supplies only a lookup key, never financial authorization.
     try:
@@ -403,6 +405,7 @@ async def remit_callback(
             "Sento remit callback: no Brand for order %s — refusing", order_id,
         )
         raise HTTPException(404, "Unknown brand for disbursement")
+    bind_reference(partner_tx_id, provider_ref=partner_tx_id, brand=brand)
 
     # Re-query using the client's actual remit correlation-key spelling.
     try:

@@ -22,6 +22,7 @@ Docs: https://api-docs.sento.id/docs-page/payment-link
 
 from __future__ import annotations
 
+from jaringan_dagang_ops import context
 import logging
 from typing import Any
 
@@ -112,6 +113,7 @@ async def create_invoice_for_cart(db: AsyncSession, cart: Cart) -> dict:
         return {"id": mock_invoice_id, "invoice_url": cart.qr_image_url, "mock": True}
 
     email, name = _customer_fields(cart)
+    context.bind_refs(cart_id=cart.id, brand_id=getattr(brand, "id", None))
     partner_tx_id = f"cart-{cart.id}"
 
     response = await sento_client.create_invoice(
@@ -175,6 +177,7 @@ async def create_invoice_for_order(
             "mock": True,
         }
 
+    context.bind_refs(order_id=order.id, brand_id=getattr(brand, "id", None))
     partner_tx_id = f"order-{order.id}"
     items = [
         {

@@ -11,7 +11,8 @@ from .payment_method import PaymentMethod
 from .brand import Brand
 from .midtrans_payment import MidtransPaymentLink, MidtransPaymentAttempt
 from .partner_order import PartnerOrder, PartnerOrderStatus
-from .webhook_audit import WebhookAudit
+from .partner_exchange import PartnerExchange
+from .obs_span import ObsSpan
 from .payout_bank_account import PayoutBankAccount
 from .order import Order, OrderState
 from .order_event import OrderEvent
@@ -45,6 +46,8 @@ __all__ = [
     "Brand",
     "PartnerOrder",
     "PartnerOrderStatus",
+    "PartnerExchange",
+    "ObsSpan",
     "PayoutBankAccount",
     "Order",
     "OrderState",

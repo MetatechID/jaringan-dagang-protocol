@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 [manifest]
 members = [
     "jaringan-dagang-beckn",
+    "jaringan-dagang-ops",
     "jaringan-dagang-protocol-workspace",
 ]
 
@@ -186,6 +187,17 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.5.0" },
     { name = "pynacl", specifier = ">=1.5.0" },
 ]
+
+[[package]]
+name = "jaringan-dagang-ops"
+version = "0.1.0"
+source = { editable = "packages/ops-py" }
+dependencies = [
+    { name = "httpx" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "httpx", specifier = ">=0.26.0" }]
 
 [[package]]
 name = "jaringan-dagang-protocol-workspace"

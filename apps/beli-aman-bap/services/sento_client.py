@@ -27,6 +27,8 @@ import logging
 from typing import Any
 
 import httpx
+from jaringan_dagang_ops import exchanges
+from jaringan_dagang_ops.http import instrument
 
 from config import settings
 
@@ -77,6 +79,7 @@ async def _request(
     if not username:
         raise SentoError(0, "Sento username not configured")
     async with httpx.AsyncClient(timeout=30.0) as client:
+        instrument(client, "sento", exchanges.path_operation(method, path))
         resp = await client.request(
             method,
             f"{_base_url()}{path}",

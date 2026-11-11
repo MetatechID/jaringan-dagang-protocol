@@ -10,6 +10,7 @@ See `services/xendit_client.py` for the raw HTTP wrapper.
 
 from __future__ import annotations
 
+from jaringan_dagang_ops import context
 import logging
 from typing import Any
 
@@ -115,6 +116,7 @@ async def create_invoice_for_cart(db: AsyncSession, cart: Cart) -> dict:
     success_url = f"{base}/checkout/done?cart_id={cart.id}"
     failure_url = f"{base}/checkout/failed?cart_id={cart.id}"
 
+    context.bind_refs(cart_id=cart.id, brand_id=getattr(brand, "id", None))
     response = await xendit_client.create_invoice(
         for_user_id=brand.xendit_sub_account_id,
         external_id=f"cart-{cart.id}",
@@ -186,6 +188,7 @@ async def create_invoice_for_order(db: AsyncSession, order: Order) -> dict:
         for i in (order.items or [])
     ]
 
+    context.bind_refs(order_id=order.id, brand_id=getattr(brand, "id", None))
     response = await xendit_client.create_invoice(
         for_user_id=brand.xendit_sub_account_id,
         external_id=f"order-{order.id}",

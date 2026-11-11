@@ -21,6 +21,7 @@ jobs:
           python -m venv apps/beli-aman-bap/.venv
           apps/beli-aman-bap/.venv/bin/pip install -r apps/beli-aman-bap/requirements.txt 'pytest>=8,<9' 'pytest-asyncio>=0.24,<0.25' build
           apps/beli-aman-bap/.venv/bin/python -m build --wheel --outdir /tmp/beckn-wheels packages/beckn-protocol-py
+          apps/beli-aman-bap/.venv/bin/python -m build --wheel --outdir /tmp/beckn-wheels packages/ops-py
           apps/beli-aman-bap/.venv/bin/pip install /tmp/beckn-wheels/*.whl
       - run: env -i PATH=/usr/bin:/bin apps/beli-aman-bap/.venv/bin/python -I apps/beli-aman-bap/scripts/test_partner_returns_offline.py
 
@@ -36,6 +37,7 @@ jobs:
           python -m venv apps/beli-aman-bap/.venv
           apps/beli-aman-bap/.venv/bin/pip install -r apps/beli-aman-bap/requirements.txt 'pytest>=8,<9' 'pytest-asyncio>=0.24,<0.25' build
           apps/beli-aman-bap/.venv/bin/python -m build --wheel --outdir /tmp/beckn-wheels packages/beckn-protocol-py
+          apps/beli-aman-bap/.venv/bin/python -m build --wheel --outdir /tmp/beckn-wheels packages/ops-py
           apps/beli-aman-bap/.venv/bin/pip install /tmp/beckn-wheels/*.whl
       - run: env -i PATH=/usr/bin:/bin apps/beli-aman-bap/.venv/bin/python -I apps/beli-aman-bap/scripts/test_sento_offline.py
 
@@ -48,7 +50,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install -r apps/beli-aman-bap/requirements.txt ./packages/beckn-protocol-py pytest
+      - run: python -m pip install -r apps/beli-aman-bap/requirements.txt ./packages/beckn-protocol-py ./packages/ops-py pytest
       - name: Run isolated provider auth regressions
         env:
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
@@ -63,7 +65,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install -r apps/beli-aman-bap/requirements.txt ./packages/beckn-protocol-py pytest
+      - run: python -m pip install -r apps/beli-aman-bap/requirements.txt ./packages/beckn-protocol-py ./packages/ops-py pytest
       - name: Test real application lifespan and all mock routes offline
         env:
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
@@ -80,7 +82,7 @@ jobs:
           python-version: '3.12'
       - name: Install app requirements and canonical protocol wheel
         run: |
-          python -m pip install -r apps/beli-aman-bap/requirements.txt ./packages/beckn-protocol-py pytest
+          python -m pip install -r apps/beli-aman-bap/requirements.txt ./packages/beckn-protocol-py ./packages/ops-py pytest
           python -m pip check
       - name: Run offline webhook regressions with pre-import isolation
         run: python apps/beli-aman-bap/scripts/test_dipay_webhooks.py
@@ -108,7 +110,7 @@ jobs:
       - name: Build and install application dependencies
         run: |
           python -m pip wheel --wheel-dir "$RUNNER_TEMP/bap-wheels" -r apps/beli-aman-bap/requirements.txt
-          python -m pip wheel --no-deps --wheel-dir "$RUNNER_TEMP/bap-wheels" ./packages/beckn-protocol-py
+          python -m pip wheel --no-deps --wheel-dir "$RUNNER_TEMP/bap-wheels" ./packages/beckn-protocol-py ./packages/ops-py
           python -m pip install --no-index "$RUNNER_TEMP"/bap-wheels/*.whl
           python -m pip install pytest
           python -m pip check
@@ -146,7 +148,7 @@ jobs:
       - name: Install BAP dependencies and canonical wheel
         run: |
           python -m venv apps/beli-aman-bap/.venv
-          apps/beli-aman-bap/.venv/bin/python -m pip wheel --no-deps ./packages/beckn-protocol-py --wheel-dir /tmp/protocol-wheel
+          apps/beli-aman-bap/.venv/bin/python -m pip wheel --no-deps ./packages/beckn-protocol-py ./packages/ops-py --wheel-dir /tmp/protocol-wheel
           apps/beli-aman-bap/.venv/bin/python -m pip install /tmp/protocol-wheel/*.whl -r apps/beli-aman-bap/requirements.txt pytest pytest-asyncio
       - name: Run isolated offline Dipay regressions (blocking)
         run: >-

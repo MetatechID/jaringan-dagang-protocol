@@ -23,6 +23,7 @@ import logging
 from typing import Any, Iterable
 
 import httpx
+from jaringan_dagang_ops.http import instrument
 
 from config import settings
 
@@ -105,6 +106,7 @@ async def get_rates(
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
+            instrument(client, "biteship", "rates")
             resp = await client.post(
                 f"{_api_base()}/v1/rates/couriers",
                 headers=_headers(),
@@ -207,6 +209,7 @@ async def create_shipment(
         payload.pop("origin_coordinate")
 
     async with httpx.AsyncClient(timeout=30.0) as client:
+        instrument(client, "biteship", "order_create")
         resp = await client.post(
             f"{_api_base()}/v1/orders",
             headers=_headers(),

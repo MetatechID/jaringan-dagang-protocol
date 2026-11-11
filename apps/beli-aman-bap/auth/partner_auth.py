@@ -53,7 +53,7 @@ async def require_partner(
         if hmac.compare_digest(
             presented.encode("utf-8"), brand.partner_api_key.encode("utf-8")
         ):
-            from services.webhook_audit import attach
+            from services.partner_exchange import attach
             attach(request, brand=brand)
             return brand
 

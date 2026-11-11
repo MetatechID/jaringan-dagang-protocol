@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import settings
 from database import get_db
 from models.order import Order, OrderState
+from services.partner_exchange import bind_reference
 from services.release_clock import compute_auto_release_at
 from services.state_machine import (
     StateTransitionError,
@@ -116,6 +117,7 @@ async def tracking_callback(
             "reference_id=%s", biteship_order_id, reference_id,
         )
         return {"ok": True, "matched": False}
+    bind_reference(None, provider_ref=biteship_order_id, order_id=order.id, brand_id=getattr(order, "brand_id", None))
 
     event_time = _parse_iso(event_time_raw) or datetime.now(timezone.utc)
     order.fulfillment_status = status_raw or order.fulfillment_status

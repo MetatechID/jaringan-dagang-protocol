@@ -7,6 +7,8 @@ import re
 from urllib.parse import quote, urlparse
 
 import httpx
+from jaringan_dagang_ops import exchanges
+from jaringan_dagang_ops.http import instrument
 
 
 class MidtransError(Exception):
@@ -80,6 +82,7 @@ def payment_url(value: str, config: MidtransConfig) -> str:
 async def _request(config: MidtransConfig, method: str, path: str, body=None) -> dict:
     try:
         async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
+            instrument(client, "midtrans", exchanges.path_operation(method, path))
             response = await client.request(method, config.base_url + path,
                 auth=httpx.BasicAuth(config.server_key, ""),
                 headers={"Accept": "application/json"}, json=body)

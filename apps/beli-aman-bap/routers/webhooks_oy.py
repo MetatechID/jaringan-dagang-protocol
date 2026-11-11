@@ -29,6 +29,7 @@ from database import get_db
 from models.bot_rest import Cart, CartStatus
 from models.brand import Brand
 from models.escrow_ledger import EscrowEntryStatus, EscrowEntryType, EscrowLedger
+from services.partner_exchange import bind_reference
 from services import order_paid
 from services import seller_bridge
 
@@ -144,6 +145,7 @@ async def invoice_callback(
         raise HTTPException(401, "Unknown OY invoice")
 
     _verify_signature(body_bytes, x_oy_signature, brand)
+    bind_reference(await _resolve_external_ref(body, invoice_id), provider_ref=invoice_id, brand=brand)
 
     status = _oy_status(body)
     _LOG.info(

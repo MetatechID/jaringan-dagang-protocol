@@ -5,7 +5,8 @@ WORKDIR /build
 COPY apps/beli-aman-bap/requirements.txt ./requirements.txt
 RUN pip wheel --wheel-dir /wheels -r requirements.txt
 COPY packages/beckn-protocol-py /src/beckn-protocol-py
-RUN pip wheel --no-deps --wheel-dir /wheels /src/beckn-protocol-py
+COPY packages/ops-py /src/ops-py
+RUN pip wheel --no-deps --wheel-dir /wheels /src/beckn-protocol-py /src/ops-py
 
 FROM python:3.12-slim AS runtime
 # Deployment-owned signal, independent of mutable application ENVIRONMENT.

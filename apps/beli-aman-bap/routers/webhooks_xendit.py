@@ -23,6 +23,7 @@ from config import settings
 from database import get_db
 from models.bot_rest import Cart, CartStatus
 from models.escrow_ledger import EscrowEntryStatus, EscrowEntryType, EscrowLedger
+from services.partner_exchange import bind_reference
 from services import order_paid
 from services import partner_orders
 from services import partner_webhook
@@ -71,6 +72,7 @@ async def invoice_callback(
 
     if not invoice_id or not external_id:
         raise HTTPException(400, "Missing id or external_id in callback")
+    bind_reference(external_id, provider_ref=invoice_id)
 
     _LOG.info(
         "Xendit invoice callback: id=%s external_id=%s status=%s",
@@ -209,6 +211,7 @@ async def disbursement_callback(
             disbursement_id, external_id,
         )
         return {"ok": True, "matched": False}
+    bind_reference(external_id, provider_ref=disbursement_id, order_id=entry.order_id)
 
     if status_raw == "COMPLETED":
         entry.status = EscrowEntryStatus.COMPLETED
@@ -262,6 +265,7 @@ async def refund_callback(
     if entry is None:
         _LOG.error("No REFUND ledger entry for refund %s", refund_id)
         return {"ok": True, "matched": False}
+    bind_reference(None, provider_ref=refund_id, order_id=entry.order_id)
 
     if status_raw in ("SUCCEEDED", "COMPLETED") or event == "refund.succeeded":
         entry.status = EscrowEntryStatus.COMPLETED
