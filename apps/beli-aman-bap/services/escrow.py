@@ -139,10 +139,13 @@ async def release(
     provider = (brand.payment_provider if brand is not None else "xendit") or "xendit"
     snapshot_provider = (order.payment_method_snapshot or {}).get("payment_provider")
     if provider == "midtrans" or snapshot_provider == "midtrans":
-        entry.status = EscrowEntryStatus.FAILED
-        entry.description = "Midtrans payout requires manual reconciliation; automatic disbursement unsupported"
+        # Midtrans has no payout API we use: the escrow is released and the row
+        # stays PENDING with no external_ref, like a brand without a payout
+        # account (step 4 above). Ops transfers by hand, then completes the row.
+        entry.description = f"{entry.description} — manual payout (no automatic Midtrans disbursement)"
         await db.commit()
-        raise ReleaseFailed("Midtrans automatic payouts are not supported", status_code=409)
+        _LOG.info("Midtrans release for order %s recorded for manual payout", order_id)
+        return entry
     if provider == "dipay":
         entry.partner_ref = snap_ref("r", str(entry.id))
 

@@ -6,7 +6,7 @@ from jaringan_dagang_ops import context
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from config import settings
 from database import async_session, get_db
@@ -25,9 +25,11 @@ from services.payment_policy import (
     reject_nonlocal_demo_invoice,
 )
 from pydantic import BaseModel, Field
+from services import auto_release
 from services import catalog as catalog_service
 from services import escrow as escrow_service
 from services import pricing, seller_bridge
+from services.release_clock import compute_auto_release_at
 from services.state_machine import (
     StateTransitionError,
     lock_order_for_update,
@@ -268,41 +270,17 @@ async def get_order(
 
     # Lazy auto-release: if RECEIVED and auto_release_at is in the past, release now.
     # Acquire the lock only here — a write is actually needed. Re-check state
-    # after locking because a concurrent request may have already released.
-    if (
-        order.state == OrderState.RECEIVED
-        and order.auto_release_at is not None
-        and order.auto_release_at <= datetime.now(timezone.utc)
-    ):
+    # after locking because a concurrent request (or the sweep) may have released.
+    if auto_release.is_due(order):
         order = await lock_order_for_update(db, order_id)
-        if order and order.state == OrderState.RECEIVED:
-            try:
-                await escrow_service.release(
-                    db, order_id=order.id, amount_idr=order.total_idr,
-                    description="Auto-release after D+3 (lazy)",
+        if order and await auto_release.release_if_due(db, order, reason="D+3 elapsed (lazy release on read)"):
+            # Best-effort: tell seller-bpp the order moved to RELEASED so
+            # the seller's dashboard badge flips to green "Completed".
+            asyncio.create_task(
+                seller_bridge.patch_escrow_status(
+                    order_id=order.id, escrow_status="released",
                 )
-                await transition(
-                    db, order, OrderState.ESCROW_RELEASED,
-                    actor="system:auto_release",
-                    payload={"reason": "D+3 elapsed (lazy release on read)"},
-                )
-                order.released_at = datetime.now(timezone.utc)
-                # Loyalty: earn points on auto-release too (idempotent per order).
-                from models.loyalty import accrue_for_order
-                await accrue_for_order(db, profile_id=order.profile_id, order_id=order.id, total_idr=order.total_idr)
-                # Best-effort: tell seller-bpp the order moved to RELEASED so
-                # the seller's dashboard badge flips to green "Completed".
-                asyncio.create_task(
-                    seller_bridge.patch_escrow_status(
-                        order_id=order.id, escrow_status="released",
-                    )
-                )
-            except StateTransitionError:
-                pass
-            except escrow_service.ReleaseFailed:
-                # The failed attempt is durably recorded by release(); leave
-                # the order RECEIVED and do not accrue/notify completion.
-                pass
+            )
 
     # Also include the ledger
     ledger_result = await db.execute(
@@ -854,6 +832,47 @@ async def book_shipment(
         raise HTTPException(409, str(e))
 
     return _serialize_order(order)
+
+
+class SellerFulfillmentIn(BaseModel):
+    event: Literal["shipped", "delivered"]
+
+
+@router.post("/{order_id}/seller-fulfillment", dependencies=[Depends(require_admin_token)])
+async def seller_fulfillment(
+    order_id: str,
+    body: SellerFulfillmentIn,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """The seller marked the order shipped or delivered in its dashboard.
+
+    For orders shipped without a carrier booking (so no tracking events).
+    ``delivered`` starts the D+3 clock exactly like a carrier DELIVERED event;
+    the buyer can still dispute until it runs out. Idempotent: an order that is
+    already further along, disputed or closed is returned unchanged, and an
+    existing clock is never moved.
+    """
+    order = await lock_order_for_update(db, order_id)
+    if order is None:
+        raise HTTPException(404, "Order not found")
+    now = datetime.now(timezone.utc)
+    if order.state == OrderState.ESCROW_HELD:
+        await transition(db, order, OrderState.FULFILLING, actor="seller:dashboard",
+                         payload={"event": "seller_shipped"})
+        order.shipped_at = order.shipped_at or now
+    if body.event == "delivered" and order.state in (OrderState.FULFILLING, OrderState.RECEIVED):
+        if order.state == OrderState.FULFILLING:
+            await transition(db, order, OrderState.RECEIVED, actor="seller:dashboard",
+                             payload={"event": "seller_delivered"})
+        if order.auto_release_at is None:
+            order.delivered_at = order.delivered_at or now
+            order.auto_release_at = compute_auto_release_at(order.delivered_at, settings.auto_release_days)
+    return {
+        "id": order.id,
+        "state": order.state.value,
+        "delivered_at": order.delivered_at.isoformat() if order.delivered_at else None,
+        "auto_release_at": order.auto_release_at.isoformat() if order.auto_release_at else None,
+    }
 
 
 def _serialize_invoice_snapshot(
