@@ -70,3 +70,36 @@ async def test_create_payload(monkeypatch):
     assert body["transaction_details"]["gross_amount"] == 10000
     assert body["credit_card"]["secure"] is True
     assert "customer_details" not in body
+    # Midtrans rejects singular units (400 "expiry.unit must be one of [minutes, …]").
+    assert body["expiry"] == {"duration": 60, "unit": "minutes"}
+
+
+def _signed(secret: str) -> dict:
+    payload = {"order_id": "mt-a-b-1234567890123", "status_code": "200", "gross_amount": "10000.00"}
+    payload["signature_key"] = hashlib.sha512(("mt-a-b-123456789012320010000.00" + secret).encode()).hexdigest()
+    return payload
+
+
+def test_signature_secret_key_signs_notifications_when_configured():
+    # Newer Midtrans accounts sign notifications with a separate "Signature
+    # Secret Key"; API calls still use the (named) server key.
+    config = MidtransConfig("SB-Mid-server-api", "sandbox", None, "Mid-server-sig")
+    assert verify_signature(_signed("Mid-server-sig"), config)
+    assert not verify_signature(_signed("SB-Mid-server-api"), config)
+
+
+def test_server_key_still_signs_when_no_signature_key():
+    assert verify_signature(_signed("secret"), MidtransConfig("secret"))
+
+
+def test_signature_key_is_never_shown():
+    assert "Mid-server-sig" not in repr(MidtransConfig("k", "sandbox", None, "Mid-server-sig"))
+
+
+def test_resolve_config_reads_signature_key():
+    settings = SimpleNamespace(midtrans_server_key="api", midtrans_environment="sandbox",
+                               midtrans_merchant_id="", midtrans_signature_key="sig")
+    config = resolve_config(SimpleNamespace(), settings)
+    assert config.signature_key == "sig" and config.merchant_id is None
+    settings.midtrans_signature_key = ""
+    assert resolve_config(SimpleNamespace(), settings).signature_key is None

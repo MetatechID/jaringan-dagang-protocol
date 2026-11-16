@@ -154,6 +154,9 @@ class Settings(BaseSettings):
     midtrans_server_key: str = ""
     midtrans_environment: str = "sandbox"
     midtrans_merchant_id: str = ""
+    # Notification signing secret on Midtrans' newer credential model
+    # (Settings → Access Keys → Signature Secret Key). Empty = server key.
+    midtrans_signature_key: str = ""
 
     # --- Dipay (https://api-docs.dipay.id/) — SNAP v2.1 ---
     # Base URL for Dipay's SNAP v2.1 HTTP API. Default is the demo

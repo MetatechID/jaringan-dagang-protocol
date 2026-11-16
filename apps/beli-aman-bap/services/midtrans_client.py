@@ -22,6 +22,9 @@ class MidtransConfig:
     server_key: str = field(repr=False)
     environment: str = "sandbox"
     merchant_id: str | None = None
+    # Accounts on Midtrans' newer credential model sign notifications with a
+    # separate "Signature Secret Key"; older accounts sign with the server key.
+    signature_key: str | None = field(default=None, repr=False)
 
     def __post_init__(self):
         if not self.server_key.strip() or self.environment not in {"sandbox", "production"}:
@@ -33,13 +36,14 @@ class MidtransConfig:
 
 
 def resolve_config(brand, settings) -> MidtransConfig:
-    names = ("midtrans_server_key", "midtrans_environment", "midtrans_merchant_id")
+    names = ("midtrans_server_key", "midtrans_environment", "midtrans_merchant_id", "midtrans_signature_key")
     # Store selection/ownership is brand-scoped; merchant account is platform-wide.
     source = settings
     return MidtransConfig(
         getattr(source, names[0], None) or "",
         getattr(source, names[1], None) or "",
         getattr(source, names[2], None) or None,
+        getattr(source, names[3], None) or None,
     )
 
 
@@ -67,7 +71,8 @@ def verify_signature(payload: dict, config: MidtransConfig) -> bool:
     signature = payload.get("signature_key")
     if not isinstance(signature, str) or not re.fullmatch(r"[0-9a-fA-F]{128}", signature):
         return False
-    expected = hashlib.sha512(("".join(str(v) for v in values) + config.server_key).encode()).hexdigest()
+    secret = config.signature_key or config.server_key
+    expected = hashlib.sha512(("".join(str(v) for v in values) + secret).encode()).hexdigest()
     return hmac.compare_digest(expected, signature.lower())
 
 
@@ -101,7 +106,7 @@ async def create_link(config: MidtransConfig, reference: str, total: int, durati
         raise ValueError("Invalid Midtrans base reference")
     return await _request(config, "POST", "/v1/payment-links", {
         "transaction_details": {"order_id": reference, "gross_amount": amount_idr(total)},
-        "usage_limit": 1, "expiry": {"duration": duration, "unit": "minute"},
+        "usage_limit": 1, "expiry": {"duration": duration, "unit": "minutes"},
         "credit_card": {"secure": True}, "custom_field1": reference,
     })
 
