@@ -10,17 +10,23 @@ Three sign-in surfaces converge on the same Firebase ID token shape:
   POST /api/v1/auth/otp/verify     — Verify the code, auto-merge / create the
                                      profile, return a Firebase custom token
                                      that the SDK signs in with.
+  POST /api/v1/auth/password/login — Email + password for operator-created
+                                     accounts; returns a Firebase custom token
+                                     like /otp/verify.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from auth import passwords
 from auth.firebase import mint_custom_token
 from database import get_db
 from deps import _get_or_create_profile_by_contact, get_current_profile
@@ -141,6 +147,55 @@ async def otp_verify(body: OtpVerifyIn, db: AsyncSession = Depends(get_db)) -> d
     custom_token = mint_custom_token(profile.id)
     return {
         "custom_token": custom_token,
+        "profile": {
+            "id": profile.id,
+            "google_sub": profile.google_sub,
+            "email": profile.email,
+            "display_name": profile.display_name,
+            "photo_url": profile.photo_url,
+            "phone_e164": profile.phone_e164,
+            "created_at": profile.created_at.isoformat(),
+        },
+    }
+
+
+# ------------------------ /password/login ------------------------------------
+
+
+class PasswordLoginIn(BaseModel):
+    email: str = Field(..., max_length=255)
+    password: str = Field(..., max_length=256)
+
+
+_INVALID_CREDENTIALS = "invalid_credentials"
+
+
+@router.post("/password/login")
+async def password_login(body: PasswordLoginIn, db: AsyncSession = Depends(get_db)) -> dict:
+    """Email + password → Firebase custom token bound to the profile uid.
+
+    Unknown email, no password set and wrong password all return the same 401
+    after the same scrypt work. Five failures per email in 15 minutes → 429.
+    """
+    email = (body.email or "").strip().lower()
+    if passwords.login_limiter.blocked(email):
+        raise HTTPException(status_code=429, detail="too_many_attempts")
+
+    profile = None
+    if _EMAIL.match(email):
+        profile = (
+            await db.execute(select(BeliAmanProfile).where(BeliAmanProfile.email == email))
+        ).scalar_one_or_none()
+    stored = profile.password_hash if profile is not None else None
+    if not passwords.verify_password(body.password, stored or passwords.DUMMY_HASH) or not stored:
+        passwords.login_limiter.fail(email)
+        raise HTTPException(status_code=401, detail=_INVALID_CREDENTIALS)
+
+    passwords.login_limiter.clear(email)
+    profile.last_seen_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {
+        "custom_token": mint_custom_token(profile.id),
         "profile": {
             "id": profile.id,
             "google_sub": profile.google_sub,

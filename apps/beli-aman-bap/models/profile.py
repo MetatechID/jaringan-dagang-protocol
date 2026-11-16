@@ -2,6 +2,7 @@
 
 Sign-in methods (all mint a Firebase ID token at the SDK layer):
   - Google SSO via Firebase (sets google_sub).
+  - Email + password, for operator-created accounts (sets password_hash).
   - WhatsApp OTP, code delivered via the jd-wa-whatsmeow sidecar (sets phone_e164).
   - Email OTP, code delivered via SMTP (sets email).
 
@@ -36,6 +37,9 @@ class BeliAmanProfile(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     display_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     photo_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # scrypt hash for operator-created email + password accounts; NULL for
+    # Google / OTP-only profiles. Set by scripts/set-buyer-password.py.
+    password_hash: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     last_seen_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
